@@ -11,7 +11,10 @@ Leggi `../AGENTS.md` e `../PLAN.md`.
 - Contratto OpenAPI generato dal backend; il frontend consuma quello.
 - Segreti solo user-secrets in sviluppo o secret manager; mai in `appsettings`.
 - Audit remoto redatto: nessun segreto in chiaro.
+- RBAC D7 = B: anagrafiche globali `SystemAdmin`; risorse d'ambiente `ServerAdmin` su tutti gli ambienti coinvolti; `SystemAdmin` non basta per server/console/run.
+- Menu filtrato da `MenuRole`; CSRF su tutte le mutazioni.
+- Cookie di sessione: HttpOnly, `SameSite=Lax`, `Secure` in produzione; nessun token in risposta.
 
 ## Stato
 
-Fase 0: nessun progetto. Non inventare comandi o file.
+Fase 2: identity + auth BFF + shell API. L'inventario parte in Fase 3. Comandi reali nel README.

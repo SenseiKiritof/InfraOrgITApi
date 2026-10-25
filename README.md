@@ -4,36 +4,65 @@ Backend di InfraOrgIT: API .NET 10, Minimal APIs, EF Core 10, MySQL LTS, Keycloa
 
 ## Stato
 
-Fase 0 — solo documentazione e CI skeleton. Nessun progetto, build o test disponibile.
+Fase 2 — fondamenta e auth — 2026-10-25. Implementati modulo identity (utenti, gruppi, ruoli, menu), BFF Keycloak, sessione server-side, CSRF, `/api/menus`, `/api/server-access/me`, health check e test di integrazione. L'inventario arriva in Fase 3.
 
 ## Stack
 
 - .NET 10 LTS, ASP.NET Core Minimal APIs
 - EF Core 10 + `MySql.EntityFrameworkCore` (Oracle) 10.0.x
 - MySQL LTS corrente (8.4)
-- Keycloak 26 OIDC, BFF con sessione server-side
-- SSH.NET per la gestione remota
+- Keycloak 26 OIDC, BFF con sessione server-side in memoria
 - xunit, Testcontainers MySQL, WebApplicationFactory
-- Serilog + OpenTelemetry
 
-## Struttura prevista
+## Struttura
 
 ```
 src/InfraOrgIt.Api/
-  Features/<Feature>/{Endpoints.cs, Contracts.cs, Service.cs, Validator.cs}
-  BuildingBlocks/{Auth, Authorization, Errors, Pagination, Audit, Time}
-  Infrastructure/{Persistence, Ssh, Crypto}
+  BuildingBlocks/{Auth, Errors}
+  Features/{Auth, Session, Menus, ServerAccess, Users}
+  Infrastructure/Persistence/{Entities, Migrations}
   Program.cs
 tests/InfraOrgIt.UnitTests/
 tests/InfraOrgIt.IntegrationTests/
-tools/LegacyImport/
 ```
 
 ## Comandi
 
-Non ancora disponibili. Arrivano con lo scaffolding della Fase 2 e verranno documentati qui.
+```bash
+dotnet build -warnaserror
+dotnet test
+dotnet ef migrations add <Nome> --project src/InfraOrgIt.Api --startup-project src/InfraOrgIt.Api
+```
+
+Per avvio e migrazioni con l'infra Compose usare il meta repo:
+
+```bash
+cd ../AllInfraOrgIT
+make dev       # infra + API :5298 + Vite :3000
+make migrate
+make test
+```
+
+`dotnet ef` è nel manifest `.config/dotnet-tools.json` del meta repo; in alternativa `dotnet tool restore` dalla root del workspace.
+
+## Configurazione locale
+
+- `appsettings.Development.json` contiene solo valori non segreti.
+- `Oidc:ClientSecret` e `ConnectionStrings:MySql` arrivano da env (`Oidc__ClientSecret`, `ConnectionStrings__MySql`) tramite `scripts/env.sh`.
+- Bootstrap SystemAdmin: `Auth:BootstrapAdminUsername=admin` in Development; il primo login dell'utente Keycloak `admin` assegna il ruolo se non esiste già un SystemAdmin. In produzione la variabile resta vuota.
+- Cookie di sessione in memoria: adatto a una singola istanza; lo store condiviso è una decisione di Fase 8.
+
+## Auth BFF
+
+- `GET /auth/login` → redirect Keycloak con PKCE S256.
+- `GET /auth/callback` → scambio codice, JIT provisioning utente, cookie di sessione HttpOnly.
+- `POST /auth/logout` → revoca Keycloak e cancella la sessione; richiede CSRF.
+- `GET /api/session` → utente, scadenza, CSRF token; rinnova il token lato server.
+- Mutazioni: header `X-CSRF-Token` + `Origin` ammessa; `SameSite=Lax`.
+- Nessun token è restituito al browser o leggibile da JavaScript.
 
 ## Riferimenti
 
-- `../PLAN.md` §5.3, §5.5, §5.8, §5.9
-- `../AllInfraOrgIT/docs/adr/`
+- `../PLAN.md` §5.3, §5.5, §5.8
+- `../AllInfraOrgIT/docs/security/permissions.md`
+- ADR 003, 005, 007, 008

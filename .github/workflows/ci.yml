@@ -1,12 +1,22 @@
 name: backend-ci
 
 on:
-  workflow_dispatch:
+  push:
+  pull_request:
 
-# TODO Fase 2: aggiungere push/pull_request quando esiste il progetto .NET.
 jobs:
-  placeholder:
+  build-test:
     runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
     steps:
       - uses: actions/checkout@v4
-      - run: 'echo "Backend non ancora scaffoldato: i gate arrivano in Fase 2."'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Restore
+        run: dotnet restore InfraOrgIt.slnx
+      - name: Build
+        run: dotnet build InfraOrgIt.slnx --no-restore -warnaserror
+      - name: Test
+        run: dotnet test InfraOrgIt.slnx --no-build --verbosity normal
