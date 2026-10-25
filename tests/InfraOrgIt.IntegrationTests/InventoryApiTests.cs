@@ -4,6 +4,7 @@ using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
+using InfraOrgIt.IntegrationTests.Legacy;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -324,104 +325,84 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Import_dry_run_loads_reference_and_catalog_fixture()
+    public async Task Legacy_dry_run_maps_reference_and_catalog_fixture()
     {
         using var admin = await ClientForAsync("dryrun.admin", systemAdmin: true);
+        var fixture = LegacyFixture.Load(FixturePath());
+        fixture.Validate();
+        var mapped = fixture.Map();
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
 
-        var provider = new Provider { Name = "DryRun Provider" };
-        var environment = new EnvironmentDefinition { Name = "DryRun Env", Description = "" };
-        db.Providers.Add(provider);
-        db.EnvironmentDefinitions.Add(environment);
+        db.EnvironmentDefinitions.AddRange(mapped.Environments);
+        db.Providers.AddRange(mapped.Providers);
+        await db.SaveChangesAsync();
+        db.ProviderEnvironments.AddRange(mapped.ProviderEnvironments);
+        db.Applications.AddRange(mapped.Applications);
+        await db.SaveChangesAsync();
+        db.ApplicationVersions.AddRange(mapped.ApplicationVersions);
+        db.Projects.AddRange(mapped.Projects);
+        await db.SaveChangesAsync();
+        db.ApplicationVersionApis.AddRange(mapped.ApplicationVersionApis);
+        await db.SaveChangesAsync();
+        db.ApplicationApiQueryParams.AddRange(mapped.ApplicationApiQueryParams);
+        db.Set<ApplicationProject>().AddRange(mapped.ApplicationProjects);
         await db.SaveChangesAsync();
 
-        var providerEnvironment = new ProviderEnvironment
-        {
-            ProviderId = provider.Id,
-            EnvironmentDefinitionId = environment.Id
-        };
-        db.ProviderEnvironments.Add(providerEnvironment);
-        await db.SaveChangesAsync();
+        Assert.Equal("Provider Demo A",
+            (await db.Providers.SingleAsync(x => x.Id == 9101)).Name);
+        Assert.Equal("PROD",
+            (await db.EnvironmentDefinitions.SingleAsync(x => x.Id == 9002)).Name);
+        Assert.Equal("1.0.0",
+            (await db.ApplicationVersions.SingleAsync(x => x.Id == 9401)).VersionNumber);
+        Assert.Equal("GET",
+            (await db.ApplicationVersionApis.SingleAsync(x => x.Id == 9501)).RequestTypeEnum);
+        Assert.Equal("DELETE",
+            (await db.ApplicationVersionApis.SingleAsync(x => x.Id == 9502)).RequestTypeEnum);
+        Assert.Equal("Bool",
+            (await db.ApplicationApiQueryParams.SingleAsync(x => x.Id == 9601)).ParamType);
 
-        db.Servers.AddRange(
-            new Server
-            {
-                ProviderEnvironmentId = providerEnvironment.Id,
-                Name = "DryRun Server 1",
-                IpAddress = "10.10.0.1",
-                Hostname = "dryrun-1.local"
-            },
-            new Server
-            {
-                ProviderEnvironmentId = providerEnvironment.Id,
-                Name = "DryRun Server 2",
-                IpAddress = "10.10.0.2",
-                Hostname = "dryrun-2.local"
-            });
+        var providers = await ReadAsync(await admin.GetAsync("/api/providers?q=Provider Demo"));
+        Assert.Equal(2, providers.GetProperty("total").GetInt32());
 
-        var application = new Application
-        {
-            Name = "DryRun App",
-            Description = "",
-            BasePath = "/dryrun",
-            ListeningOnPort = 8080
-        };
-        db.Applications.Add(application);
-        await db.SaveChangesAsync();
+        var environments = await ReadAsync(
+            await admin.GetAsync("/api/provider-environments?q=Provider Demo&pageSize=200"));
+        Assert.Equal(2, environments.GetProperty("total").GetInt32());
+        Assert.Contains(environments.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("label").GetString() == "Provider Demo A / PRE");
 
-        var version = new ApplicationVersion
-        {
-            ApplicationId = application.Id,
-            VersionNumber = "9.9.9"
-        };
-        db.ApplicationVersions.Add(version);
-        await db.SaveChangesAsync();
-
-        var api = new ApplicationVersionApi
-        {
-            ApplicationVersionId = version.Id,
-            Url = "/dry-run",
-            RequestTypeEnum = "GET",
-            Description = ""
-        };
-        db.ApplicationVersionApis.Add(api);
-        await db.SaveChangesAsync();
-
-        db.ApplicationApiQueryParams.Add(new ApplicationApiQueryParam
-        {
-            ApplicationApiId = api.Id,
-            Name = "flag",
-            ParamType = "Bool"
-        });
-
-        var project = new Project { Name = "DryRun Project", Description = "Fixture" };
-        db.Projects.Add(project);
-        await db.SaveChangesAsync();
-        db.Set<ApplicationProject>().Add(new ApplicationProject
-        {
-            ApplicationsId = application.Id,
-            ProjectsId = project.Id
-        });
-        await db.SaveChangesAsync();
-
-        var providers = await ReadAsync(await admin.GetAsync("/api/providers?q=DryRun"));
-        Assert.Equal(1, providers.GetProperty("total").GetInt32());
-
-        var servers = await ReadAsync(await admin.GetAsync("/api/servers?q=DryRun"));
-        Assert.Equal(2, servers.GetProperty("total").GetInt32());
-
-        var apis = (await ReadAsync(await admin.GetAsync($"/api/application-versions/{version.Id}/apis")))
+        var apis = (await ReadAsync(await admin.GetAsync("/api/application-versions/9401/apis")))
             .GetProperty("items");
+        Assert.Equal(1, apis.GetArrayLength());
         Assert.Equal(1, apis[0].GetProperty("queryParamCount").GetInt32());
 
-        var linked = await ReadAsync(await admin.GetAsync($"/api/projects/{project.Id}/applications"));
+        var versions = (await ReadAsync(await admin.GetAsync("/api/applications/9301/versions")))
+            .GetProperty("items");
+        Assert.Equal(2, versions.GetArrayLength());
+
+        var linked = await ReadAsync(await admin.GetAsync("/api/projects/9701/applications"));
         Assert.Equal(1, linked.GetArrayLength());
 
-        var blocked = await SendAsync(admin, HttpMethod.Delete, $"/api/providers/{provider.Id}");
+        var blocked = await SendAsync(admin, HttpMethod.Delete, "/api/providers/9101");
         Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
     }
+
+    [Fact]
+    public void Legacy_fixture_rejects_orphan_foreign_keys()
+    {
+        var fixture = LegacyFixture.Load(FixturePath());
+        var broken = fixture with
+        {
+            ProviderEnvironments = [new LegacyProviderEnvironment(9999, 424242, 9001)]
+        };
+
+        var error = Assert.Throws<InvalidOperationException>(broken.Validate);
+        Assert.Contains("senza provider", error.Message);
+    }
+
+    private static string FixturePath() =>
+        Path.Combine(AppContext.BaseDirectory, "Legacy", "Fixtures", "legacy-reference-catalog.json");
 
     private async Task<int> CreateProviderEnvironmentAsync(HttpClient admin)
     {

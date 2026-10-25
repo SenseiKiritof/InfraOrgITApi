@@ -1,0 +1,54 @@
+{
+  "environments": [
+    { "id": 9001, "name": "PRE", "description": "Ambiente di pre-produzione" },
+    { "id": 9002, "name": "PROD", "description": "Ambiente di produzione" }
+  ],
+  "providers": [
+    { "id": 9101, "name": "Provider Demo A" },
+    { "id": 9102, "name": "Provider Demo B" }
+  ],
+  "providerEnvironments": [
+    { "id": 9201, "providerId": 9101, "environmentId": 9001 },
+    { "id": 9202, "providerId": 9102, "environmentId": 9002 }
+  ],
+  "applications": [
+    {
+      "id": 9301,
+      "name": "App Demo",
+      "description": "Applicazione demo",
+      "basePath": "/demo",
+      "listeningOnPort": 8080
+    }
+  ],
+  "applicationVersions": [
+    { "id": 9401, "applicationId": 9301, "versionNumber": "1.0.0" },
+    { "id": 9402, "applicationId": 9301, "versionNumber": "2.0.0" }
+  ],
+  "applicationVersionApis": [
+    {
+      "id": 9501,
+      "applicationVersionId": 9401,
+      "url": "/health",
+      "requestType": 0,
+      "description": "Health check",
+      "body": null
+    },
+    {
+      "id": 9502,
+      "applicationVersionId": 9402,
+      "url": "/items",
+      "requestType": 4,
+      "description": "Cancella elemento",
+      "body": null
+    }
+  ],
+  "applicationApiQueryParams": [
+    { "id": 9601, "applicationApiId": 9501, "name": "verbose", "paramType": 2 }
+  ],
+  "projects": [
+    { "id": 9701, "name": "Progetto Demo", "description": "Demo" }
+  ],
+  "applicationProjects": [
+    { "applicationId": 9301, "projectId": 9701 }
+  ]
+}

@@ -24,4 +24,8 @@
     <ProjectReference Include="..\..\src\InfraOrgIt.Api\InfraOrgIt.Api.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Legacy/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
