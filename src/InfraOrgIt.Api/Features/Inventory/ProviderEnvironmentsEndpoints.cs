@@ -171,6 +171,7 @@ public static class ProviderEnvironmentsEndpoints
 
     private static async Task<IResult> ListGroupRolesAsync(
         int id,
+        HttpContext http,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -178,14 +179,24 @@ public static class ProviderEnvironmentsEndpoints
         if (!exists)
             throw Guard.NotFound("Ambiente provider", id);
 
-        var items = await db.ProviderEnvironmentGroupRoles.AsNoTracking()
-            .Where(x => x.ProviderEnvironmentId == id)
+        var page = PageRequest.From(http);
+        var query = db.ProviderEnvironmentGroupRoles.AsNoTracking()
+            .Where(x => x.ProviderEnvironmentId == id);
+        if (page.Q is not null)
+            query = query.Where(x => x.Group!.Name.Contains(page.Q) ||
+                                     x.Role!.Name.Contains(page.Q));
+
+        var total = await query.CountAsync(ct);
+        var items = await query
             .OrderBy(x => x.Id)
+            .Skip((page.Page - 1) * page.PageSize)
+            .Take(page.PageSize)
             .Select(x => new ProviderEnvironmentGroupRoleDto(
                 x.Id, x.ProviderEnvironmentId, x.GroupId, x.Group!.Name, x.RoleId, x.Role!.Name))
             .ToListAsync(ct);
 
-        return Results.Ok(items);
+        return Results.Ok(new PagedResult<ProviderEnvironmentGroupRoleDto>(
+            items, total, page.Page, page.PageSize));
     }
 
     private static async Task<IResult> AddGroupRoleAsync(

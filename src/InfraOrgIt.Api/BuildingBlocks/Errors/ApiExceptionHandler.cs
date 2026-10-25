@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using MySql.Data.MySqlClient;
 
 namespace InfraOrgIt.Api.BuildingBlocks.Errors;
 
@@ -47,8 +48,19 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
             .ExecuteAsync(context);
 
     private static bool IsDuplicateEntry(DbUpdateException exception) =>
+        HasMySqlError(exception, 1062) ||
         exception.ToString().Contains("Duplicate entry", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsForeignKeyViolation(DbUpdateException exception) =>
+        HasMySqlError(exception, 1451) ||
+        HasMySqlError(exception, 1452) ||
         exception.ToString().Contains("foreign key constraint", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasMySqlError(Exception? exception, int number) =>
+        exception switch
+        {
+            MySqlException mysql => mysql.Number == number || HasMySqlError(mysql.InnerException, number),
+            null => false,
+            _ => HasMySqlError(exception.InnerException, number)
+        };
 }

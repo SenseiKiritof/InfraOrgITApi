@@ -112,7 +112,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, param.StatusCode);
         var paramId = (await ReadAsync(param)).GetProperty("id").GetInt32();
 
-        var apis = await ReadAsync(await admin.GetAsync($"/api/application-versions/{versionId}/apis"));
+        var apis = (await ReadAsync(await admin.GetAsync($"/api/application-versions/{versionId}/apis")))
+            .GetProperty("items");
         Assert.Equal(1, apis.GetArrayLength());
         Assert.Equal(1, apis[0].GetProperty("queryParamCount").GetInt32());
 
@@ -120,7 +121,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
             $"/api/application-versions/{versionId}",
             new { applicationId, versionNumber = "1.0.1" });
         Assert.Equal(HttpStatusCode.NoContent, updatedVersion.StatusCode);
-        var versions = await ReadAsync(await admin.GetAsync($"/api/applications/{applicationId}/versions"));
+        var versions = (await ReadAsync(await admin.GetAsync($"/api/applications/{applicationId}/versions")))
+            .GetProperty("items");
         Assert.Equal("1.0.1", versions[0].GetProperty("versionNumber").GetString());
 
         var updatedApi = await SendAsync(admin, HttpMethod.Put,
@@ -146,6 +148,14 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         var deleteVersion = await SendAsync(admin, HttpMethod.Delete, $"/api/application-versions/{versionId}");
         Assert.Equal(HttpStatusCode.NoContent, deleteVersion.StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            Assert.False(await db.ApplicationVersions.AnyAsync(x => x.Id == versionId));
+            Assert.False(await db.ApplicationVersionApis.AnyAsync(x => x.Id == apiId));
+            Assert.False(await db.ApplicationApiQueryParams.AnyAsync(x => x.Id == paramId));
+        }
 
         var deleteApplication = await SendAsync(admin, HttpMethod.Delete, $"/api/applications/{applicationId}");
         Assert.Equal(HttpStatusCode.NoContent, deleteApplication.StatusCode);
@@ -402,7 +412,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var servers = await ReadAsync(await admin.GetAsync("/api/servers?q=DryRun"));
         Assert.Equal(2, servers.GetProperty("total").GetInt32());
 
-        var apis = await ReadAsync(await admin.GetAsync($"/api/application-versions/{version.Id}/apis"));
+        var apis = (await ReadAsync(await admin.GetAsync($"/api/application-versions/{version.Id}/apis")))
+            .GetProperty("items");
         Assert.Equal(1, apis[0].GetProperty("queryParamCount").GetInt32());
 
         var linked = await ReadAsync(await admin.GetAsync($"/api/projects/{project.Id}/applications"));

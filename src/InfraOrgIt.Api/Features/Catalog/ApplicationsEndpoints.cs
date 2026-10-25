@@ -129,19 +129,28 @@ public static class ApplicationsEndpoints
 
     private static async Task<IResult> ListVersionsAsync(
         int id,
+        HttpContext http,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
         if (!await db.Applications.AnyAsync(x => x.Id == id, ct))
             throw Guard.NotFound("Applicazione", id);
 
-        var items = await db.ApplicationVersions.AsNoTracking()
-            .Where(x => x.ApplicationId == id)
+        var page = PageRequest.From(http);
+        var query = db.ApplicationVersions.AsNoTracking().Where(x => x.ApplicationId == id);
+        if (page.Q is not null)
+            query = query.Where(x => x.VersionNumber.Contains(page.Q));
+
+        var total = await query.CountAsync(ct);
+        var items = await query
             .OrderBy(x => x.VersionNumber)
+            .Skip((page.Page - 1) * page.PageSize)
+            .Take(page.PageSize)
             .Select(ApplicationVersionsEndpoints.ToDto)
             .ToListAsync(ct);
 
-        return Results.Ok(items);
+        return Results.Ok(new PagedResult<ApplicationVersionDto>(
+            items, total, page.Page, page.PageSize));
     }
 
     private static async Task<IResult> CreateVersionAsync(

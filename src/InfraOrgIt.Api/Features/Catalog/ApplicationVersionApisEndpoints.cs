@@ -94,36 +94,42 @@ public static class ApplicationVersionApisEndpoints
         CancellationToken ct)
     {
         EnvironmentAccessService.RequireSystemAdmin(user);
-        var entity = await db.ApplicationVersionApis.SingleOrDefaultAsync(x => x.Id == id, ct)
+        var entity = await db.ApplicationVersionApis
+                         .Include(x => x.QueryParams)
+                         .SingleOrDefaultAsync(x => x.Id == id, ct)
                      ?? throw Guard.NotFound("API applicazione", id);
 
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-
-        await db.ApplicationApiQueryParams
-            .Where(x => x.ApplicationApiId == id)
-            .ExecuteDeleteAsync(ct);
-
+        db.ApplicationApiQueryParams.RemoveRange(entity.QueryParams);
         db.ApplicationVersionApis.Remove(entity);
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
         return Results.NoContent();
     }
 
     private static async Task<IResult> ListQueryParamsAsync(
         int id,
+        HttpContext http,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
         if (!await db.ApplicationVersionApis.AnyAsync(x => x.Id == id, ct))
             throw Guard.NotFound("API applicazione", id);
 
-        var items = await db.ApplicationApiQueryParams.AsNoTracking()
-            .Where(x => x.ApplicationApiId == id)
+        var page = PageRequest.From(http);
+        var query = db.ApplicationApiQueryParams.AsNoTracking()
+            .Where(x => x.ApplicationApiId == id);
+        if (page.Q is not null)
+            query = query.Where(x => x.Name.Contains(page.Q));
+
+        var total = await query.CountAsync(ct);
+        var items = await query
             .OrderBy(x => x.Id)
+            .Skip((page.Page - 1) * page.PageSize)
+            .Take(page.PageSize)
             .Select(ApplicationApiQueryParamsEndpoints.ToDto)
             .ToListAsync(ct);
 
-        return Results.Ok(items);
+        return Results.Ok(new PagedResult<ApplicationApiQueryParamDto>(
+            items, total, page.Page, page.PageSize));
     }
 
     private static async Task<IResult> CreateQueryParamAsync(

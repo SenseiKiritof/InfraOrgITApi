@@ -94,51 +94,48 @@ public static class ApplicationVersionsEndpoints
         CancellationToken ct)
     {
         EnvironmentAccessService.RequireSystemAdmin(user);
-        var entity = await db.ApplicationVersions.SingleOrDefaultAsync(x => x.Id == id, ct)
+        var entity = await db.ApplicationVersions
+                         .Include(x => x.Apis)
+                         .ThenInclude(x => x.QueryParams)
+                         .SingleOrDefaultAsync(x => x.Id == id, ct)
                      ?? throw Guard.NotFound("Versione applicazione", id);
 
         var deployed = await db.ServerApplications.CountAsync(x => x.ApplicationVersionId == id, ct);
         if (deployed > 0)
             throw Guard.Conflict($"Versione deployata su {deployed} server: rimuovere i deploy prima.");
 
-        var apiIds = await db.ApplicationVersionApis
-            .Where(x => x.ApplicationVersionId == id)
-            .Select(x => x.Id)
-            .ToListAsync(ct);
-
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-
-        if (apiIds.Count > 0)
-        {
-            await db.ApplicationApiQueryParams
-                .Where(x => apiIds.Contains(x.ApplicationApiId))
-                .ExecuteDeleteAsync(ct);
-            await db.ApplicationVersionApis
-                .Where(x => apiIds.Contains(x.Id))
-                .ExecuteDeleteAsync(ct);
-        }
-
+        db.ApplicationApiQueryParams.RemoveRange(entity.Apis.SelectMany(api => api.QueryParams));
+        db.ApplicationVersionApis.RemoveRange(entity.Apis);
         db.ApplicationVersions.Remove(entity);
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
         return Results.NoContent();
     }
 
     private static async Task<IResult> ListApisAsync(
         int id,
+        HttpContext http,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
         if (!await db.ApplicationVersions.AnyAsync(x => x.Id == id, ct))
             throw Guard.NotFound("Versione applicazione", id);
 
-        var items = await db.ApplicationVersionApis.AsNoTracking()
-            .Where(x => x.ApplicationVersionId == id)
+        var page = PageRequest.From(http);
+        var query = db.ApplicationVersionApis.AsNoTracking()
+            .Where(x => x.ApplicationVersionId == id);
+        if (page.Q is not null)
+            query = query.Where(x => x.Url.Contains(page.Q) || x.Description.Contains(page.Q));
+
+        var total = await query.CountAsync(ct);
+        var items = await query
             .OrderBy(x => x.Id)
+            .Skip((page.Page - 1) * page.PageSize)
+            .Take(page.PageSize)
             .Select(ApplicationVersionApisEndpoints.ToDto)
             .ToListAsync(ct);
 
-        return Results.Ok(items);
+        return Results.Ok(new PagedResult<ApplicationVersionApiDto>(
+            items, total, page.Page, page.PageSize));
     }
 
     private static async Task<IResult> CreateApiAsync(
