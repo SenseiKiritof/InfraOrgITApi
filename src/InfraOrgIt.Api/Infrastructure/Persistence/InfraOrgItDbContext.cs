@@ -25,6 +25,12 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<ApplicationVersionApi> ApplicationVersionApis => Set<ApplicationVersionApi>();
     public DbSet<ApplicationApiQueryParam> ApplicationApiQueryParams => Set<ApplicationApiQueryParam>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProxyConnection> ProxyConnections => Set<ProxyConnection>();
+    public DbSet<ProxyRoute> ProxyRoutes => Set<ProxyRoute>();
+    public DbSet<Diagram> Diagrams => Set<Diagram>();
+    public DbSet<DiagramScopeItem> DiagramScopeItems => Set<DiagramScopeItem>();
+    public DbSet<DiagramNode> DiagramNodes => Set<DiagramNode>();
+    public DbSet<DiagramEdge> DiagramEdges => Set<DiagramEdge>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -129,6 +135,9 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
                 .HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.ApplicationVersion).WithMany(x => x.ServerApplications)
                 .HasForeignKey(x => x.ApplicationVersionId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.ProxyRouteId).IsUnique();
+            e.HasOne(x => x.ProxyRoute).WithMany()
+                .HasForeignKey(x => x.ProxyRouteId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Application>(e =>
@@ -180,6 +189,77 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.Description).HasMaxLength(500);
             e.HasIndex(x => x.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<ProxyConnection>(e =>
+        {
+            e.Property(x => x.Direction).HasMaxLength(20);
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_ProxyConnections_Direction",
+                    "`Direction` IN ('Outgoing','Incoming')");
+                t.HasCheckConstraint("CK_ProxyConnections_DifferentServers",
+                    "`SourceServerId` <> `TargetServerId`");
+            });
+            e.HasIndex(x => x.SourceServerId);
+            e.HasIndex(x => x.TargetServerId);
+            e.HasOne(x => x.SourceServer).WithMany()
+                .HasForeignKey(x => x.SourceServerId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.TargetServer).WithMany()
+                .HasForeignKey(x => x.TargetServerId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProxyRoute>(e =>
+        {
+            e.Property(x => x.Route).HasMaxLength(200);
+            e.Property(x => x.MappedTo).HasMaxLength(50);
+            e.HasIndex(x => new { x.ProxyConnectionId, x.Route }).IsUnique();
+            e.HasIndex(x => x.TargetServerApplicationId);
+            e.HasIndex(x => x.TargetProxyConnectionId);
+            e.HasOne(x => x.ProxyConnection).WithMany(x => x.Routes)
+                .HasForeignKey(x => x.ProxyConnectionId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.TargetServerApplication).WithMany()
+                .HasForeignKey(x => x.TargetServerApplicationId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.TargetProxyConnection).WithMany()
+                .HasForeignKey(x => x.TargetProxyConnectionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Diagram>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(500);
+        });
+
+        modelBuilder.Entity<DiagramScopeItem>(e =>
+        {
+            e.Property(x => x.ScopeType).HasMaxLength(30);
+            e.ToTable(t => t.HasCheckConstraint("CK_DiagramScopeItems_ScopeType",
+                "`ScopeType` IN ('Provider','ProviderEnvironment','Project')"));
+            e.HasIndex(x => new { x.DiagramId, x.ScopeType, x.EntityId }).IsUnique();
+            e.HasOne(x => x.Diagram).WithMany(x => x.ScopeItems)
+                .HasForeignKey(x => x.DiagramId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DiagramNode>(e =>
+        {
+            e.Property(x => x.NodeType).HasMaxLength(30);
+            e.ToTable(t => t.HasCheckConstraint("CK_DiagramNodes_NodeType",
+                "`NodeType` IN ('Provider','ProviderEnvironment','Server','ServerApplication')"));
+            e.HasIndex(x => new { x.DiagramId, x.NodeType, x.EntityId }).IsUnique();
+            e.HasOne(x => x.Diagram).WithMany(x => x.Nodes)
+                .HasForeignKey(x => x.DiagramId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DiagramEdge>(e =>
+        {
+            e.Property(x => x.TargetNodeType).HasMaxLength(30);
+            e.Property(x => x.SourceHandle).HasMaxLength(50);
+            e.Property(x => x.TargetHandle).HasMaxLength(50);
+            e.ToTable(t => t.HasCheckConstraint("CK_DiagramEdges_TargetNodeType",
+                "`TargetNodeType` IN ('Provider','ProviderEnvironment','Server','ServerApplication')"));
+            e.HasIndex(x => new { x.DiagramId, x.ProxyConnectionId, x.TargetNodeType, x.TargetEntityId }).IsUnique();
+            e.HasOne(x => x.Diagram).WithMany(x => x.Edges)
+                .HasForeignKey(x => x.DiagramId).OnDelete(DeleteBehavior.Cascade);
         });
 
         foreach (var entityType in modelBuilder.Model.GetEntityTypes()

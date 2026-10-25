@@ -4,7 +4,7 @@ Backend di InfraOrgIT: API .NET 10, Minimal APIs, EF Core 10, MySQL LTS, Keycloa
 
 ## Stato
 
-Fase 3 — inventario — 2026-10-25. Implementati modulo identity, BFF Keycloak, sessione server-side, CSRF, health check e l'inventario: provider, ambienti, provider × ambiente, server, applicazioni/versioni/API/query param, progetti, server application. RBAC D7 = B; 11 test di integrazione su MySQL Testcontainers. La checklist di parità è in `../AllInfraOrgIT/docs/domain/inventory-parity.md`.
+Fase 4 — topologia e diagrammi — 2026-10-26. Implementati identity, BFF Keycloak, inventario, connessioni/route proxy, topologia con filtri, diagrammi con scope/nodi/edge, delete preview e delete a sottoalbero. RBAC D7 = B; 3 test unitari e 17 di integrazione su MySQL Testcontainers. Dettagli in `../AllInfraOrgIT/docs/domain/inventory-parity.md` e `topology-diagrams.md`.
 
 ## Stack
 
@@ -19,7 +19,7 @@ Fase 3 — inventario — 2026-10-25. Implementati modulo identity, BFF Keycloak
 ```
 src/InfraOrgIt.Api/
   BuildingBlocks/{Auth, Authorization, Errors, Pagination, Validation}
-  Features/{Auth, Session, Menus, ServerAccess, Users, Inventory, Catalog}
+  Features/{Auth, Session, Menus, ServerAccess, Users, Inventory, Catalog, Topology}
   Infrastructure/Persistence/{Entities, Migrations}
   Program.cs
 tests/InfraOrgIt.UnitTests/

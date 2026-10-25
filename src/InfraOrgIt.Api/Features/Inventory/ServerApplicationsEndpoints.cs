@@ -82,7 +82,7 @@ public static class ServerApplicationsEndpoints
 
         await access.RequireAdminAsync(user, [server.ProviderEnvironmentId], ct);
         await EnsureVersionAsync(db, input.ApplicationVersionId, ct);
-        EnsureProxyRouteAvailable(input.ProxyRouteId);
+        await EnsureProxyRouteAsync(db, input.ProxyRouteId, ct);
 
         var entity = new ServerApplication
         {
@@ -117,7 +117,7 @@ public static class ServerApplicationsEndpoints
         await access.RequireAdminAsync(
             user, [originalServer.ProviderEnvironmentId, targetServer.ProviderEnvironmentId], ct);
         await EnsureVersionAsync(db, input.ApplicationVersionId, ct);
-        EnsureProxyRouteAvailable(input.ProxyRouteId);
+        await EnsureProxyRouteAsync(db, input.ProxyRouteId, ct);
 
         entity.ServerId = input.ServerId;
         entity.ApplicationVersionId = input.ApplicationVersionId;
@@ -140,16 +140,23 @@ public static class ServerApplicationsEndpoints
         var server = await db.Servers.AsNoTracking().SingleAsync(x => x.Id == entity.ServerId, ct);
         await access.RequireAdminAsync(user, [server.ProviderEnvironmentId], ct);
 
+        var routes = await db.ProxyRoutes
+            .Where(x => x.TargetServerApplicationId == id)
+            .ToListAsync(ct);
+        foreach (var route in routes)
+            route.TargetServerApplicationId = null;
+
         db.ServerApplications.Remove(entity);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
 
-    private static void EnsureProxyRouteAvailable(int? proxyRouteId)
+    private static async Task EnsureProxyRouteAsync(
+        InfraOrgItDbContext db, int? proxyRouteId, CancellationToken ct)
     {
-        if (proxyRouteId is not null)
-            throw Guard.Unprocessable(
-                "ProxyRouteId non è ancora assegnabile: la route proxy arriva con la Fase 4.");
+        if (proxyRouteId is not null &&
+            !await db.ProxyRoutes.AnyAsync(x => x.Id == proxyRouteId, ct))
+            throw Guard.NotFound("Route proxy", proxyRouteId.Value);
     }
 
     internal static async Task EnsureVersionAsync(

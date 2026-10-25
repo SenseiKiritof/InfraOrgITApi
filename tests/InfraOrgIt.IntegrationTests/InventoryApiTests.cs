@@ -218,7 +218,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var invalidRoute = await SendAsync(envAdmin, HttpMethod.Put,
             $"/api/server-applications/{deployId}",
             new { serverId, applicationVersionId = versionId, exposedPort = 8080, proxyRouteId = 10 });
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, invalidRoute.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, invalidRoute.StatusCode);
 
         var invalidFilter = await envAdmin.GetAsync("/api/servers?environmentId=abc");
         Assert.Equal(HttpStatusCode.BadRequest, invalidFilter.StatusCode);
@@ -389,6 +389,219 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Topology_graph_and_diagram_round_trip()
+    {
+        using var admin = await ClientForAsync("topo.admin", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        var seeded = await SeedEnvironmentAsync(suffix);
+        var secondServerId = await AddServerAsync(seeded.ProviderEnvironmentId, "second-" + suffix);
+        var catalog = await SeedCatalogAsync(secondServerId, suffix);
+        var connectionId = await SeedProxyAsync(seeded.ServerId, secondServerId, catalog.DeployId);
+
+        var topology = await ReadAsync(await admin.GetAsync($"/api/topology?providerId={seeded.ProviderId}"));
+        var providers = topology.GetProperty("providers");
+        Assert.Equal(1, providers.GetArrayLength());
+        var servers = providers[0].GetProperty("environments")[0].GetProperty("servers");
+        Assert.Equal(2, servers.GetArrayLength());
+        var connections = topology.GetProperty("proxyConnections");
+        Assert.Equal(1, connections.GetArrayLength());
+        Assert.Equal("/api", connections[0].GetProperty("routes")[0].GetProperty("route").GetString());
+
+        var diagram = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/diagrams", new
+        {
+            name = "Diagramma " + suffix,
+            description = "Test",
+            isDefault = true
+        }));
+        var diagramId = diagram.GetProperty("id").GetInt32();
+
+        var nodes = await SendAsync(admin, HttpMethod.Put, $"/api/diagrams/{diagramId}/nodes", new object[]
+        {
+            new { nodeType = "Server", entityId = seeded.ServerId, x = 10, y = 20, collapsed = false },
+            new
+            {
+                nodeType = "ServerApplication",
+                entityId = catalog.DeployId,
+                x = 300,
+                y = 40,
+                width = 180,
+                height = 60,
+                collapsed = false
+            }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, nodes.StatusCode);
+
+        var edges = await SendAsync(admin, HttpMethod.Put, $"/api/diagrams/{diagramId}/edges", new object[]
+        {
+            new
+            {
+                proxyConnectionId = connectionId,
+                targetNodeType = "ServerApplication",
+                targetEntityId = catalog.DeployId,
+                sourceHandle = "s-left",
+                targetHandle = "t-top",
+                bendX = 10,
+                bendY = -5
+            }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, edges.StatusCode);
+
+        var graph = await ReadAsync(await admin.GetAsync($"/api/diagrams/{diagramId}/graph"));
+        Assert.Equal(2, graph.GetProperty("nodes").GetArrayLength());
+        var savedEdge = graph.GetProperty("edges")[0];
+        Assert.Equal(connectionId, savedEdge.GetProperty("proxyConnectionId").GetInt32());
+        Assert.Equal("s-left", savedEdge.GetProperty("sourceHandle").GetString());
+        Assert.Equal(10, savedEdge.GetProperty("bendX").GetDouble());
+
+        var secondDiagram = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/diagrams", new
+        {
+            name = "Diagramma default " + suffix,
+            isDefault = true
+        }));
+        var defaultDiagram = await ReadAsync(await admin.GetAsync("/api/diagrams/default"));
+        Assert.Equal(secondDiagram.GetProperty("id").GetInt32(), defaultDiagram.GetProperty("id").GetInt32());
+        var first = await ReadAsync(await admin.GetAsync($"/api/diagrams/{diagramId}"));
+        Assert.False(first.GetProperty("isDefault").GetBoolean());
+
+        var deleted = await SendAsync(admin, HttpMethod.Delete, $"/api/diagrams/{diagramId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+    }
+
+    [Fact]
+    public async Task Topology_delete_requires_environment_admin()
+    {
+        using var admin = await ClientForAsync("topo.delete.admin", systemAdmin: true);
+        using var envAdmin = await ClientForAsync("topo.delete.env");
+        using var viewer = await ClientForAsync("topo.delete.viewer");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        var seeded = await SeedEnvironmentAsync(suffix);
+
+        var preview = await ReadAsync(await viewer.GetAsync(
+            $"/api/topology/nodes/Server/{seeded.ServerId}/delete-preview"));
+        Assert.Contains(preview.GetProperty("servers").EnumerateArray(),
+            item => item.GetString() == "Topo Server " + suffix);
+
+        var denied = await SendAsync(admin, HttpMethod.Delete,
+            $"/api/topology/nodes/Server/{seeded.ServerId}");
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+        await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
+            "topo.delete.env", "ServerAdmin");
+
+        var deleted = await SendAsync(envAdmin, HttpMethod.Delete,
+            $"/api/topology/nodes/Server/{seeded.ServerId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        Assert.False(await db.Servers.AnyAsync(x => x.Id == seeded.ServerId));
+        Assert.True(await db.Providers.AnyAsync(x => x.Id == seeded.ProviderId));
+        Assert.True(await db.EnvironmentDefinitions.AnyAsync(x => x.Id == seeded.EnvironmentId));
+    }
+
+    [Fact]
+    public async Task Environment_scoped_diagram_requires_environment_admin()
+    {
+        using var admin = await ClientForAsync("diagram.admin", systemAdmin: true);
+        using var envAdmin = await ClientForAsync("diagram.env");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+
+        var deniedSystem = await SendAsync(admin, HttpMethod.Post, "/api/diagrams", new
+        {
+            name = "Diagramma env " + suffix,
+            scopeItems = new[] { new { scopeType = "ProviderEnvironment", entityId = seeded.EnvironmentId } }
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, deniedSystem.StatusCode);
+
+        await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
+            "diagram.env", "ServerAdmin");
+
+        var created = await SendAsync(envAdmin, HttpMethod.Post, "/api/diagrams", new
+        {
+            name = "Diagramma env " + suffix,
+            scopeItems = new[] { new { scopeType = "ProviderEnvironment", entityId = seeded.EnvironmentId } }
+        });
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var diagramId = (await ReadAsync(created)).GetProperty("id").GetInt32();
+
+        var nodes = await SendAsync(envAdmin, HttpMethod.Put, $"/api/diagrams/{diagramId}/nodes", new object[]
+        {
+            new { nodeType = "Server", entityId = seeded.ServerId, x = 1, y = 2, collapsed = false }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, nodes.StatusCode);
+
+        var deniedProvider = await SendAsync(envAdmin, HttpMethod.Post, "/api/diagrams", new
+        {
+            name = "Diagramma provider " + suffix,
+            scopeItems = new[] { new { scopeType = "Provider", entityId = seeded.ProviderId } }
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, deniedProvider.StatusCode);
+
+        var deleted = await SendAsync(envAdmin, HttpMethod.Delete, $"/api/diagrams/{diagramId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+    }
+
+    [Fact]
+    public async Task Proxy_crud_requires_admin_on_both_environments()
+    {
+        using var admin = await ClientForAsync("proxy.admin", systemAdmin: true);
+        using var envAdmin = await ClientForAsync("proxy.env");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        var first = await SeedEnvironmentAsync("a-" + suffix);
+        var second = await SeedEnvironmentAsync("b-" + suffix);
+
+        var systemAttempt = await SendAsync(admin, HttpMethod.Post, "/api/proxy-connections", new
+        {
+            sourceServerId = first.ServerId,
+            targetServerId = second.ServerId,
+            direction = "Outgoing"
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, systemAttempt.StatusCode);
+
+        await AssignEnvironmentRoleAsync(admin, first.ProviderEnvironmentId, "proxy.env", "ServerAdmin");
+        var partial = await SendAsync(envAdmin, HttpMethod.Post, "/api/proxy-connections", new
+        {
+            sourceServerId = first.ServerId,
+            targetServerId = second.ServerId,
+            direction = "Outgoing"
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, partial.StatusCode);
+
+        await AssignEnvironmentRoleAsync(admin, second.ProviderEnvironmentId, "proxy.env", "ServerAdmin");
+        var created = await SendAsync(envAdmin, HttpMethod.Post, "/api/proxy-connections", new
+        {
+            sourceServerId = first.ServerId,
+            targetServerId = second.ServerId,
+            direction = "Outgoing"
+        });
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var connectionId = (await ReadAsync(created)).GetProperty("id").GetInt32();
+
+        var route = await SendAsync(envAdmin, HttpMethod.Post, $"/api/proxy-connections/{connectionId}/routes",
+            new { route = "/api", mappedTo = "/mapped" });
+        Assert.Equal(HttpStatusCode.OK, route.StatusCode);
+
+        var duplicate = await SendAsync(envAdmin, HttpMethod.Post, $"/api/proxy-connections/{connectionId}/routes",
+            new { route = "/api" });
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+
+        var self = await SendAsync(envAdmin, HttpMethod.Post, "/api/proxy-connections", new
+        {
+            sourceServerId = first.ServerId,
+            targetServerId = first.ServerId,
+            direction = "Outgoing"
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, self.StatusCode);
+
+        var deleted = await SendAsync(envAdmin, HttpMethod.Delete, $"/api/proxy-connections/{connectionId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+    }
+
+    [Fact]
     public void Legacy_fixture_rejects_orphan_foreign_keys()
     {
         var fixture = LegacyFixture.Load(FixturePath());
@@ -400,6 +613,141 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var error = Assert.Throws<InvalidOperationException>(broken.Validate);
         Assert.Contains("senza provider", error.Message);
     }
+
+    private async Task<SeededEnvironment> SeedEnvironmentAsync(string suffix)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+
+        var provider = new Provider { Name = "Topo Provider " + suffix };
+        var environment = new EnvironmentDefinition
+        {
+            Name = "Topo Env " + suffix,
+            Description = ""
+        };
+        db.Providers.Add(provider);
+        db.EnvironmentDefinitions.Add(environment);
+        await db.SaveChangesAsync();
+
+        var providerEnvironment = new ProviderEnvironment
+        {
+            ProviderId = provider.Id,
+            EnvironmentDefinitionId = environment.Id
+        };
+        db.ProviderEnvironments.Add(providerEnvironment);
+        await db.SaveChangesAsync();
+
+        var server = new Server
+        {
+            ProviderEnvironmentId = providerEnvironment.Id,
+            Name = "Topo Server " + suffix,
+            IpAddress = "10.20.0.1",
+            Hostname = "topo.local"
+        };
+        db.Servers.Add(server);
+        await db.SaveChangesAsync();
+
+        return new SeededEnvironment(provider.Id, environment.Id, providerEnvironment.Id, server.Id);
+    }
+
+    private async Task<int> AddServerAsync(int providerEnvironmentId, string suffix)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+
+        var server = new Server
+        {
+            ProviderEnvironmentId = providerEnvironmentId,
+            Name = "Topo Server " + suffix,
+            IpAddress = "10.20.0.2",
+            Hostname = "topo-2.local"
+        };
+        db.Servers.Add(server);
+        await db.SaveChangesAsync();
+        return server.Id;
+    }
+
+    private async Task<SeededCatalog> SeedCatalogAsync(int serverId, string suffix)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+
+        var application = new Application
+        {
+            Name = "Topo App " + suffix,
+            Description = "",
+            BasePath = "/topo",
+            ListeningOnPort = 8080
+        };
+        db.Applications.Add(application);
+        await db.SaveChangesAsync();
+
+        var version = new ApplicationVersion
+        {
+            ApplicationId = application.Id,
+            VersionNumber = "1.0.0"
+        };
+        db.ApplicationVersions.Add(version);
+        await db.SaveChangesAsync();
+
+        var deploy = new ServerApplication
+        {
+            ServerId = serverId,
+            ApplicationVersionId = version.Id,
+            ExposedPort = 8080
+        };
+        db.ServerApplications.Add(deploy);
+        await db.SaveChangesAsync();
+
+        var project = new Project { Name = "Topo Project " + suffix, Description = "Test" };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync();
+        db.Set<ApplicationProject>().Add(new ApplicationProject
+        {
+            ApplicationsId = application.Id,
+            ProjectsId = project.Id
+        });
+        await db.SaveChangesAsync();
+
+        return new SeededCatalog(application.Id, version.Id, deploy.Id, project.Id);
+    }
+
+    private async Task<int> SeedProxyAsync(int sourceServerId, int targetServerId, int targetApplicationId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+
+        var connection = new ProxyConnection
+        {
+            SourceServerId = sourceServerId,
+            TargetServerId = targetServerId,
+            Direction = "Outgoing"
+        };
+        db.ProxyConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        db.ProxyRoutes.Add(new ProxyRoute
+        {
+            ProxyConnectionId = connection.Id,
+            Route = "/api",
+            MappedTo = "/mapped",
+            TargetServerApplicationId = targetApplicationId
+        });
+        await db.SaveChangesAsync();
+        return connection.Id;
+    }
+
+    private sealed record SeededEnvironment(
+        int ProviderId,
+        int EnvironmentId,
+        int ProviderEnvironmentId,
+        int ServerId);
+
+    private sealed record SeededCatalog(
+        int ApplicationId,
+        int VersionId,
+        int DeployId,
+        int ProjectId);
 
     private static string FixturePath() =>
         Path.Combine(AppContext.BaseDirectory, "Legacy", "Fixtures", "legacy-reference-catalog.json");

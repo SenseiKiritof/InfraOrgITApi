@@ -7,6 +7,7 @@ using InfraOrgIt.Api.Features.Inventory;
 using InfraOrgIt.Api.Features.Menus;
 using InfraOrgIt.Api.Features.ServerAccess;
 using InfraOrgIt.Api.Features.Session;
+using InfraOrgIt.Api.Features.Topology;
 using InfraOrgIt.Api.Features.Users;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
@@ -33,6 +34,8 @@ builder.Services.AddSingleton<LoginStateStore>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
+builder.Services.AddScoped<TopologyService>();
+builder.Services.AddScoped<DiagramService>();
 builder.Services.AddHttpClient<OidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<IConfigurationManager<OpenIdConnectConfiguration>>(sp =>
 {
@@ -120,6 +123,9 @@ ApplicationVersionsEndpoints.Map(app);
 ApplicationVersionApisEndpoints.Map(app);
 ApplicationApiQueryParamsEndpoints.Map(app);
 ProjectsEndpoints.Map(app);
+TopologyEndpoints.Map(app);
+DiagramEndpoints.Map(app);
+ProxyEndpoints.Map(app);
 
 app.Run();
 

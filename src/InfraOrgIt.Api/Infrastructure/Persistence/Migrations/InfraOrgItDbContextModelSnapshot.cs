@@ -194,6 +194,185 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Diagrams");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.DiagramEdge", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<double?>("BendX")
+                        .HasColumnType("double");
+
+                    b.Property<double?>("BendY")
+                        .HasColumnType("double");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("DiagramId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProxyConnectionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceHandle")
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<int>("TargetEntityId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TargetHandle")
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<string>("TargetNodeType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DiagramId", "ProxyConnectionId", "TargetNodeType", "TargetEntityId")
+                        .IsUnique();
+
+                    b.ToTable("DiagramEdges", t =>
+                        {
+                            t.HasCheckConstraint("CK_DiagramEdges_TargetNodeType", "`TargetNodeType` IN ('Provider','ProviderEnvironment','Server','ServerApplication')");
+                        });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.DiagramNode", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Collapsed")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("DiagramId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EntityId")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("Height")
+                        .HasColumnType("double");
+
+                    b.Property<string>("NodeType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.Property<double?>("Width")
+                        .HasColumnType("double");
+
+                    b.Property<double>("X")
+                        .HasColumnType("double");
+
+                    b.Property<double>("Y")
+                        .HasColumnType("double");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DiagramId", "NodeType", "EntityId")
+                        .IsUnique();
+
+                    b.ToTable("DiagramNodes", t =>
+                        {
+                            t.HasCheckConstraint("CK_DiagramNodes_NodeType", "`NodeType` IN ('Provider','ProviderEnvironment','Server','ServerApplication')");
+                        });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.DiagramScopeItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("DiagramId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EntityId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ScopeType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DiagramId", "ScopeType", "EntityId")
+                        .IsUnique();
+
+                    b.ToTable("DiagramScopeItems", t =>
+                        {
+                            t.HasCheckConstraint("CK_DiagramScopeItems_ScopeType", "`ScopeType` IN ('Provider','ProviderEnvironment','Project')");
+                        });
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", b =>
                 {
                     b.Property<int>("Id")
@@ -775,6 +954,93 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("ProviderEnvironmentGroupRoles");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProxyConnection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<int>("SourceServerId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TargetServerId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceServerId");
+
+                    b.HasIndex("TargetServerId");
+
+                    b.ToTable("ProxyConnections", t =>
+                        {
+                            t.HasCheckConstraint("CK_ProxyConnections_DifferentServers", "`SourceServerId` <> `TargetServerId`");
+
+                            t.HasCheckConstraint("CK_ProxyConnections_Direction", "`Direction` IN ('Outgoing','Incoming')");
+                        });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProxyRoute", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("MappedTo")
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<int>("ProxyConnectionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Route")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<int?>("TargetProxyConnectionId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TargetServerApplicationId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TargetProxyConnectionId");
+
+                    b.HasIndex("TargetServerApplicationId");
+
+                    b.HasIndex("ProxyConnectionId", "Route")
+                        .IsUnique();
+
+                    b.ToTable("ProxyRoutes");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Role", b =>
                 {
                     b.Property<int>("Id")
@@ -946,6 +1212,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ApplicationVersionId");
 
+                    b.HasIndex("ProxyRouteId")
+                        .IsUnique();
+
                     b.HasIndex("ServerId");
 
                     b.ToTable("ServerApplications");
@@ -1042,6 +1311,39 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("ApplicationVersion");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.DiagramEdge", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", "Diagram")
+                        .WithMany("Edges")
+                        .HasForeignKey("DiagramId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Diagram");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.DiagramNode", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", "Diagram")
+                        .WithMany("Nodes")
+                        .HasForeignKey("DiagramId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Diagram");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.DiagramScopeItem", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", "Diagram")
+                        .WithMany("ScopeItems")
+                        .HasForeignKey("DiagramId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Diagram");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.GroupUser", b =>
                 {
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Group", "Group")
@@ -1136,6 +1438,50 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProxyConnection", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", "SourceServer")
+                        .WithMany()
+                        .HasForeignKey("SourceServerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", "TargetServer")
+                        .WithMany()
+                        .HasForeignKey("TargetServerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("SourceServer");
+
+                    b.Navigation("TargetServer");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProxyRoute", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProxyConnection", "ProxyConnection")
+                        .WithMany("Routes")
+                        .HasForeignKey("ProxyConnectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProxyConnection", "TargetProxyConnection")
+                        .WithMany()
+                        .HasForeignKey("TargetProxyConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerApplication", "TargetServerApplication")
+                        .WithMany()
+                        .HasForeignKey("TargetServerApplicationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ProxyConnection");
+
+                    b.Navigation("TargetProxyConnection");
+
+                    b.Navigation("TargetServerApplication");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.RoleUser", b =>
                 {
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Role", "Role")
@@ -1174,6 +1520,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProxyRoute", "ProxyRoute")
+                        .WithMany()
+                        .HasForeignKey("ProxyRouteId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", "Server")
                         .WithMany("ServerApplications")
                         .HasForeignKey("ServerId")
@@ -1181,6 +1532,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("ApplicationVersion");
+
+                    b.Navigation("ProxyRoute");
 
                     b.Navigation("Server");
                 });
@@ -1200,6 +1553,15 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationVersionApi", b =>
                 {
                     b.Navigation("QueryParams");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", b =>
+                {
+                    b.Navigation("Edges");
+
+                    b.Navigation("Nodes");
+
+                    b.Navigation("ScopeItems");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", b =>
@@ -1222,6 +1584,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("GroupRoles");
 
                     b.Navigation("Servers");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProxyConnection", b =>
+                {
+                    b.Navigation("Routes");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", b =>
