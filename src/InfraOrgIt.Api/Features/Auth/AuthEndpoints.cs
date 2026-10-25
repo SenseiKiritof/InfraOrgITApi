@@ -3,6 +3,7 @@ using System.Text;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Features.Users;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 
 namespace InfraOrgIt.Api.Features.Auth;
@@ -11,7 +12,7 @@ public static class AuthEndpoints
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/auth/login", StartLogin).AllowAnonymous();
+        app.MapGet("/auth/login", StartLogin).AllowAnonymous().RequireRateLimiting("auth-login");
         app.MapGet("/auth/callback", Callback).AllowAnonymous();
         app.MapPost("/auth/logout", Logout).AllowAnonymous();
     }
@@ -35,7 +36,7 @@ public static class AuthEndpoints
         var challenge = CryptoRandom.Sha256Base64Url(verifier);
 
         http.Response.Cookies.Append(
-            SessionCookie.Login(secure),
+            SessionCookie.Login(secure, state),
             loginId,
             SessionCookie.Options(secure, DateTimeOffset.UtcNow.AddMinutes(10)));
 
@@ -48,6 +49,7 @@ public static class AuthEndpoints
         string? state,
         LoginStateStore states,
         OidcClient oidc,
+        IOidcIdentityValidator identityValidator,
         UserProvisioningService users,
         ISessionStore sessions,
         IOptions<AuthOptions> auth,
@@ -56,10 +58,12 @@ public static class AuthEndpoints
         CancellationToken ct)
     {
         var secure = auth.Value.SecureCookies;
-        var loginCookie = SessionCookie.Login(secure);
 
-        if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state) ||
-            !http.Request.Cookies.TryGetValue(loginCookie, out var loginId))
+        if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
+            return LoginError(http, frontend.Value.BaseUrl, "callback_non_valido");
+
+        var loginCookie = SessionCookie.Login(secure, state);
+        if (!http.Request.Cookies.TryGetValue(loginCookie, out var loginId))
             return LoginError(http, frontend.Value.BaseUrl, "callback_non_valido");
 
         var login = states.Consume(loginId);
@@ -72,8 +76,8 @@ public static class AuthEndpoints
             if (string.IsNullOrWhiteSpace(token.IdToken))
                 throw new InvalidOperationException("Keycloak non ha restituito id_token.");
 
-            var identity = OidcIdentityParser.Parse(token.IdToken);
-            await users.EnsureUserAsync(identity, ct);
+            var identity = await identityValidator.ValidateAsync(token.IdToken, ct);
+            var roles = await users.EnsureUserAsync(identity, ct);
 
             var now = DateTimeOffset.UtcNow;
             var refreshExpiresAt = token.RefreshExpiresIn > 0
@@ -84,11 +88,11 @@ public static class AuthEndpoints
                 identity.Username,
                 identity.Name,
                 identity.Surname,
-                token.AccessToken,
                 token.RefreshToken,
                 now.AddSeconds(token.ExpiresIn),
                 refreshExpiresAt,
-                CryptoRandom.Token());
+                CryptoRandom.Token(),
+                roles);
 
             var sessionId = sessions.Create(session);
             http.Response.Cookies.Append(

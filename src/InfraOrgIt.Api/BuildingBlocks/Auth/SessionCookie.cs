@@ -8,7 +8,8 @@ public static class SessionCookie
     public const string SecureLoginName = "__Host-infraorgit_login";
 
     public static string Session(bool secure) => secure ? SecureSessionName : SessionName;
-    public static string Login(bool secure) => secure ? SecureLoginName : LoginName;
+    public static string Login(bool secure, string state) =>
+        (secure ? SecureLoginName : LoginName) + "_" + state;
 
     public static CookieOptions Options(bool secure, DateTimeOffset? expires = null) => new()
     {

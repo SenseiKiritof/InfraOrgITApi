@@ -1,8 +1,6 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
-using InfraOrgIt.Api.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace InfraOrgIt.Api.BuildingBlocks.Auth;
@@ -12,33 +10,21 @@ public sealed class SessionAuthenticationHandler(
     ILoggerFactory logger,
     UrlEncoder encoder,
     ISessionStore sessions,
-    InfraOrgItDbContext db,
     IOptions<AuthOptions> authOptions)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "Session";
     public const string SessionItemKey = "session";
 
-    protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
         var cookieName = SessionCookie.Session(authOptions.Value.SecureCookies);
         if (!Request.Cookies.TryGetValue(cookieName, out var sessionId) || string.IsNullOrEmpty(sessionId))
-            return AuthenticateResult.NoResult();
+            return Task.FromResult(AuthenticateResult.NoResult());
 
         var session = sessions.Get(sessionId);
         if (session is null)
-            return AuthenticateResult.NoResult();
-
-        var user = await db.Users
-            .AsNoTracking()
-            .Include(x => x.Roles)
-            .SingleOrDefaultAsync(x => x.Username == session.Username, Context.RequestAborted);
-
-        if (user is null)
-        {
-            sessions.Remove(sessionId);
-            return AuthenticateResult.NoResult();
-        }
+            return Task.FromResult(AuthenticateResult.NoResult());
 
         Context.Items[SessionItemKey] = session;
 
@@ -49,9 +35,30 @@ public sealed class SessionAuthenticationHandler(
             new("preferred_username", session.Username),
             new("display_name", session.Name)
         };
-        claims.AddRange(user.Roles.Select(role => new Claim(ClaimTypes.Role, role.Name)));
+        claims.AddRange(session.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
 
         var identity = new ClaimsIdentity(claims, SchemeName);
-        return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
+        return Task.FromResult(AuthenticateResult.Success(
+            new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
+    }
+
+    protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
+    {
+        Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Sessione assente o scaduta",
+                extensions: new Dictionary<string, object?> { ["code"] = "unauthorized" })
+            .ExecuteAsync(Context);
+    }
+
+    protected override async Task HandleForbiddenAsync(AuthenticationProperties properties)
+    {
+        Response.StatusCode = StatusCodes.Status403Forbidden;
+        await Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Accesso negato",
+                extensions: new Dictionary<string, object?> { ["code"] = "forbidden" })
+            .ExecuteAsync(Context);
     }
 }

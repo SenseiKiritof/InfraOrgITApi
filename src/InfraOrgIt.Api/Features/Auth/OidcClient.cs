@@ -7,7 +7,6 @@ using Microsoft.Extensions.Options;
 namespace InfraOrgIt.Api.Features.Auth;
 
 public sealed record OidcTokenResult(
-    string AccessToken,
     string? RefreshToken,
     string? IdToken,
     int ExpiresIn,
@@ -98,13 +97,7 @@ public sealed class OidcClient(HttpClient http, IOptions<OidcOptions> options, I
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
         var root = document.RootElement;
 
-        if (!root.TryGetProperty("access_token", out var accessToken) ||
-            string.IsNullOrEmpty(accessToken.GetString()))
-            throw new ApiException(StatusCodes.Status502BadGateway, "oidc_error",
-                "Risposta Keycloak senza access token.");
-
         return new OidcTokenResult(
-            accessToken.GetString()!,
             root.TryGetProperty("refresh_token", out var refreshToken) ? refreshToken.GetString() : null,
             root.TryGetProperty("id_token", out var idToken) ? idToken.GetString() : null,
             root.TryGetProperty("expires_in", out var expiresIn) ? expiresIn.GetInt32() : 300,

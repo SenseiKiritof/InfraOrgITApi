@@ -4,26 +4,33 @@ namespace InfraOrgIt.Api.BuildingBlocks.Auth;
 
 public sealed record LoginState(string State, string CodeVerifier);
 
-public sealed class LoginStateStore(IMemoryCache cache)
+public sealed class LoginStateStore : IDisposable
 {
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
+    private readonly MemoryCache _cache = new(new MemoryCacheOptions { SizeLimit = 5_000 });
 
     public string Create(string state, string codeVerifier)
     {
         var id = CryptoRandom.Token();
-        cache.Set(Key(id), new LoginState(state, codeVerifier), Lifetime);
+        _cache.Set(Key(id), new LoginState(state, codeVerifier), new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = Lifetime,
+            Size = 1
+        });
         return id;
     }
 
     public LoginState? Consume(string id)
     {
         var key = Key(id);
-        if (!cache.TryGetValue(key, out LoginState? state) || state is null)
+        if (!_cache.TryGetValue(key, out LoginState? state) || state is null)
             return null;
 
-        cache.Remove(key);
+        _cache.Remove(key);
         return state;
     }
+
+    public void Dispose() => _cache.Dispose();
 
     private static string Key(string id) => "login:" + id;
 }

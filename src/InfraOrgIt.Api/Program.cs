@@ -8,7 +8,12 @@ using InfraOrgIt.Api.Features.Users;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,6 +30,26 @@ builder.Services.AddSingleton<LoginStateStore>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddHttpClient<OidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddSingleton<IConfigurationManager<OpenIdConnectConfiguration>>(sp =>
+{
+    var oidc = sp.GetRequiredService<IOptions<OidcOptions>>().Value;
+    return new ConfigurationManager<OpenIdConnectConfiguration>(
+        oidc.DiscoveryEndpoint,
+        new OpenIdConnectConfigurationRetriever(),
+        new HttpDocumentRetriever { RequireHttps = !builder.Environment.IsDevelopment() });
+});
+builder.Services.AddSingleton<IOidcIdentityValidator, OidcIdentityValidator>();
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("auth-login", limiter =>
+    {
+        limiter.PermitLimit = 120;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+});
 
 builder.Services.AddOptions<AuthOptions>().Bind(builder.Configuration.GetSection("Auth"));
 builder.Services.AddOptions<OidcOptions>()
@@ -55,6 +80,20 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseExceptionHandler();
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        context.Response.OnStarting(() =>
+        {
+            context.Response.Headers["Cache-Control"] = "no-store";
+            return Task.CompletedTask;
+        });
+    }
+
+    await next(context);
+});
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<CsrfMiddleware>();
 app.UseAuthorization();

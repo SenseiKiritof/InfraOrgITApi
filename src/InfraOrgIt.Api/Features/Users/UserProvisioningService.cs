@@ -12,7 +12,7 @@ public sealed class UserProvisioningService(
     IOptions<AuthOptions> authOptions,
     ILogger<UserProvisioningService> logger)
 {
-    public async Task EnsureUserAsync(OidcIdentity identity, CancellationToken ct)
+    public async Task<IReadOnlyList<string>> EnsureUserAsync(OidcIdentity identity, CancellationToken ct)
     {
         var user = await db.Users
             .Include(x => x.Roles)
@@ -48,23 +48,28 @@ public sealed class UserProvisioningService(
         }
 
         var bootstrapUsername = authOptions.Value.BootstrapAdminUsername;
-        if (string.IsNullOrWhiteSpace(bootstrapUsername) ||
-            !string.Equals(bootstrapUsername, identity.Username, StringComparison.OrdinalIgnoreCase))
-            return;
+        if (!string.IsNullOrWhiteSpace(bootstrapUsername) &&
+            string.Equals(bootstrapUsername, identity.Username, StringComparison.OrdinalIgnoreCase))
+        {
+            var systemAdmin = await db.Roles.SingleOrDefaultAsync(x => x.Name == "SystemAdmin", ct);
+            if (systemAdmin is not null)
+            {
+                var alreadyAssigned = await db.Users.AnyAsync(
+                    x => x.Roles.Any(role => role.Name == "SystemAdmin"), ct);
 
-        var systemAdmin = await db.Roles.SingleOrDefaultAsync(x => x.Name == "SystemAdmin", ct);
-        if (systemAdmin is null)
-            return;
+                if (!alreadyAssigned && user.Roles.All(role => role.Id != systemAdmin.Id))
+                {
+                    user.Roles.Add(systemAdmin);
+                    await db.SaveChangesAsync(ct);
+                    logger.LogInformation("Bootstrap SystemAdmin assegnato a {Username}", user.Username);
+                }
+            }
+        }
 
-        var alreadyAssigned = await db.Users.AnyAsync(
-            x => x.Roles.Any(role => role.Name == "SystemAdmin"), ct);
-
-        if (alreadyAssigned || user.Roles.Any(role => role.Id == systemAdmin.Id))
-            return;
-
-        user.Roles.Add(systemAdmin);
-        await db.SaveChangesAsync(ct);
-        logger.LogInformation("Bootstrap SystemAdmin assegnato a {Username}", user.Username);
+        return user.Roles
+            .Select(role => role.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static string Fallback(string value, string fallback) =>

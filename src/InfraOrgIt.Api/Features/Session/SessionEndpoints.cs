@@ -16,6 +16,7 @@ public static class SessionEndpoints
         HttpContext http,
         ISessionStore sessions,
         OidcClient oidc,
+        IOidcIdentityValidator identityValidator,
         UserProvisioningService users,
         IOptions<AuthOptions> auth,
         ILoggerFactory loggerFactory,
@@ -43,8 +44,8 @@ public static class SessionEndpoints
                 if (string.IsNullOrWhiteSpace(token.IdToken))
                     throw new InvalidOperationException("Keycloak non ha restituito id_token.");
 
-                var identity = OidcIdentityParser.Parse(token.IdToken);
-                await users.EnsureUserAsync(identity, ct);
+                var identity = await identityValidator.ValidateAsync(token.IdToken, ct);
+                var roles = await users.EnsureUserAsync(identity, ct);
 
                 var now = DateTimeOffset.UtcNow;
                 var refreshExpiresAt = token.RefreshExpiresIn > 0
@@ -55,10 +56,10 @@ public static class SessionEndpoints
                 {
                     Name = identity.Name,
                     Surname = identity.Surname,
-                    AccessToken = token.AccessToken,
                     RefreshToken = token.RefreshToken ?? session.RefreshToken,
                     AccessExpiresAt = now.AddSeconds(token.ExpiresIn),
-                    RefreshExpiresAt = refreshExpiresAt
+                    RefreshExpiresAt = refreshExpiresAt,
+                    Roles = roles
                 };
 
                 sessions.Update(sessionId, session);

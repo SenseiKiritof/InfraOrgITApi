@@ -1,14 +1,18 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
+using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
@@ -22,6 +26,7 @@ public sealed class AuthApiTests : IAsyncLifetime
         .Build();
 
     private WebApplicationFactory<Program> _factory = null!;
+    private readonly FakeOidcHandler _oidcHandler = new();
 
     public async Task InitializeAsync()
     {
@@ -38,6 +43,14 @@ public sealed class AuthApiTests : IAsyncLifetime
             builder.UseSetting("Oidc:ClientSecret", "test");
             builder.UseSetting("Oidc:RedirectUri", "http://localhost:3000/auth/callback");
             builder.UseSetting("Frontend:BaseUrl", "http://localhost:3000");
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IOidcIdentityValidator>();
+                services.AddSingleton<IOidcIdentityValidator>(new FakeIdentityValidator());
+                services.RemoveAll<OidcClient>();
+                services.AddHttpClient<OidcClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() => _oidcHandler);
+            });
         });
 
         using var scope = _factory.Services.CreateScope();
@@ -56,6 +69,9 @@ public sealed class AuthApiTests : IAsyncLifetime
         using var client = _factory.CreateClient();
         var response = await client.GetAsync("/api/session");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.Equal("unauthorized", json.RootElement.GetProperty("code").GetString());
     }
 
     [Fact]
@@ -70,6 +86,26 @@ public sealed class AuthApiTests : IAsyncLifetime
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
         Assert.Equal("session.user", json.RootElement.GetProperty("user").GetProperty("username").GetString());
         Assert.False(string.IsNullOrWhiteSpace(json.RootElement.GetProperty("csrfToken").GetString()));
+        Assert.Contains("no-store", response.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
+    public async Task Expired_session_refreshes_with_token_endpoint()
+    {
+        var sessionId = await CreateSessionAsync(
+            "refresh.user",
+            "SystemAdmin",
+            DateTimeOffset.UtcNow.AddSeconds(-1),
+            "old-refresh-token",
+            DateTimeOffset.UtcNow.AddMinutes(10));
+
+        using var client = ClientWithSession(sessionId);
+        var response = await client.GetAsync("/api/session");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.True(json.RootElement.GetProperty("expiresIn").GetInt32() > 0);
+        Assert.Equal("refresh.user", json.RootElement.GetProperty("user").GetProperty("username").GetString());
     }
 
     [Fact]
@@ -122,7 +158,12 @@ public sealed class AuthApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
-    private async Task<string> CreateSessionAsync(string username, string? role = null)
+    private async Task<string> CreateSessionAsync(
+        string username,
+        string? role = null,
+        DateTimeOffset? accessExpiresAt = null,
+        string? refreshToken = null,
+        DateTimeOffset? refreshExpiresAt = null)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
@@ -148,11 +189,11 @@ public sealed class AuthApiTests : IAsyncLifetime
             username,
             "Test",
             "User",
-            "access-token",
-            null,
-            DateTimeOffset.UtcNow.AddHours(1),
-            null,
-            "csrf"));
+            refreshToken,
+            accessExpiresAt ?? DateTimeOffset.UtcNow.AddHours(1),
+            refreshExpiresAt,
+            "csrf",
+            role is null ? [] : [role]));
     }
 
     private HttpClient ClientWithSession(string sessionId)
@@ -171,5 +212,33 @@ public sealed class AuthApiTests : IAsyncLifetime
         return json.RootElement.EnumerateArray()
             .Select(item => item.GetProperty("name").GetString() ?? "")
             .ToList();
+    }
+
+    private sealed class FakeIdentityValidator : IOidcIdentityValidator
+    {
+        public Task<OidcIdentity> ValidateAsync(string idToken, CancellationToken ct) =>
+            Task.FromResult(new OidcIdentity("refresh.user", "Test", "User"));
+    }
+
+    private sealed class FakeOidcHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var body = JsonSerializer.Serialize(new
+            {
+                access_token = "unused-access-token",
+                refresh_token = "new-refresh-token",
+                id_token = "header.payload.signature",
+                expires_in = 300,
+                refresh_expires_in = 1800
+            });
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            });
+        }
     }
 }

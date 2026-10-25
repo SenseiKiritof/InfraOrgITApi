@@ -10,5 +10,6 @@ public sealed class OidcOptions
     public string AuthorizationEndpoint => TrimmedIssuer + "/protocol/openid-connect/auth";
     public string TokenEndpoint => TrimmedIssuer + "/protocol/openid-connect/token";
     public string LogoutEndpoint => TrimmedIssuer + "/protocol/openid-connect/logout";
+    public string DiscoveryEndpoint => TrimmedIssuer + "/.well-known/openid-configuration";
     private string TrimmedIssuer => Issuer.TrimEnd('/');
 }
