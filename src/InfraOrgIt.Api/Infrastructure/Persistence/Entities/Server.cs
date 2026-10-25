@@ -8,10 +8,11 @@ public sealed class Server : EntityBase
     public string Hostname { get; set; } = "";
     public int SshPort { get; set; } = 22;
 
-    // FK verso ServerCredentials aggiunta in Fase 5, quando l'entità esiste.
     public int? CredentialId { get; set; }
     public string? HostKeyFingerprint { get; set; }
 
     public ProviderEnvironment? ProviderEnvironment { get; set; }
+    public ServerCredential? Credential { get; set; }
     public List<ServerApplication> ServerApplications { get; set; } = [];
+    public List<ReachabilityTest> ReachabilityTests { get; set; } = [];
 }

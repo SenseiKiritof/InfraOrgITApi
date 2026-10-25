@@ -256,7 +256,7 @@ public static class ServersEndpoints
         x.Hostname,
         x.SshPort,
         x.CredentialId,
-        null,
+        x.Credential != null ? x.Credential.Name : null,
         x.HostKeyFingerprint != null,
         x.CreatedAt,
         x.UpdatedAt,

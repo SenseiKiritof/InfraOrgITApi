@@ -2,13 +2,17 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
+using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
+using InfraOrgIt.Api.Infrastructure.Ssh;
 using InfraOrgIt.IntegrationTests.Legacy;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
@@ -21,7 +25,11 @@ public sealed class InventoryApiTests : IAsyncLifetime
         .WithPassword("test")
         .Build();
 
+    private static readonly string TestCredentialKey =
+        Convert.ToBase64String(Enumerable.Range(0, 32).Select(x => (byte)x).ToArray());
+
     private WebApplicationFactory<Program> _factory = null!;
+    private readonly FakeSsh _ssh = new();
 
     public async Task InitializeAsync()
     {
@@ -38,6 +46,14 @@ public sealed class InventoryApiTests : IAsyncLifetime
             builder.UseSetting("Oidc:ClientSecret", "test");
             builder.UseSetting("Oidc:RedirectUri", "http://localhost:3000/auth/callback");
             builder.UseSetting("Frontend:BaseUrl", "http://localhost:3000");
+            builder.UseSetting("ServerAccess:CurrentKeyVersion", "1");
+            builder.UseSetting("ServerAccess:CredentialKeys:1", TestCredentialKey);
+            builder.UseSetting("ServerAccess:CommandTimeoutMinutes", "1");
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<ISshConnector>();
+                services.AddSingleton<ISshConnector>(_ssh);
+            });
         });
 
         using var scope = _factory.Services.CreateScope();
@@ -322,6 +338,217 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var deleteEnvironment = await SendAsync(admin, HttpMethod.Delete,
             $"/api/provider-environments/{providerEnvironmentId}");
         Assert.Equal(HttpStatusCode.NoContent, deleteEnvironment.StatusCode);
+    }
+
+    [Fact]
+    public async Task Credential_secret_is_encrypted_and_never_returned()
+    {
+        using var admin = await ClientForAsync("cred.admin", systemAdmin: true);
+        using var viewer = await ClientForAsync("cred.viewer");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+
+        var created = await SendAsync(admin, HttpMethod.Post, "/api/server-credentials", new
+        {
+            name = "Credenziale " + suffix,
+            username = "root",
+            authType = "Password",
+            secret = "super-secret"
+        });
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+
+        var raw = await created.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("super-secret", raw);
+        var credentialId = JsonDocument.Parse(raw).RootElement.GetProperty("id").GetInt32();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var row = await db.ServerCredentials.SingleAsync(x => x.Id == credentialId);
+            Assert.NotEqual("super-secret", row.EncryptedSecret);
+            var cipher = scope.ServiceProvider.GetRequiredService<CredentialCipher>();
+            Assert.Equal("super-secret", cipher.Decrypt(row.EncryptedSecret, row.KeyVersion));
+        }
+
+        var denied = await viewer.GetAsync("/api/server-credentials");
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+        var assign = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{seeded.ServerId}/ssh",
+            new { credentialId, sshPort = 2222 });
+        Assert.Equal(HttpStatusCode.NoContent, assign.StatusCode);
+
+        var server = await ReadAsync(await admin.GetAsync($"/api/servers/{seeded.ServerId}"));
+        Assert.Equal("Credenziale " + suffix, server.GetProperty("credentialName").GetString());
+
+        var blocked = await SendAsync(admin, HttpMethod.Delete,
+            $"/api/server-credentials/{credentialId}");
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+
+        var unassign = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{seeded.ServerId}/ssh",
+            new { credentialId = (int?)null, sshPort = 2222 });
+        Assert.Equal(HttpStatusCode.NoContent, unassign.StatusCode);
+
+        var deleted = await SendAsync(admin, HttpMethod.Delete,
+            $"/api/server-credentials/{credentialId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+    }
+
+    [Fact]
+    public async Task Action_run_is_audited_redacted_and_idempotent()
+    {
+        using var admin = await ClientForAsync("action.admin", systemAdmin: true);
+        using var operatorUser = await ClientForAsync("action.operator");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        var catalog = await SeedCatalogAsync(seeded.ServerId, suffix);
+        await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
+            "action.operator", "ServerOperator");
+
+        var credential = await ReadAsync(await SendAsync(admin, HttpMethod.Post,
+            "/api/server-credentials", new
+            {
+                name = "Credenziale azione " + suffix,
+                username = "root",
+                authType = "Password",
+                secret = "secret"
+            }));
+        await SendAsync(admin, HttpMethod.Put, $"/api/servers/{seeded.ServerId}/ssh", new
+        {
+            credentialId = credential.GetProperty("id").GetInt32(),
+            sshPort = 22
+        });
+
+        var template = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/command-templates",
+            new
+            {
+                name = "Template " + suffix,
+                description = "",
+                script = "echo {{Value}} {{ServerName}}"
+            }));
+        var action = await ReadAsync(await SendAsync(admin, HttpMethod.Post,
+            $"/api/applications/{catalog.ApplicationId}/actions", new
+            {
+                label = "Esegui",
+                order = 1,
+                commandTemplateId = template.GetProperty("id").GetInt32(),
+                parameterValues = new Dictionary<string, string> { ["Value"] = "secret-value" },
+                requiresConfirmation = true
+            }));
+        var actionId = action.GetProperty("id").GetInt32();
+
+        _ssh.Result = new SshCommandResult(0, "secret-value on server");
+        var idempotencyKey = "run-" + suffix;
+        var run = await SendAsync(operatorUser, HttpMethod.Post,
+            $"/api/server-applications/{catalog.DeployId}/actions/{actionId}/run",
+            body: null, idempotencyKey: idempotencyKey);
+        Assert.Equal(HttpStatusCode.OK, run.StatusCode);
+        var runBody = await ReadAsync(run);
+        Assert.Equal(0, runBody.GetProperty("exitCode").GetInt32());
+        Assert.Contains("secret-value", runBody.GetProperty("output").GetString());
+
+        var serverName = "Topo Server " + suffix;
+        Assert.Equal($"echo 'secret-value' '{serverName}'", _ssh.Scripts[^1]);
+
+        var executions = (await ReadAsync(await admin.GetAsync(
+                $"/api/command-executions?q=Topo%20App%20{suffix}")))
+            .GetProperty("items");
+        var audit = executions[0];
+        Assert.Equal("Action", audit.GetProperty("kind").GetString());
+        Assert.DoesNotContain("secret-value", audit.GetProperty("script").GetString());
+        Assert.Contains("***", audit.GetProperty("output").GetString());
+
+        var calls = _ssh.Scripts.Count;
+        var duplicate = await SendAsync(operatorUser, HttpMethod.Post,
+            $"/api/server-applications/{catalog.DeployId}/actions/{actionId}/run",
+            body: null, idempotencyKey: idempotencyKey);
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        Assert.Equal(calls, _ssh.Scripts.Count);
+
+        var unsafeAction = await SendAsync(admin, HttpMethod.Post,
+            $"/api/applications/{catalog.ApplicationId}/actions", new
+            {
+                label = "Unsafe",
+                order = 2,
+                customScript = "echo {{Value}}",
+                parameterValues = new Dictionary<string, string> { ["Value"] = "$(id)" }
+            });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, unsafeAction.StatusCode);
+
+        var denied = await SendAsync(admin, HttpMethod.Post,
+            $"/api/server-applications/{catalog.DeployId}/actions/{actionId}/run");
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+        var deniedList = await SendAsync(admin, HttpMethod.Get, "/api/command-executions");
+        Assert.Equal(HttpStatusCode.OK, deniedList.StatusCode);
+    }
+
+    [Fact]
+    public async Task Reachability_run_uses_ssh_and_audits()
+    {
+        using var admin = await ClientForAsync("reach.admin", systemAdmin: true);
+        using var operatorUser = await ClientForAsync("reach.operator");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
+            "reach.operator", "ServerOperator");
+
+        var test = await SendAsync(admin, HttpMethod.Post, "/api/reachability-tests", new
+        {
+            hostname = "example.com",
+            port = 443,
+            description = "Web"
+        });
+        Assert.Equal(HttpStatusCode.OK, test.StatusCode);
+
+        _ssh.Result = new SshCommandResult(0, "");
+        var run = await SendAsync(operatorUser, HttpMethod.Post,
+            $"/api/servers/{seeded.ServerId}/reachability-tests/run");
+        Assert.Equal(HttpStatusCode.OK, run.StatusCode);
+        var results = await ReadAsync(run);
+        Assert.Equal(1, results.GetArrayLength());
+        Assert.True(results[0].GetProperty("reachable").GetBoolean());
+        Assert.Contains("/dev/tcp/example.com/443", _ssh.Scripts[^1]);
+
+        var denied = await SendAsync(admin, HttpMethod.Post,
+            $"/api/servers/{seeded.ServerId}/reachability-tests/run");
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+        var invalid = await SendAsync(admin, HttpMethod.Post, "/api/reachability-tests", new
+        {
+            hostname = "bad host",
+            port = 80,
+            description = ""
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
+
+        var executions = (await ReadAsync(await admin.GetAsync(
+                "/api/command-executions?kind=Reachability")))
+            .GetProperty("items");
+        Assert.Contains(executions.EnumerateArray(),
+            item => item.GetProperty("kind").GetString() == "Reachability");
+    }
+
+    [Fact]
+    public async Task Console_rejects_non_websocket_and_foreign_origin()
+    {
+        using var admin = await ClientForAsync("console.admin", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+
+        var plain = await admin.GetAsync($"/api/socket/servers/{seeded.ServerId}/console");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, plain.StatusCode);
+
+        var cookie = admin.DefaultRequestHeaders.GetValues("Cookie").Single();
+        var client = _factory.Server.CreateWebSocketClient();
+        client.ConfigureRequest = request =>
+        {
+            request.Headers["Cookie"] = cookie;
+            request.Headers["Origin"] = "http://evil.invalid";
+        };
+
+        await Assert.ThrowsAnyAsync<Exception>(() => client.ConnectAsync(
+            new Uri($"ws://localhost/api/socket/servers/{seeded.ServerId}/console"),
+            CancellationToken.None));
     }
 
     [Fact]
@@ -743,6 +970,31 @@ public sealed class InventoryApiTests : IAsyncLifetime
         int ProviderEnvironmentId,
         int ServerId);
 
+    private sealed class FakeSsh : ISshConnector
+    {
+        public SshCommandResult Result { get; set; } = new(0, "");
+        public List<string> Scripts { get; } = [];
+
+        public Task<ISshSession> ConnectAsync(Server server, CancellationToken ct) =>
+            Task.FromResult<ISshSession>(new FakeSession(this));
+
+        private sealed class FakeSession(FakeSsh owner) : ISshSession
+        {
+            public Task<SshCommandResult> RunAsync(
+                string script, TimeSpan timeout, CancellationToken ct)
+            {
+                owner.Scripts.Add(script);
+                return Task.FromResult(owner.Result);
+            }
+
+            public Task<IShellSession> OpenShellAsync(
+                uint columns, uint rows, CancellationToken ct) =>
+                throw new NotSupportedException("Shell non usata nei test.");
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
+
     private sealed record SeededCatalog(
         int ApplicationId,
         int VersionId,
@@ -842,10 +1094,16 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     private static async Task<HttpResponseMessage> SendAsync(
-        HttpClient client, HttpMethod method, string url, object? body = null)
+        HttpClient client,
+        HttpMethod method,
+        string url,
+        object? body = null,
+        string? idempotencyKey = null)
     {
         using var request = new HttpRequestMessage(method, url);
         request.Headers.Add("X-CSRF-Token", "csrf");
+        if (idempotencyKey is not null)
+            request.Headers.Add("Idempotency-Key", idempotencyKey);
         if (body is not null)
             request.Content = JsonContent.Create(body);
         return await client.SendAsync(request);

@@ -31,6 +31,11 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<DiagramScopeItem> DiagramScopeItems => Set<DiagramScopeItem>();
     public DbSet<DiagramNode> DiagramNodes => Set<DiagramNode>();
     public DbSet<DiagramEdge> DiagramEdges => Set<DiagramEdge>();
+    public DbSet<ServerCredential> ServerCredentials => Set<ServerCredential>();
+    public DbSet<CommandTemplate> CommandTemplates => Set<CommandTemplate>();
+    public DbSet<ApplicationAction> ApplicationActions => Set<ApplicationAction>();
+    public DbSet<ReachabilityTest> ReachabilityTests => Set<ReachabilityTest>();
+    public DbSet<CommandExecution> CommandExecutions => Set<CommandExecution>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -123,8 +128,11 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.HostKeyFingerprint).HasMaxLength(100);
             e.Property(x => x.SshPort).HasDefaultValue(22);
             e.HasIndex(x => x.ProviderEnvironmentId);
+            e.HasIndex(x => x.CredentialId);
             e.HasOne(x => x.ProviderEnvironment).WithMany(x => x.Servers)
                 .HasForeignKey(x => x.ProviderEnvironmentId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Credential).WithMany(x => x.Servers)
+                .HasForeignKey(x => x.CredentialId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ServerApplication>(e =>
@@ -248,6 +256,65 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.HasIndex(x => new { x.DiagramId, x.NodeType, x.EntityId }).IsUnique();
             e.HasOne(x => x.Diagram).WithMany(x => x.Nodes)
                 .HasForeignKey(x => x.DiagramId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ServerCredential>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Username).HasMaxLength(200);
+            e.Property(x => x.AuthType).HasMaxLength(20);
+            e.Property(x => x.EncryptedSecret).HasColumnType("longtext");
+            e.Property(x => x.EncryptedPassphrase).HasColumnType("longtext");
+            e.HasIndex(x => x.Name).IsUnique();
+            e.ToTable(t => t.HasCheckConstraint("CK_ServerCredentials_AuthType",
+                "`AuthType` IN ('Password','PrivateKey')"));
+        });
+
+        modelBuilder.Entity<CommandTemplate>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Script).HasColumnType("longtext");
+            e.HasIndex(x => x.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<ApplicationAction>(e =>
+        {
+            e.Property(x => x.Label).HasMaxLength(100);
+            e.Property(x => x.CustomScript).HasColumnType("longtext");
+            e.Property(x => x.ParameterValuesJson).HasColumnType("json");
+            e.HasIndex(x => x.Order);
+            e.HasOne(x => x.Application).WithMany()
+                .HasForeignKey(x => x.ApplicationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.CommandTemplate).WithMany()
+                .HasForeignKey(x => x.CommandTemplateId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ReachabilityTest>(e =>
+        {
+            e.Property(x => x.Hostname).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(200);
+            e.HasIndex(x => x.ServerId);
+            e.HasOne(x => x.Server).WithMany(x => x.ReachabilityTests)
+                .HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Cascade);
+            e.ToTable(t => t.HasCheckConstraint("CK_ReachabilityTests_Port",
+                "`Port` BETWEEN 1 AND 65535"));
+        });
+
+        modelBuilder.Entity<CommandExecution>(e =>
+        {
+            e.Property(x => x.Username).HasMaxLength(100);
+            e.Property(x => x.ServerName).HasMaxLength(200);
+            e.Property(x => x.Kind).HasMaxLength(20);
+            e.Property(x => x.Label).HasMaxLength(200);
+            e.Property(x => x.Script).HasColumnType("longtext");
+            e.Property(x => x.Output).HasColumnType("longtext");
+            e.Property(x => x.IdempotencyKey).HasMaxLength(100);
+            e.HasIndex(x => x.ServerId);
+            e.HasIndex(x => x.StartedAt);
+            e.HasIndex(x => x.IdempotencyKey).IsUnique();
+            e.ToTable(t => t.HasCheckConstraint("CK_CommandExecutions_Kind",
+                "`Kind` IN ('Action','Reachability','Console')"));
         });
 
         modelBuilder.Entity<DiagramEdge>(e =>

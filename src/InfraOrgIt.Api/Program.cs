@@ -1,15 +1,18 @@
 using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
+using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Features.Catalog;
 using InfraOrgIt.Api.Features.Inventory;
 using InfraOrgIt.Api.Features.Menus;
+using InfraOrgIt.Api.Features.Remote;
 using InfraOrgIt.Api.Features.ServerAccess;
 using InfraOrgIt.Api.Features.Session;
 using InfraOrgIt.Api.Features.Topology;
 using InfraOrgIt.Api.Features.Users;
 using InfraOrgIt.Api.Infrastructure.Persistence;
+using InfraOrgIt.Api.Infrastructure.Ssh;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.RateLimiting;
@@ -65,6 +68,19 @@ builder.Services.AddOptions<OidcOptions>()
     .Validate(o => !string.IsNullOrWhiteSpace(o.ClientId), "Oidc:ClientId mancante.")
     .Validate(o => Uri.TryCreate(o.RedirectUri, UriKind.Absolute, out _), "Oidc:RedirectUri non è un URI assoluto.")
     .ValidateOnStart();
+builder.Services.AddOptions<ServerAccessOptions>()
+    .Bind(builder.Configuration.GetSection(ServerAccessOptions.SectionName))
+    .Validate(o => o.CredentialKeys.Count > 0, "ServerAccess:CredentialKeys mancante.")
+    .Validate(o => o.CredentialKeys.Values.All(IsCredentialKey), "Ogni CredentialKeys deve essere base64 di 32 byte.")
+    .Validate(o => o.CredentialKeys.ContainsKey(o.CurrentKeyVersion.ToString()),
+        "ServerAccess:CurrentKeyVersion non ha una chiave corrispondente.")
+    .Validate(o => o.CommandTimeoutMinutes is >= 1 and <= 60, "CommandTimeoutMinutes tra 1 e 60.")
+    .Validate(o => o.MaxOutputBytes is >= 1_024 and <= 10_485_760, "MaxOutputBytes tra 1 KB e 10 MB.")
+    .Validate(o => o.MaxAuditOutputBytes is >= 1_024 && o.MaxAuditOutputBytes <= o.MaxOutputBytes,
+        "MaxAuditOutputBytes tra 1 KB e MaxOutputBytes.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<CredentialCipher>();
+builder.Services.AddScoped<ISshConnector, SshConnector>();
 builder.Services.AddOptions<FrontendOptions>()
     .Bind(builder.Configuration.GetSection("Frontend"))
     .Validate(o => Uri.TryCreate(o.BaseUrl, UriKind.Absolute, out _), "Frontend:BaseUrl non è un URI assoluto.")
@@ -125,8 +141,27 @@ ApplicationApiQueryParamsEndpoints.Map(app);
 ProjectsEndpoints.Map(app);
 TopologyEndpoints.Map(app);
 DiagramEndpoints.Map(app);
+ServerCredentialsEndpoints.Map(app);
+CommandTemplateEndpoints.Map(app);
+ApplicationActionsEndpoints.Map(app);
+ReachabilityEndpoints.Map(app);
+CommandExecutionEndpoints.Map(app);
+ConsoleEndpoints.Map(app);
 ProxyEndpoints.Map(app);
 
 app.Run();
 
-public partial class Program;
+public partial class Program
+{
+    private static bool IsCredentialKey(string value)
+    {
+        try
+        {
+            return Convert.FromBase64String(value).Length == 32;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+}

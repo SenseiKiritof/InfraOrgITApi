@@ -4,7 +4,7 @@ Backend di InfraOrgIT: API .NET 10, Minimal APIs, EF Core 10, MySQL LTS, Keycloa
 
 ## Stato
 
-Fase 4 — topologia e diagrammi — 2026-10-26. Implementati identity, BFF Keycloak, inventario, connessioni/route proxy, topologia con filtri, diagrammi con scope/nodi/edge, delete preview e delete a sottoalbero. RBAC D7 = B; 3 test unitari e 17 di integrazione su MySQL Testcontainers. Dettagli in `../AllInfraOrgIT/docs/domain/inventory-parity.md` e `topology-diagrams.md`.
+Fase 5 — gestione remota — 2026-10-26. Implementati identity, BFF Keycloak, inventario, topologia/diagrammi e gestione remota: credenziali AES-GCM versionate, SSH con host key TOFU e timeout, azioni/template con audit redatto e idempotenza, reachability, console WebSocket, registro esecuzioni. RBAC D7 = B; 11 test unitari e 22 di integrazione (incluso SSH reale su container). Dettagli in `../AllInfraOrgIT/docs/domain/remote-management.md`.
 
 ## Stack
 
@@ -19,7 +19,8 @@ Fase 4 — topologia e diagrammi — 2026-10-26. Implementati identity, BFF Keyc
 ```
 src/InfraOrgIt.Api/
   BuildingBlocks/{Auth, Authorization, Errors, Pagination, Validation}
-  Features/{Auth, Session, Menus, ServerAccess, Users, Inventory, Catalog, Topology}
+  Features/{Auth, Session, Menus, ServerAccess, Users, Inventory, Catalog, Topology, Remote}
+  Infrastructure/Ssh
   Infrastructure/Persistence/{Entities, Migrations}
   Program.cs
 tests/InfraOrgIt.UnitTests/
@@ -49,6 +50,7 @@ make test
 
 - `appsettings.Development.json` contiene solo valori non segreti.
 - `Oidc:ClientSecret` e `ConnectionStrings:MySql` arrivano da env (`Oidc__ClientSecret`, `ConnectionStrings__MySql`) tramite `scripts/env.sh`.
+- `ServerAccess:CredentialKeys:<n>` (base64 di 32 byte) e `ServerAccess:CurrentKeyVersion` cifrano le credenziali SSH. In sviluppo `scripts/env.sh` genera la chiave nel `.env` ignorato; senza chiavi l'API non parte.
 - Bootstrap SystemAdmin: `Auth:BootstrapAdminUsername=admin` in Development; il primo login dell'utente Keycloak `admin` assegna il ruolo se non esiste già un SystemAdmin. In produzione la variabile resta vuota.
 - Cookie di sessione in memoria: adatto a una singola istanza; lo store condiviso è una decisione di Fase 8.
 

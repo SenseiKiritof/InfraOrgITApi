@@ -43,6 +43,9 @@ public sealed class AuthApiTests : IAsyncLifetime
             builder.UseSetting("Oidc:ClientSecret", "test");
             builder.UseSetting("Oidc:RedirectUri", "http://localhost:3000/auth/callback");
             builder.UseSetting("Frontend:BaseUrl", "http://localhost:3000");
+            builder.UseSetting("ServerAccess:CurrentKeyVersion", "1");
+            builder.UseSetting("ServerAccess:CredentialKeys:1",
+                Convert.ToBase64String(Enumerable.Range(0, 32).Select(x => (byte)x).ToArray()));
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IOidcIdentityValidator>();

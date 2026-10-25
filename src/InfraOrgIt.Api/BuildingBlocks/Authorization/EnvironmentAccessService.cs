@@ -51,6 +51,23 @@ public sealed class EnvironmentAccessService(InfraOrgItDbContext db)
                 $"Serve il ruolo {AdminRole} sugli ambienti coinvolti (mancante su: {string.Join(", ", missing)}).");
     }
 
+    public async Task RequireOperatorAsync(
+        ClaimsPrincipal user,
+        IReadOnlyCollection<int> providerEnvironmentIds,
+        CancellationToken ct)
+    {
+        if (providerEnvironmentIds.Count == 0)
+            throw Guard.Forbidden("Nessun ambiente coinvolto.");
+
+        var access = await GetAsync(user, ct);
+        var missing = providerEnvironmentIds
+            .Where(id => !access.OperatorEnvironmentIds.Contains(id))
+            .ToArray();
+        if (missing.Length > 0)
+            throw Guard.Forbidden(
+                $"Serve il ruolo {OperatorRole} sugli ambienti coinvolti (mancante su: {string.Join(", ", missing)}).");
+    }
+
     public static void RequireSystemAdmin(ClaimsPrincipal user)
     {
         if (!user.IsInRole(SystemAdminRole))

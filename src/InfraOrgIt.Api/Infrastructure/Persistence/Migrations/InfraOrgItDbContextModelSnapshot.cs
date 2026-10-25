@@ -61,6 +61,57 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("Applications");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationAction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<int>("ApplicationId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CommandTemplateId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("CustomScript")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ParameterValuesJson")
+                        .IsRequired()
+                        .HasColumnType("json");
+
+                    b.Property<bool>("RequiresConfirmation")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationId");
+
+                    b.HasIndex("CommandTemplateId");
+
+                    b.HasIndex("Order");
+
+                    b.ToTable("ApplicationActions");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationApiQueryParam", b =>
                 {
                     b.Property<int>("Id")
@@ -192,6 +243,109 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_ApplicationVersionApis_RequestTypeEnum", "`RequestTypeEnum` IN ('GET','POST','PUT','PATCH','DELETE')");
                         });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.CommandExecution", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("ExitCode")
+                        .HasColumnType("int");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<string>("Output")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Script")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<int>("ServerId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ServerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("ServerId");
+
+                    b.HasIndex("StartedAt");
+
+                    b.ToTable("CommandExecutions", t =>
+                        {
+                            t.HasCheckConstraint("CK_CommandExecutions_Kind", "`Kind` IN ('Action','Reachability','Console')");
+                        });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.CommandTemplate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<string>("Script")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("CommandTemplates");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", b =>
@@ -1041,6 +1195,48 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("ProxyRoutes");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ReachabilityTest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<string>("Hostname")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ServerId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServerId");
+
+                    b.ToTable("ReachabilityTests", t =>
+                        {
+                            t.HasCheckConstraint("CK_ReachabilityTests_Port", "`Port` BETWEEN 1 AND 65535");
+                        });
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Role", b =>
                 {
                     b.Property<int>("Id")
@@ -1175,6 +1371,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CredentialId");
+
                     b.HasIndex("ProviderEnvironmentId");
 
                     b.ToTable("Servers");
@@ -1220,6 +1418,61 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("ServerApplications");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerCredential", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<string>("AuthType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("EncryptedPassphrase")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("EncryptedSecret")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<int>("KeyVersion")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<bool>("NeedsReauth")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("ServerCredentials", t =>
+                        {
+                            t.HasCheckConstraint("CK_ServerCredentials_AuthType", "`AuthType` IN ('Password','PrivateKey')");
+                        });
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.User", b =>
                 {
                     b.Property<int>("Id")
@@ -1257,6 +1510,24 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationAction", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Application", "Application")
+                        .WithMany()
+                        .HasForeignKey("ApplicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.CommandTemplate", "CommandTemplate")
+                        .WithMany()
+                        .HasForeignKey("CommandTemplateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Application");
+
+                    b.Navigation("CommandTemplate");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationApiQueryParam", b =>
@@ -1482,6 +1753,16 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("TargetServerApplication");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ReachabilityTest", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", "Server")
+                        .WithMany("ReachabilityTests")
+                        .HasForeignKey("ServerId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Server");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.RoleUser", b =>
                 {
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Role", "Role")
@@ -1503,11 +1784,18 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", b =>
                 {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerCredential", "Credential")
+                        .WithMany("Servers")
+                        .HasForeignKey("CredentialId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProviderEnvironment", "ProviderEnvironment")
                         .WithMany("Servers")
                         .HasForeignKey("ProviderEnvironmentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Credential");
 
                     b.Navigation("ProviderEnvironment");
                 });
@@ -1593,7 +1881,14 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", b =>
                 {
+                    b.Navigation("ReachabilityTests");
+
                     b.Navigation("ServerApplications");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerCredential", b =>
+                {
+                    b.Navigation("Servers");
                 });
 #pragma warning restore 612, 618
         }
