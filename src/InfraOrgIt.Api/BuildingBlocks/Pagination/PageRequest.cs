@@ -1,3 +1,5 @@
+using InfraOrgIt.Api.BuildingBlocks.Errors;
+
 namespace InfraOrgIt.Api.BuildingBlocks.Pagination;
 
 public sealed record PageRequest(int Page, int PageSize, string? Sort, string? Q)
@@ -17,7 +19,12 @@ public sealed record PageRequest(int Page, int PageSize, string? Sort, string? Q
         var raw = http.Request.Query[name].ToString();
         if (string.IsNullOrWhiteSpace(raw))
             return null;
-        return int.TryParse(raw, out var value) ? value : null;
+        if (!int.TryParse(raw, out var value))
+            throw new ApiException(
+                StatusCodes.Status400BadRequest,
+                "validation_failed",
+                $"Il parametro {name} deve essere un intero.");
+        return value;
     }
 
     private static int ParseInt(string? raw, int fallback, int min, int max)

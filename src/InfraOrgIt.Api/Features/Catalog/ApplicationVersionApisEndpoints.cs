@@ -97,12 +97,15 @@ public static class ApplicationVersionApisEndpoints
         var entity = await db.ApplicationVersionApis.SingleOrDefaultAsync(x => x.Id == id, ct)
                      ?? throw Guard.NotFound("API applicazione", id);
 
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
         await db.ApplicationApiQueryParams
             .Where(x => x.ApplicationApiId == id)
             .ExecuteDeleteAsync(ct);
 
         db.ApplicationVersionApis.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return Results.NoContent();
     }
 

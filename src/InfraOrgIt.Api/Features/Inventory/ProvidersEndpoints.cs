@@ -1,6 +1,5 @@
 using System.Security.Claims;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
-using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
 using InfraOrgIt.Api.Infrastructure.Persistence;

@@ -110,10 +110,34 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var param = await SendAsync(admin, HttpMethod.Post, $"/api/application-version-apis/{apiId}/query-params",
             new { name = "verbose", paramType = "Bool" });
         Assert.Equal(HttpStatusCode.OK, param.StatusCode);
+        var paramId = (await ReadAsync(param)).GetProperty("id").GetInt32();
 
         var apis = await ReadAsync(await admin.GetAsync($"/api/application-versions/{versionId}/apis"));
         Assert.Equal(1, apis.GetArrayLength());
         Assert.Equal(1, apis[0].GetProperty("queryParamCount").GetInt32());
+
+        var updatedVersion = await SendAsync(admin, HttpMethod.Put,
+            $"/api/application-versions/{versionId}",
+            new { applicationId, versionNumber = "1.0.1" });
+        Assert.Equal(HttpStatusCode.NoContent, updatedVersion.StatusCode);
+        var versions = await ReadAsync(await admin.GetAsync($"/api/applications/{applicationId}/versions"));
+        Assert.Equal("1.0.1", versions[0].GetProperty("versionNumber").GetString());
+
+        var updatedApi = await SendAsync(admin, HttpMethod.Put,
+            $"/api/application-version-apis/{apiId}",
+            new
+            {
+                applicationVersionId = versionId,
+                url = "/healthz",
+                requestType = "GET",
+                description = "Health check aggiornato"
+            });
+        Assert.Equal(HttpStatusCode.NoContent, updatedApi.StatusCode);
+
+        var updatedParam = await SendAsync(admin, HttpMethod.Put,
+            $"/api/application-api-query-params/{paramId}",
+            new { applicationApiId = apiId, name = "v", paramType = "String" });
+        Assert.Equal(HttpStatusCode.NoContent, updatedParam.StatusCode);
 
         var invalidParam = await SendAsync(admin, HttpMethod.Post,
             $"/api/application-version-apis/{apiId}/query-params",
@@ -175,9 +199,18 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var deploy = await SendAsync(envAdmin, HttpMethod.Post, $"/api/servers/{serverId}/applications",
             new { applicationVersionId = versionId, exposedPort = 8080 });
         Assert.Equal(HttpStatusCode.OK, deploy.StatusCode);
+        var deployId = (await ReadAsync(deploy)).GetProperty("id").GetInt32();
 
         var blockedDelete = await SendAsync(envAdmin, HttpMethod.Delete, $"/api/servers/{serverId}");
         Assert.Equal(HttpStatusCode.Conflict, blockedDelete.StatusCode);
+
+        var invalidRoute = await SendAsync(envAdmin, HttpMethod.Put,
+            $"/api/server-applications/{deployId}",
+            new { serverId, applicationVersionId = versionId, exposedPort = 8080, proxyRouteId = 10 });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, invalidRoute.StatusCode);
+
+        var invalidFilter = await envAdmin.GetAsync("/api/servers?environmentId=abc");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidFilter.StatusCode);
 
         var outsiderAttempt = await SendAsync(outsider, HttpMethod.Put, $"/api/servers/{serverId}", new
         {
@@ -192,6 +225,39 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var adminEnvironmentIds = access.GetProperty("adminEnvironmentIds")
             .EnumerateArray().Select(x => x.GetInt32()).ToArray();
         Assert.Contains(environmentId, adminEnvironmentIds);
+    }
+
+    [Fact]
+    public async Task Provider_environment_pair_change_is_blocked_when_in_use()
+    {
+        using var admin = await ClientForAsync("pair.admin", systemAdmin: true);
+        var providerEnvironmentId = await CreateProviderEnvironmentAsync(admin);
+        var providerEnvironment = await ReadAsync(
+            await admin.GetAsync($"/api/provider-environments/{providerEnvironmentId}"));
+        var providerId = providerEnvironment.GetProperty("providerId").GetInt32();
+
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var otherEnvironment = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/environments",
+            new { name = "Alt " + suffix, description = "" }));
+        var otherEnvironmentId = otherEnvironment.GetProperty("id").GetInt32();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            db.Servers.Add(new Server
+            {
+                ProviderEnvironmentId = providerEnvironmentId,
+                Name = "Guard " + suffix,
+                IpAddress = "10.0.0.50",
+                Hostname = "guard.local"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var response = await SendAsync(admin, HttpMethod.Put,
+            $"/api/provider-environments/{providerEnvironmentId}",
+            new { providerId, environmentId = otherEnvironmentId });
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     [Fact]

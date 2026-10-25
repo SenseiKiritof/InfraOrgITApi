@@ -106,6 +106,8 @@ public static class ApplicationVersionsEndpoints
             .Select(x => x.Id)
             .ToListAsync(ct);
 
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
         if (apiIds.Count > 0)
         {
             await db.ApplicationApiQueryParams
@@ -118,6 +120,7 @@ public static class ApplicationVersionsEndpoints
 
         db.ApplicationVersions.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return Results.NoContent();
     }
 

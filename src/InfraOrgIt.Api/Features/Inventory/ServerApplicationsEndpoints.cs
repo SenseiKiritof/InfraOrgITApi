@@ -82,6 +82,7 @@ public static class ServerApplicationsEndpoints
 
         await access.RequireAdminAsync(user, [server.ProviderEnvironmentId], ct);
         await EnsureVersionAsync(db, input.ApplicationVersionId, ct);
+        EnsureProxyRouteAvailable(input.ProxyRouteId);
 
         var entity = new ServerApplication
         {
@@ -116,6 +117,7 @@ public static class ServerApplicationsEndpoints
         await access.RequireAdminAsync(
             user, [originalServer.ProviderEnvironmentId, targetServer.ProviderEnvironmentId], ct);
         await EnsureVersionAsync(db, input.ApplicationVersionId, ct);
+        EnsureProxyRouteAvailable(input.ProxyRouteId);
 
         entity.ServerId = input.ServerId;
         entity.ApplicationVersionId = input.ApplicationVersionId;
@@ -141,6 +143,13 @@ public static class ServerApplicationsEndpoints
         db.ServerApplications.Remove(entity);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
+    }
+
+    private static void EnsureProxyRouteAvailable(int? proxyRouteId)
+    {
+        if (proxyRouteId is not null)
+            throw Guard.Unprocessable(
+                "ProxyRouteId non è ancora assegnabile: la route proxy arriva con la Fase 4.");
     }
 
     internal static async Task EnsureVersionAsync(

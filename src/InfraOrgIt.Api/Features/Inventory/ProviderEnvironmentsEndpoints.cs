@@ -1,6 +1,5 @@
 using System.Security.Claims;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
-using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
 using InfraOrgIt.Api.Infrastructure.Persistence;
@@ -128,6 +127,22 @@ public static class ProviderEnvironmentsEndpoints
 
         await EnsureReferencesAsync(db, input, ct);
         await EnsureUniqueAsync(db, input, id, ct);
+
+        var pairChanged = entity.ProviderId != input.ProviderId ||
+                          entity.EnvironmentDefinitionId != input.EnvironmentId;
+        if (pairChanged)
+        {
+            var servers = await db.Servers.CountAsync(x => x.ProviderEnvironmentId == id, ct);
+            if (servers > 0)
+                throw Guard.Conflict(
+                    $"La coppia provider/ambiente ha {servers} server: spostarli o rimuoverli prima.");
+
+            var assignments = await db.ProviderEnvironmentGroupRoles
+                .CountAsync(x => x.ProviderEnvironmentId == id, ct);
+            if (assignments > 0)
+                throw Guard.Conflict(
+                    $"La coppia provider/ambiente ha {assignments} assegnazioni di ruolo: rimuoverle prima.");
+        }
 
         entity.ProviderId = input.ProviderId;
         entity.EnvironmentDefinitionId = input.EnvironmentId;
