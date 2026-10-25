@@ -1,6 +1,9 @@
 using InfraOrgIt.Api.BuildingBlocks.Auth;
+using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.Features.Auth;
+using InfraOrgIt.Api.Features.Catalog;
+using InfraOrgIt.Api.Features.Inventory;
 using InfraOrgIt.Api.Features.Menus;
 using InfraOrgIt.Api.Features.ServerAccess;
 using InfraOrgIt.Api.Features.Session;
@@ -29,6 +32,7 @@ builder.Services.AddSingleton<ISessionStore, InMemorySessionStore>();
 builder.Services.AddSingleton<LoginStateStore>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
+builder.Services.AddScoped<EnvironmentAccessService>();
 builder.Services.AddHttpClient<OidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<IConfigurationManager<OpenIdConnectConfiguration>>(sp =>
 {
@@ -106,6 +110,16 @@ AuthEndpoints.Map(app);
 SessionEndpoints.Map(app);
 MenuEndpoints.Map(app);
 ServerAccessEndpoints.Map(app);
+ProvidersEndpoints.Map(app);
+EnvironmentDefinitionsEndpoints.Map(app);
+ProviderEnvironmentsEndpoints.Map(app);
+ServersEndpoints.Map(app);
+ServerApplicationsEndpoints.Map(app);
+ApplicationsEndpoints.Map(app);
+ApplicationVersionsEndpoints.Map(app);
+ApplicationVersionApisEndpoints.Map(app);
+ApplicationApiQueryParamsEndpoints.Map(app);
+ProjectsEndpoints.Map(app);
 
 app.Run();
 

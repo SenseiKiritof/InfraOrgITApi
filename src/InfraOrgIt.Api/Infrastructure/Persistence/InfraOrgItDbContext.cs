@@ -14,6 +14,17 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<GroupUser> GroupUsers => Set<GroupUser>();
     public DbSet<RoleUser> RoleUsers => Set<RoleUser>();
     public DbSet<MenuRole> MenuRoles => Set<MenuRole>();
+    public DbSet<ProviderEnvironmentGroupRole> ProviderEnvironmentGroupRoles => Set<ProviderEnvironmentGroupRole>();
+    public DbSet<Provider> Providers => Set<Provider>();
+    public DbSet<EnvironmentDefinition> EnvironmentDefinitions => Set<EnvironmentDefinition>();
+    public DbSet<ProviderEnvironment> ProviderEnvironments => Set<ProviderEnvironment>();
+    public DbSet<Server> Servers => Set<Server>();
+    public DbSet<ServerApplication> ServerApplications => Set<ServerApplication>();
+    public DbSet<Application> Applications => Set<Application>();
+    public DbSet<ApplicationVersion> ApplicationVersions => Set<ApplicationVersion>();
+    public DbSet<ApplicationVersionApi> ApplicationVersionApis => Set<ApplicationVersionApi>();
+    public DbSet<ApplicationApiQueryParam> ApplicationApiQueryParams => Set<ApplicationApiQueryParam>();
+    public DbSet<Project> Projects => Set<Project>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -62,6 +73,113 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
                     j => j.HasOne(x => x.Role).WithMany().HasForeignKey(x => x.RolesId),
                     j => j.HasOne(x => x.Menu).WithMany().HasForeignKey(x => x.MenuId),
                     j => { j.ToTable("MenuRole"); j.HasKey(x => new { x.MenuId, x.RolesId }); });
+        });
+
+        modelBuilder.Entity<Provider>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.HasIndex(x => x.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<EnvironmentDefinition>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Description).HasMaxLength(250);
+            e.HasIndex(x => x.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<ProviderEnvironment>(e =>
+        {
+            e.HasIndex(x => new { x.ProviderId, x.EnvironmentDefinitionId }).IsUnique();
+            e.HasOne(x => x.Provider).WithMany(x => x.ProviderEnvironments)
+                .HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.EnvironmentDefinition).WithMany(x => x.ProviderEnvironments)
+                .HasForeignKey(x => x.EnvironmentDefinitionId).OnDelete(DeleteBehavior.Restrict);
+            e.Ignore(x => x.Label);
+        });
+
+        modelBuilder.Entity<ProviderEnvironmentGroupRole>(e =>
+        {
+            e.HasIndex(x => new { x.ProviderEnvironmentId, x.GroupId, x.RoleId }).IsUnique();
+            e.HasOne(x => x.ProviderEnvironment).WithMany(x => x.GroupRoles)
+                .HasForeignKey(x => x.ProviderEnvironmentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Group).WithMany()
+                .HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Role).WithMany()
+                .HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Server>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.IpAddress).HasMaxLength(200);
+            e.Property(x => x.Hostname).HasMaxLength(200);
+            e.Property(x => x.HostKeyFingerprint).HasMaxLength(100);
+            e.Property(x => x.SshPort).HasDefaultValue(22);
+            e.HasIndex(x => x.ProviderEnvironmentId);
+            e.HasOne(x => x.ProviderEnvironment).WithMany(x => x.Servers)
+                .HasForeignKey(x => x.ProviderEnvironmentId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ServerApplication>(e =>
+        {
+            e.HasIndex(x => x.ServerId);
+            e.HasIndex(x => x.ApplicationVersionId);
+            e.HasOne(x => x.Server).WithMany(x => x.ServerApplications)
+                .HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.ApplicationVersion).WithMany(x => x.ServerApplications)
+                .HasForeignKey(x => x.ApplicationVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Application>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(200);
+            e.Property(x => x.BasePath).HasMaxLength(50);
+            e.HasIndex(x => x.Name).IsUnique();
+            e.HasMany(x => x.Projects).WithMany(x => x.Applications)
+                .UsingEntity<ApplicationProject>(
+                    j => j.HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectsId),
+                    j => j.HasOne(x => x.Application).WithMany().HasForeignKey(x => x.ApplicationsId),
+                    j => { j.ToTable("ApplicationProject"); j.HasKey(x => new { x.ApplicationsId, x.ProjectsId }); });
+        });
+
+        modelBuilder.Entity<ApplicationVersion>(e =>
+        {
+            e.Property(x => x.VersionNumber).HasMaxLength(25);
+            e.HasIndex(x => new { x.ApplicationId, x.VersionNumber }).IsUnique();
+            e.HasOne(x => x.Application).WithMany(x => x.Versions)
+                .HasForeignKey(x => x.ApplicationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ApplicationVersionApi>(e =>
+        {
+            e.Property(x => x.Url).HasMaxLength(200);
+            e.Property(x => x.RequestTypeEnum).HasMaxLength(10);
+            e.Property(x => x.Description).HasMaxLength(200);
+            e.ToTable(t => t.HasCheckConstraint(
+                "CK_ApplicationVersionApis_RequestTypeEnum",
+                "`RequestTypeEnum` IN ('GET','POST','PUT','PATCH','DELETE')"));
+            e.HasOne(x => x.ApplicationVersion).WithMany(x => x.Apis)
+                .HasForeignKey(x => x.ApplicationVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ApplicationApiQueryParam>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.ParamType).HasMaxLength(20);
+            e.ToTable(t => t.HasCheckConstraint(
+                "CK_ApplicationApiQueryParams_ParamType",
+                "`ParamType` IN ('Int','String','Bool','DateTime','Double','Decimal')"));
+            e.HasOne(x => x.ApplicationApi).WithMany(x => x.QueryParams)
+                .HasForeignKey(x => x.ApplicationApiId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Project>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.HasIndex(x => x.Name).IsUnique();
         });
 
         foreach (var entityType in modelBuilder.Model.GetEntityTypes()

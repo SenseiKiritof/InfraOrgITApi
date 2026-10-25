@@ -17,4 +17,4 @@ Leggi `../AGENTS.md` e `../PLAN.md`.
 
 ## Stato
 
-Fase 2: identity + auth BFF + shell API. L'inventario parte in Fase 3. Comandi reali nel README.
+Fase 3: identity + auth BFF + inventario e catalogo. La checklist di parità è in `../AllInfraOrgIT/docs/domain/inventory-parity.md`. La Fase 4 aggiunge topologia e diagrammi. Comandi reali nel README.
