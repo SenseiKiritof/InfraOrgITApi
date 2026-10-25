@@ -1,0 +1,11 @@
+bin/
+obj/
+TestResults/
+.vs/
+.idea/
+*.user
+appsettings.*.Secure.json
+.env
+.env.*
+!.env.example
+*.pfx
