@@ -9,6 +9,7 @@ public sealed class TablePlan
     public required Dictionary<string, string> Columns { get; init; }
     public Dictionary<string, Func<JsonElement, object?>> Transforms { get; init; } = [];
     public string[] KeyColumns { get; init; } = ["Id"];
+    public string[] NaturalKey { get; init; } = [];
     public bool Audit { get; init; } = true;
     public bool Redact { get; init; }
     public List<(string TargetColumn, string LegacyColumn)> Deferred { get; init; } = [];
@@ -16,6 +17,37 @@ public sealed class TablePlan
 
 public static class ImportPlans
 {
+    // Natural keys are target columns. On an Id collision the importer compares them and
+    // refuses to reuse the existing row for a different entity.
+    private static readonly Dictionary<string, string[]> NaturalKeys = new(StringComparer.Ordinal)
+    {
+        ["Environments"] = ["Name"],
+        ["Providers"] = ["Name"],
+        ["ProviderEnvironments"] = ["ProviderId", "EnvironmentDefinitionId"],
+        ["Roles"] = ["Name"],
+        ["Menus"] = ["Path"],
+        ["Users"] = ["Username"],
+        ["Groups"] = ["Name"],
+        ["ProviderEnvironmentGroupRoles"] = ["ProviderEnvironmentId", "GroupId", "RoleId"],
+        ["Applications"] = ["Name"],
+        ["ApplicationVersions"] = ["ApplicationId", "VersionNumber"],
+        ["ApplicationVersionApis"] = ["ApplicationVersionId", "Url"],
+        ["ApplicationApiQueryParams"] = ["ApplicationApiId", "Name"],
+        ["Projects"] = ["Name"],
+        ["CommandTemplates"] = ["Name"],
+        ["ApplicationActions"] = ["ApplicationId", "Label"],
+        ["ServerCredentials"] = ["Name", "Username"],
+        ["Servers"] = ["ProviderEnvironmentId", "Name"],
+        ["ProxyConnections"] = ["SourceServerId", "TargetServerId", "Direction"],
+        ["ServerApplications"] = ["ServerId", "ApplicationVersionId", "ExposedPort"],
+        ["ProxyRoutes"] = ["ProxyConnectionId", "Route"],
+        ["ReachabilityTests"] = ["ServerId", "Hostname", "Port"],
+        ["Diagrams"] = ["Name"],
+        ["DiagramScopeItems"] = ["DiagramId", "ScopeType", "EntityId"],
+        ["DiagramNodes"] = ["DiagramId", "NodeType", "EntityId"],
+        ["DiagramEdges"] = ["DiagramId", "ProxyConnectionId", "TargetNodeType", "TargetEntityId"]
+    };
+
     public static readonly List<TablePlan> All =
     [
         Plan("Environments", "EnvironmentDefinitions", ("Id", "Id"), ("Name", "Name"), ("Description", "Description")),
@@ -126,7 +158,13 @@ public static class ImportPlans
         Custom(legacy, target, columns);
 
     private static TablePlan Join(string legacy, string target, params (string Target, string Source)[] columns) =>
-        Custom(legacy, target, columns, audit: false, keyColumns: columns.Select(x => x.Target).ToArray());
+        Custom(
+            legacy,
+            target,
+            columns,
+            audit: false,
+            keyColumns: columns.Select(x => x.Target).ToArray(),
+            naturalKeys: columns.Select(x => x.Target).ToArray());
 
     private static TablePlan Custom(
         string legacy,
@@ -136,7 +174,8 @@ public static class ImportPlans
         (string Target, string Source)[]? deferred = null,
         bool audit = true,
         bool redact = false,
-        string[]? keyColumns = null) => new()
+        string[]? keyColumns = null,
+        string[]? naturalKeys = null) => new()
     {
         Legacy = legacy,
         Target = target,
@@ -145,7 +184,8 @@ public static class ImportPlans
         Deferred = deferred?.ToList() ?? [],
         Audit = audit,
         Redact = redact,
-        KeyColumns = keyColumns ?? ["Id"]
+        KeyColumns = keyColumns ?? ["Id"],
+        NaturalKey = naturalKeys ?? NaturalKeys.GetValueOrDefault(legacy, [])
     };
 
     private static string EnumName(JsonElement value, params string[] names)

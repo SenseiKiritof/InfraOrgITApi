@@ -10,6 +10,23 @@ public sealed class LegacyCipher(string? base64Key)
 
     public bool HasKey => !string.IsNullOrWhiteSpace(base64Key);
 
+    public static string? ValidateKey(string? base64Key)
+    {
+        if (string.IsNullOrWhiteSpace(base64Key))
+            return null;
+
+        try
+        {
+            return Convert.FromBase64String(base64Key).Length == 32
+                ? null
+                : "La chiave AES-GCM deve essere di 32 byte.";
+        }
+        catch (FormatException)
+        {
+            return "La chiave AES-GCM non è base64 valido.";
+        }
+    }
+
     public string Decrypt(string ciphertext)
     {
         var key = Key();

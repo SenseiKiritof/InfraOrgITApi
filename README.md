@@ -4,7 +4,7 @@ Backend di InfraOrgIT: API .NET 10, Minimal APIs, EF Core 10, MySQL LTS, Keycloa
 
 ## Stato
 
-Fase 7 in corso — 2026-10-26. Backend completo fino a Fase 6 (identity, inventario, topologia/diagrammi, gestione remota, admin/RBAC) e importer `tools/LegacyImport`: dry-run/apply su JSON legacy-shaped, ID preservati, due fasi per i cicli FK, credenziali ricifrate o `NeedsReauth`, audit redatto, report JSON. Test: 12 unitari e 25 di integrazione (SSH reale incluso). Dettagli in `tools/LegacyImport/README.md` e `../AllInfraOrgIT/docs/migration/phase7-plan.md`.
+Fase 7 in corso — 2026-10-26. Backend completo fino a Fase 6 (identity, inventario, topologia/diagrammi, gestione remota, admin/RBAC) e importer `tools/LegacyImport`: dry-run/apply atomico su JSON legacy-shaped, ID preservati con controllo di chiave naturale, collisioni bloccanti, due fasi per i cicli FK, credenziali ricifrate con chiave versionata (`NeedsReauth` solo con `--allow-reauth`), audit redatto, report JSON. Test: 12 unitari e 29 di integrazione (SSH reale incluso). Dettagli in `tools/LegacyImport/README.md` e `../AllInfraOrgIT/docs/migration/phase7-plan.md`.
 
 ## Stack
 

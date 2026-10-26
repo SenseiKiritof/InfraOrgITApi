@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using MySql.Data.MySqlClient;
 
@@ -10,7 +11,9 @@ public sealed record ImportOptions(
     bool Apply,
     string? OldKey,
     string? NewKey,
-    bool RedactAudit);
+    bool RedactAudit,
+    int NewKeyVersion = 1,
+    bool AllowReauth = false);
 
 public sealed record TableReport(string Table, int Read, int Inserted, int Skipped, int Failed);
 
@@ -22,14 +25,17 @@ public sealed record ImportReport(
     List<string> Errors,
     List<string> Warnings,
     int NeedsReauth,
-    int RedactedAudit);
+    int RedactedAudit,
+    bool RolledBack,
+    int NewKeyVersion);
 
 public sealed class Importer
 {
     private static readonly (string Table, string Column, string ParentTable)[] ForeignKeys =
     [
         ("ProviderEnvironments", "ProviderId", "Providers"),
-        ("ProviderEnvironments", "EnvironmentDefinitionId", "EnvironmentDefinitions"),
+        ("ProviderEnvironments", "EnvironmentDefinitionId", "Environments"),
+        ("Menus", "ParentId", "Menus"),
         ("MenuRole", "MenuId", "Menus"),
         ("MenuRole", "RolesId", "Roles"),
         ("GroupUser", "GroupsId", "Groups"),
@@ -52,19 +58,22 @@ public sealed class Importer
         ("ProxyConnections", "TargetServerId", "Servers"),
         ("ServerApplications", "ServerId", "Servers"),
         ("ServerApplications", "ApplicationVersionId", "ApplicationVersions"),
+        ("ServerApplications", "ProxyRouteId", "ProxyRoutes"),
         ("ProxyRoutes", "ProxyConnectionId", "ProxyConnections"),
         ("ProxyRoutes", "TargetServerApplicationId", "ServerApplications"),
         ("ProxyRoutes", "TargetProxyConnectionId", "ProxyConnections"),
         ("ReachabilityTests", "ServerId", "Servers"),
         ("DiagramScopeItems", "DiagramId", "Diagrams"),
         ("DiagramNodes", "DiagramId", "Diagrams"),
-        ("DiagramEdges", "DiagramId", "Diagrams")
+        ("DiagramEdges", "DiagramId", "Diagrams"),
+        ("DiagramEdges", "ProxyConnectionId", "ProxyConnections")
     ];
 
     private static readonly (string Table, string[] Columns)[] Unique =
     [
         ("Providers", ["Name"]),
         ("EnvironmentDefinitions", ["Name"]),
+        ("ProviderEnvironments", ["ProviderId", "EnvironmentDefinitionId"]),
         ("Applications", ["Name"]),
         ("Projects", ["Name"]),
         ("CommandTemplates", ["Name"]),
@@ -80,106 +89,178 @@ public sealed class Importer
         ("ServerApplications", ["ProxyRouteId"])
     ];
 
+    private sealed record ExistingRow(bool Found, string? Mismatch);
+
+    private sealed record BuiltRow(Dictionary<string, object?> Values, bool NeedsReauth, bool Redacted);
+
     public async Task<ImportReport> RunAsync(ImportOptions options, CancellationToken ct)
     {
-        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(options.InputPath, ct));
-        var input = ReadInput(document.RootElement);
-
         var errors = new List<string>();
         var warnings = new List<string>();
+        var reports = new List<TableReport>();
         var needsReauth = 0;
         var redacted = 0;
+        var rolledBack = false;
 
-        Validate(
-            input, errors, warnings,
-            !string.IsNullOrWhiteSpace(options.OldKey),
-            !string.IsNullOrWhiteSpace(options.NewKey));
+        Dictionary<string, List<JsonElement>> input;
+        try
+        {
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(options.InputPath, ct));
+            input = ReadInput(document.RootElement);
+        }
+        catch (Exception exception)
+        {
+            errors.Add($"Input non leggibile: {exception.Message}");
+            return NewReport(options, reports, errors, warnings, needsReauth, redacted, rolledBack);
+        }
 
-        var reports = new List<TableReport>();
+        ValidateCipherKeys(options, errors);
+        Validate(input, errors);
+        AddMissingTablesWarning(input, warnings);
+
+        foreach (var plan in ImportPlans.All)
+            reports.Add(new TableReport(plan.Legacy, Rows(input, plan.Legacy).Count, 0, 0, 0));
+
         if (!options.Apply)
         {
-            foreach (var plan in ImportPlans.All)
-            {
-                var rows = Rows(input, plan.Legacy);
-                reports.Add(new TableReport(plan.Legacy, rows.Count, 0, 0, 0));
-            }
-
-            needsReauth = string.IsNullOrWhiteSpace(options.OldKey) ||
-                          string.IsNullOrWhiteSpace(options.NewKey)
-                ? Rows(input, "ServerCredentials").Count
-                : 0;
-
+            needsReauth = CountNeedsReauth(input, options, warnings);
             if (options.RedactAudit)
                 redacted = Rows(input, "CommandExecutions").Count;
 
-            return NewReport(options, reports, errors, warnings, needsReauth, redacted);
+            if (string.IsNullOrWhiteSpace(options.ConnectionString))
+                warnings.Add(
+                    "Dry-run senza LEGACY_IMPORT_CONNECTION: collisioni con il target non verificate.");
+            else
+                await CheckCollisionsAsync(options.ConnectionString, input, errors, ct);
+
+            return NewReport(options, reports, errors, warnings, needsReauth, redacted, rolledBack);
         }
 
+        var requiredReauth = CountNeedsReauth(input, options, warnings);
+        if (requiredReauth > 0 && !options.AllowReauth)
+            errors.Add(
+                $"{requiredReauth} credenziali richiedono NeedsReauth: fornisci le chiavi o usa --allow-reauth.");
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
+            errors.Add("LEGACY_IMPORT_CONNECTION è obbligatoria con --apply.");
+        if (errors.Count > 0)
         {
-            errors.Add("--connection è obbligatorio con --apply.");
-            return NewReport(options, reports, errors, warnings, needsReauth, redacted);
+            needsReauth = requiredReauth;
+            return NewReport(options, reports, errors, warnings, needsReauth, redacted, rolledBack);
         }
 
-        if (errors.Count > 0)
-            return NewReport(options, reports, errors, warnings, needsReauth, redacted);
-
-        await using var connection = new MySqlConnection(options.ConnectionString);
-        await connection.OpenAsync(ct);
-
-        var oldCipher = new LegacyCipher(options.OldKey);
-        var newCipher = new LegacyCipher(options.NewKey);
-
-        foreach (var plan in ImportPlans.All)
+        var counters = new Dictionary<string, (int Inserted, int Skipped, int Failed)>(StringComparer.Ordinal);
+        try
         {
-            var rows = Rows(input, plan.Legacy);
-            if (rows.Count == 0)
-                continue;
-
-            var inserted = 0;
-            var skipped = 0;
-            var failed = 0;
-
+            await using var connection = new MySqlConnection(options.ConnectionString);
+            await connection.OpenAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
+
+            var oldCipher = new LegacyCipher(options.OldKey);
+            var newCipher = new LegacyCipher(options.NewKey);
+
             try
             {
-                foreach (var row in rows)
+                foreach (var plan in ImportPlans.All)
                 {
-                    var key = Key(row, plan);
-                    if (await ExistsAsync(connection, transaction, plan, key, ct))
-                    {
-                        skipped++;
+                    var rows = Rows(input, plan.Legacy);
+                    if (rows.Count == 0)
                         continue;
+
+                    var inserted = 0;
+                    var skipped = 0;
+                    var failed = 0;
+
+                    foreach (var row in rows)
+                    {
+                        var key = Key(row, plan);
+                        var existing = await InspectAsync(connection, transaction, plan, row, key, ct);
+                        if (existing.Found)
+                        {
+                            if (existing.Mismatch is null)
+                            {
+                                skipped++;
+                            }
+                            else
+                            {
+                                failed++;
+                                errors.Add(
+                                    $"{plan.Legacy} {key}: Id già usato da una riga diversa " +
+                                    $"({existing.Mismatch}); riga non importata.");
+                            }
+
+                            continue;
+                        }
+
+                        try
+                        {
+                            var built = BuildValues(plan, row, options, oldCipher, newCipher);
+                            await InsertAsync(connection, transaction, plan, built.Values, ct);
+                            inserted++;
+                            if (built.NeedsReauth)
+                                needsReauth++;
+                            if (built.Redacted)
+                                redacted++;
+                        }
+                        catch (Exception exception)
+                        {
+                            failed++;
+                            errors.Add($"{plan.Legacy}: riga {key} non importata: {exception.Message}");
+                        }
                     }
 
-                    try
-                    {
-                        var values = BuildValues(
-                            plan, row, options, oldCipher, newCipher, ref needsReauth, ref redacted);
-                        await InsertAsync(connection, transaction, plan, values, ct);
-                        inserted++;
-                    }
-                    catch (Exception exception)
-                    {
-                        failed++;
-                        errors.Add($"{plan.Legacy}: riga {key} non importata: {exception.Message}");
-                    }
+                    counters[plan.Legacy] = (inserted, skipped, failed);
                 }
 
-                await transaction.CommitAsync(ct);
+                reports = reports
+                    .Select(report => counters.TryGetValue(report.Table, out var counter)
+                        ? report with
+                        {
+                            Inserted = counter.Inserted,
+                            Skipped = counter.Skipped,
+                            Failed = counter.Failed
+                        }
+                        : report)
+                    .ToList();
+
+                if (errors.Count > 0)
+                {
+                    await transaction.RollbackAsync(ct);
+                    rolledBack = true;
+                }
+                else
+                {
+                    await ApplyDeferredAsync(connection, transaction, input, ct);
+                    await transaction.CommitAsync(ct);
+                }
             }
             catch (Exception exception)
             {
-                await transaction.RollbackAsync(ct);
-                errors.Add($"{plan.Legacy}: transazione annullata: {exception.Message}");
-            }
+                try
+                {
+                    await transaction.RollbackAsync(ct);
+                }
+                catch
+                {
+                    // The connection may already be gone; the report still records the failure.
+                }
 
-            reports.Add(new TableReport(plan.Legacy, rows.Count, inserted, skipped, failed));
+                rolledBack = true;
+                errors.Add($"Apply annullato: {exception.Message}");
+            }
+        }
+        catch (Exception exception)
+        {
+            errors.Add($"Connessione o transazione fallita: {exception.Message}");
         }
 
-        await ApplyDeferredAsync(connection, input, ct);
+        if (rolledBack)
+        {
+            reports = reports.Select(report => report with { Inserted = 0 }).ToList();
+            needsReauth = 0;
+            redacted = 0;
+        }
 
-        return NewReport(options, reports, errors, warnings, needsReauth, redacted);
+        return NewReport(options, reports, errors, warnings, needsReauth, redacted, rolledBack);
     }
 
     private static ImportReport NewReport(
@@ -188,7 +269,8 @@ public sealed class Importer
         List<string> errors,
         List<string> warnings,
         int needsReauth,
-        int redacted) => new(
+        int redacted,
+        bool rolledBack) => new(
         options.InputPath,
         !options.Apply,
         DateTime.UtcNow,
@@ -196,7 +278,9 @@ public sealed class Importer
         errors,
         warnings,
         needsReauth,
-        redacted);
+        redacted,
+        rolledBack,
+        options.NewKeyVersion);
 
     private static Dictionary<string, List<JsonElement>> ReadInput(JsonElement root)
     {
@@ -205,22 +289,92 @@ public sealed class Importer
         {
             if (property.Value.ValueKind != JsonValueKind.Array)
                 continue;
-            result[property.Name] = property.Value.EnumerateArray().ToList();
+            result[property.Name] = property.Value.EnumerateArray().Select(row => row.Clone()).ToList();
         }
 
         return result;
     }
 
     private static List<JsonElement> Rows(
-        Dictionary<string, List<JsonElement>> input, string table) =>
+        Dictionary<string, List<JsonElement>> input,
+        string table) =>
         input.TryGetValue(table, out var rows) ? rows : [];
+
+    private static void ValidateCipherKeys(ImportOptions options, List<string> errors)
+    {
+        if (!string.IsNullOrWhiteSpace(options.OldKey) &&
+            LegacyCipher.ValidateKey(options.OldKey) is { } oldError)
+            errors.Add($"LEGACY_IMPORT_OLD_KEY: {oldError}");
+        if (!string.IsNullOrWhiteSpace(options.NewKey) &&
+            LegacyCipher.ValidateKey(options.NewKey) is { } newError)
+            errors.Add($"LEGACY_IMPORT_NEW_KEY: {newError}");
+        if (options.NewKeyVersion < 1)
+            errors.Add("--new-key-version deve essere maggiore o uguale a 1.");
+    }
+
+    private static void AddMissingTablesWarning(
+        Dictionary<string, List<JsonElement>> input,
+        List<string> warnings)
+    {
+        var missing = ImportPlans.All
+            .Where(plan => !input.ContainsKey(plan.Legacy))
+            .Select(plan => plan.Legacy)
+            .ToList();
+        if (missing.Count > 0)
+            warnings.Add($"Tabelle assenti nella fixture: {string.Join(", ", missing)}.");
+    }
+
+    private static int CountNeedsReauth(
+        Dictionary<string, List<JsonElement>> input,
+        ImportOptions options,
+        List<string> warnings)
+    {
+        var rows = Rows(input, "ServerCredentials");
+        if (rows.Count == 0)
+            return 0;
+
+        if (LegacyCipher.ValidateKey(options.OldKey) is not null ||
+            LegacyCipher.ValidateKey(options.NewKey) is not null)
+            return 0;
+
+        if (string.IsNullOrWhiteSpace(options.OldKey) || string.IsNullOrWhiteSpace(options.NewKey))
+        {
+            warnings.Add(
+                $"{rows.Count} credenziali: chiave vecchia o nuova assente, verranno importate come NeedsReauth.");
+            return rows.Count;
+        }
+
+        var cipher = new LegacyCipher(options.OldKey);
+        var count = 0;
+        foreach (var row in rows)
+        {
+            var id = Get(row, "Id")?.GetRawText() ?? "?";
+            var secret = Get(row, "EncryptedSecret")?.GetString() ?? "";
+            if (string.IsNullOrEmpty(secret))
+            {
+                count++;
+                warnings.Add($"ServerCredentials {id}: segreto assente, NeedsReauth.");
+                continue;
+            }
+
+            try
+            {
+                cipher.Decrypt(secret);
+            }
+            catch
+            {
+                count++;
+                warnings.Add(
+                    $"ServerCredentials {id}: segreto non decifrabile con la vecchia chiave, NeedsReauth.");
+            }
+        }
+
+        return count;
+    }
 
     private static void Validate(
         Dictionary<string, List<JsonElement>> input,
-        List<string> errors,
-        List<string> warnings,
-        bool hasOldKey,
-        bool hasNewKey)
+        List<string> errors)
     {
         foreach (var plan in ImportPlans.All)
         {
@@ -256,9 +410,10 @@ public sealed class Importer
                 ValidateRow(plan, row, key, errors);
             }
 
-            foreach (var (table, columns) in Unique.Where(x => x.Table == plan.Legacy))
+            foreach (var (table, columns) in Unique.Where(x => x.Table == plan.Target))
             {
-                var values = rows.Select(row => string.Join("|", columns.Select(column =>
+                var sourceColumns = columns.Select(column => SourceColumn(plan, column)).ToArray();
+                var values = rows.Select(row => string.Join("|", sourceColumns.Select(column =>
                         Get(row, column)?.GetRawText() ?? "")))
                     .Where(value => value.Replace("|", "").Length > 0)
                     .ToList();
@@ -271,16 +426,18 @@ public sealed class Importer
         foreach (var (table, column, parent) in ForeignKeys)
         {
             var rows = Rows(input, table);
-            var parents = Rows(input, parent);
-            if (rows.Count == 0 || parents.Count == 0)
+            if (rows.Count == 0)
                 continue;
 
-            var parentIds = parents.Select(row => Get(row, "Id")?.GetRawText())
+            var plan = ImportPlans.All.FirstOrDefault(candidate => candidate.Legacy == table);
+            var sourceColumn = plan is null ? column : SourceColumn(plan, column);
+            var parentIds = Rows(input, parent)
+                .Select(row => Get(row, "Id")?.GetRawText())
                 .Where(x => x is not null)
                 .ToHashSet(StringComparer.Ordinal);
             foreach (var row in rows)
             {
-                var value = Get(row, column);
+                var value = Get(row, sourceColumn);
                 if (value is null || value.Value.ValueKind == JsonValueKind.Null)
                     continue;
                 if (!parentIds.Contains(value.Value.GetRawText()))
@@ -310,10 +467,6 @@ public sealed class Importer
         var diagrams = Rows(input, "Diagrams");
         if (diagrams.Count(row => Get(row, "IsDefault")?.ValueKind == JsonValueKind.True) > 1)
             errors.Add("Diagrams: più di un IsDefault");
-
-        var credentials = Rows(input, "ServerCredentials");
-        if (credentials.Count > 0 && (!hasOldKey || !hasNewKey))
-            warnings.Add($"{credentials.Count} credenziali: chiave vecchia o nuova assente, verranno importate come NeedsReauth");
     }
 
     private static void ValidateRow(
@@ -322,25 +475,33 @@ public sealed class Importer
         string key,
         List<string> errors)
     {
-        if (plan.Legacy != "CommandExecutions" &&
-            Get(row, "Id") is { } id &&
-            id.TryGetInt32(out var idValue) &&
-            idValue <= 0)
+        if (plan.KeyColumns.Length != 1 || plan.KeyColumns[0] != "Id")
+            return;
+
+        var id = Get(row, "Id");
+        if (id is null || id.Value.ValueKind == JsonValueKind.Null)
+        {
+            errors.Add($"{plan.Legacy} {key}: Id mancante");
+            return;
+        }
+
+        if (id.Value.TryGetInt32(out var idValue) && idValue <= 0)
             errors.Add($"{plan.Legacy} {key}: Id non positivo");
     }
 
     private static string Key(JsonElement row, TablePlan plan) =>
         string.Join("|", plan.KeyColumns.Select(column =>
-            Get(row, plan.Columns.GetValueOrDefault(column, column))?.GetRawText() ?? ""));
+            Get(row, SourceColumn(plan, column))?.GetRawText() ?? ""));
 
-    private static Dictionary<string, object?> BuildValues(
+    private static string SourceColumn(TablePlan plan, string targetColumn) =>
+        plan.Columns.GetValueOrDefault(targetColumn, targetColumn);
+
+    private static BuiltRow BuildValues(
         TablePlan plan,
         JsonElement row,
         ImportOptions options,
         LegacyCipher oldCipher,
-        LegacyCipher newCipher,
-        ref int needsReauth,
-        ref int redacted)
+        LegacyCipher newCipher)
     {
         var values = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var (target, source) in plan.Columns)
@@ -365,6 +526,7 @@ public sealed class Importer
             values["Version"] = 0;
         }
 
+        var needsReauth = false;
         if (plan.Target == "ServerCredentials")
         {
             var secret = Get(row, "EncryptedSecret")?.GetString() ?? "";
@@ -378,36 +540,37 @@ public sealed class Importer
                     values["EncryptedPassphrase"] = string.IsNullOrEmpty(passphrase)
                         ? null
                         : newCipher.Encrypt(oldCipher.Decrypt(passphrase));
-                    values["KeyVersion"] = 1;
+                    values["KeyVersion"] = options.NewKeyVersion;
                     values["NeedsReauth"] = false;
                 }
                 catch
                 {
                     values["EncryptedSecret"] = "";
                     values["EncryptedPassphrase"] = null;
-                    values["KeyVersion"] = 1;
+                    values["KeyVersion"] = options.NewKeyVersion;
                     values["NeedsReauth"] = true;
-                    needsReauth++;
+                    needsReauth = true;
                 }
             }
             else
             {
                 values["EncryptedSecret"] = "";
                 values["EncryptedPassphrase"] = null;
-                values["KeyVersion"] = 1;
+                values["KeyVersion"] = options.NewKeyVersion;
                 values["NeedsReauth"] = true;
-                needsReauth++;
+                needsReauth = true;
             }
         }
 
+        var redacted = false;
         if (plan.Redact && options.RedactAudit)
         {
             values["Script"] = "";
             values["Output"] = "";
-            redacted++;
+            redacted = true;
         }
 
-        return values;
+        return new BuiltRow(values, needsReauth, redacted);
     }
 
     private static object? Convert(JsonElement value, string targetColumn) =>
@@ -420,33 +583,112 @@ public sealed class Importer
             JsonValueKind.Number when value.TryGetInt64(out var longValue) => longValue,
             JsonValueKind.Number => value.GetDouble(),
             JsonValueKind.String when targetColumn.EndsWith("At", StringComparison.Ordinal) &&
-                                      DateTime.TryParse(value.GetString(), out var date) => date,
+                                      DateTime.TryParse(
+                                          value.GetString(),
+                                          CultureInfo.InvariantCulture,
+                                          DateTimeStyles.RoundtripKind,
+                                          out var date) => date,
             JsonValueKind.String => value.GetString(),
             _ => value.GetRawText()
         };
 
-    private static async Task<bool> ExistsAsync(
+    private static async Task<ExistingRow> InspectAsync(
         MySqlConnection connection,
-        MySqlTransaction transaction,
+        MySqlTransaction? transaction,
         TablePlan plan,
+        JsonElement row,
         string key,
         CancellationToken ct)
     {
         if (string.IsNullOrEmpty(key))
-            return false;
+            return new ExistingRow(false, null);
 
-        var columns = plan.KeyColumns
-            .Select(column => plan.Columns.TryGetValue(column, out var source) ? column : column)
-            .ToArray();
-        var parts = columns.Select((column, index) => $"`{column}` = @k{index}");
+        var where = plan.KeyColumns.Select((column, index) => $"`{column}` = @k{index}");
+        var select = plan.NaturalKey.Length == 0
+            ? "1"
+            : string.Join(", ", plan.NaturalKey.Select(column => $"`{column}`"));
         await using var command = new MySqlCommand(
-            $"SELECT 1 FROM `{plan.Target}` WHERE {string.Join(" AND ", parts)} LIMIT 1",
+            $"SELECT {select} FROM `{plan.Target}` WHERE {string.Join(" AND ", where)} LIMIT 1",
             connection,
             transaction);
         var values = key.Split('|');
-        for (var i = 0; i < columns.Length && i < values.Length; i++)
+        for (var i = 0; i < plan.KeyColumns.Length && i < values.Length; i++)
             command.Parameters.AddWithValue($"@k{i}", values[i]);
-        return await command.ExecuteScalarAsync(ct) is not null;
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return new ExistingRow(false, null);
+        if (plan.NaturalKey.Length == 0)
+            return new ExistingRow(true, null);
+
+        var mismatches = new List<string>();
+        for (var i = 0; i < plan.NaturalKey.Length; i++)
+        {
+            var databaseValue = reader.IsDBNull(i) ? null : reader.GetValue(i);
+            var element = Get(row, SourceColumn(plan, plan.NaturalKey[i]));
+            var sourceValue = element is null ? null : Convert(element.Value, plan.NaturalKey[i]);
+            if (!Same(databaseValue, sourceValue))
+                mismatches.Add(
+                    $"{plan.NaturalKey[i]}: atteso {Show(sourceValue)}, trovato {Show(databaseValue)}");
+        }
+
+        return new ExistingRow(true, mismatches.Count == 0 ? null : string.Join("; ", mismatches));
+    }
+
+    private static bool Same(object? left, object? right)
+    {
+        if (left is null || left is DBNull)
+            return right is null;
+        if (right is null)
+            return false;
+        if (left is string leftText && right is string rightText)
+            return string.Equals(leftText, rightText, StringComparison.OrdinalIgnoreCase);
+        if (left is DateTime leftDate && right is DateTime rightDate)
+            return leftDate == rightDate;
+        if (IsNumber(left) && IsNumber(right))
+            return System.Convert.ToDecimal(left, CultureInfo.InvariantCulture) ==
+                   System.Convert.ToDecimal(right, CultureInfo.InvariantCulture);
+        return left.Equals(right);
+    }
+
+    private static bool IsNumber(object value) =>
+        value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal;
+
+    private static string Show(object? value) => value switch
+    {
+        null => "NULL",
+        string text => $"'{text}'",
+        DateTime date => date.ToString("O", CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? "NULL"
+    };
+
+    private static async Task CheckCollisionsAsync(
+        string connectionString,
+        Dictionary<string, List<JsonElement>> input,
+        List<string> errors,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var connection = new MySqlConnection(connectionString);
+            await connection.OpenAsync(ct);
+
+            foreach (var plan in ImportPlans.All)
+            {
+                foreach (var row in Rows(input, plan.Legacy))
+                {
+                    var key = Key(row, plan);
+                    var existing = await InspectAsync(connection, null, plan, row, key, ct);
+                    if (existing.Mismatch is not null)
+                        errors.Add(
+                            $"{plan.Legacy} {key}: Id già usato da una riga diversa ({existing.Mismatch}).");
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            errors.Add($"Verifica collisioni fallita: {exception.Message}");
+        }
     }
 
     private static async Task InsertAsync(
@@ -467,6 +709,7 @@ public sealed class Importer
 
     private static async Task ApplyDeferredAsync(
         MySqlConnection connection,
+        MySqlTransaction transaction,
         Dictionary<string, List<JsonElement>> input,
         CancellationToken ct)
     {
@@ -487,7 +730,8 @@ public sealed class Importer
 
                     await using var command = new MySqlCommand(
                         $"UPDATE `{plan.Target}` SET `{targetColumn}` = @value WHERE `Id` = @id",
-                        connection);
+                        connection,
+                        transaction);
                     command.Parameters.AddWithValue("@value", Convert(value.Value, targetColumn));
                     command.Parameters.AddWithValue("@id", id);
                     await command.ExecuteNonQueryAsync(ct);
