@@ -17,4 +17,4 @@ Leggi `../AGENTS.md` e `../PLAN.md`.
 
 ## Stato
 
-Fase 5: identity + auth BFF + inventario + topologia/diagrammi + gestione remota. Checklist in `../AllInfraOrgIT/docs/domain/inventory-parity.md`, `topology-diagrams.md` e `remote-management.md`. La Fase 6 aggiunge admin/RBAC completo. Comandi reali nel README.
+Fase 6: identity + auth BFF + inventario + topologia/diagrammi + gestione remota + admin/RBAC. Checklist in `../AllInfraOrgIT/docs/domain/` (`inventory-parity`, `topology-diagrams`, `remote-management`, `admin-rbac`). La Fase 7 è la migrazione: piano in `docs/migration/phase7-plan.md`. Comandi reali nel README.

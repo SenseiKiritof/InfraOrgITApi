@@ -4,7 +4,7 @@ Backend di InfraOrgIT: API .NET 10, Minimal APIs, EF Core 10, MySQL LTS, Keycloa
 
 ## Stato
 
-Fase 5 — gestione remota — 2026-10-26. Implementati identity, BFF Keycloak, inventario, topologia/diagrammi e gestione remota: credenziali AES-GCM versionate, SSH con host key TOFU e timeout, azioni/template con audit redatto e idempotenza, reachability, console WebSocket, registro esecuzioni. RBAC D7 = B; 11 test unitari e 22 di integrazione (incluso SSH reale su container). Dettagli in `../AllInfraOrgIT/docs/domain/remote-management.md`.
+Fase 6 — admin e RBAC — 2026-10-26. Implementati identity, BFF Keycloak, inventario, topologia/diagrammi, gestione remota e admin: CRUD utenti/gruppi/ruoli/menu, assegnazioni per ambiente, protezioni su self-delete/ultimo SystemAdmin/ruoli di sistema. RBAC D7 = B; 12 test unitari e 23 di integrazione (incluso SSH reale su container). Dettagli in `../AllInfraOrgIT/docs/domain/admin-rbac.md`.
 
 ## Stack
 
@@ -19,7 +19,7 @@ Fase 5 — gestione remota — 2026-10-26. Implementati identity, BFF Keycloak, 
 ```
 src/InfraOrgIt.Api/
   BuildingBlocks/{Auth, Authorization, Errors, Pagination, Validation}
-  Features/{Auth, Session, Menus, ServerAccess, Users, Inventory, Catalog, Topology, Remote}
+  Features/{Auth, Session, Menus, ServerAccess, Users, Inventory, Catalog, Topology, Remote, Admin}
   Infrastructure/Ssh
   Infrastructure/Persistence/{Entities, Migrations}
   Program.cs

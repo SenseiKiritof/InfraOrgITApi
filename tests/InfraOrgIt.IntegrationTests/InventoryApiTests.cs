@@ -552,6 +552,181 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Admin_identity_and_menu_crud_with_guards()
+    {
+        using var admin = await ClientForAsync("admin.identity", systemAdmin: true);
+        using var viewer = await ClientForAsync("admin.viewer");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        Assert.Equal(HttpStatusCode.OK, (await viewer.GetAsync("/api/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await SendAsync(viewer, HttpMethod.Post, "/api/groups", new { name = "No " + suffix })).StatusCode);
+
+        var group = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/groups",
+            new { name = "Gruppo " + suffix }));
+        var groupId = group.GetProperty("id").GetInt32();
+
+        var role = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/roles",
+            new { name = "Custom " + suffix, label = "Custom", scopeEnum = "System" }));
+        var roleId = role.GetProperty("id").GetInt32();
+
+        var user = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/users", new
+        {
+            username = "admin.user." + suffix,
+            name = "Admin",
+            surname = "Test",
+            groupIds = new[] { groupId },
+            roleIds = new[] { roleId }
+        }));
+        var userId = user.GetProperty("id").GetInt32();
+        Assert.Equal(1, user.GetProperty("groups").GetArrayLength());
+        Assert.Equal(1, user.GetProperty("roles").GetArrayLength());
+
+        var updated = await SendAsync(admin, HttpMethod.Put, $"/api/users/{userId}", new
+        {
+            username = "admin.user." + suffix,
+            name = "Admin",
+            surname = "Test",
+            groupIds = new[] { groupId },
+            roleIds = Array.Empty<int>()
+        });
+        Assert.Equal(HttpStatusCode.NoContent, updated.StatusCode);
+        var reloaded = await ReadAsync(await admin.GetAsync($"/api/users/{userId}"));
+        Assert.Equal(0, reloaded.GetProperty("roles").GetArrayLength());
+
+        var builtInUpdate = await SendAsync(admin, HttpMethod.Put, "/api/roles/3", new
+        {
+            name = "Renamed",
+            label = "Renamed",
+            scopeEnum = "System"
+        });
+        Assert.Equal(HttpStatusCode.Conflict, builtInUpdate.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await SendAsync(admin, HttpMethod.Delete, "/api/roles/3")).StatusCode);
+
+        var parent = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/menus", new
+        {
+            name = "Menu " + suffix,
+            path = "/menu-" + suffix,
+            isActive = true,
+            hideBackButton = false,
+            isVisible = true,
+            order = 1,
+            parentId = (int?)null,
+            roleIds = new[] { 3 }
+        }));
+        var parentId = parent.GetProperty("id").GetInt32();
+        var child = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/menus", new
+        {
+            name = "Figlio " + suffix,
+            path = "/menu-" + suffix + "/figlio",
+            isActive = true,
+            hideBackButton = false,
+            isVisible = true,
+            order = 1,
+            parentId,
+            roleIds = new[] { 3 }
+        }));
+        var childId = child.GetProperty("id").GetInt32();
+
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await SendAsync(admin, HttpMethod.Delete, $"/api/menus/{parentId}")).StatusCode);
+        var allMenus = await ReadAsync(await admin.GetAsync("/api/menus/all"));
+        Assert.Contains(allMenus.EnumerateArray(), item => item.GetProperty("id").GetInt32() == childId);
+
+        var moved = await SendAsync(admin, HttpMethod.Put, $"/api/menus/{childId}", new
+        {
+            name = "Figlio aggiornato " + suffix,
+            path = "/menu-" + suffix + "/figlio",
+            isActive = true,
+            hideBackButton = false,
+            isVisible = true,
+            order = 2,
+            parentId,
+            roleIds = new[] { 3 }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, moved.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await SendAsync(admin, HttpMethod.Delete, $"/api/menus/{childId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await SendAsync(admin, HttpMethod.Delete, $"/api/menus/{parentId}")).StatusCode);
+
+        var seeded = await SeedEnvironmentAsync(suffix);
+        int operatorRoleId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            operatorRoleId = (await db.Roles.SingleAsync(x => x.Name == "ServerOperator")).Id;
+        }
+        var assignment = await ReadAsync(await SendAsync(admin, HttpMethod.Post,
+            "/api/provider-environment-group-roles", new
+            {
+                providerEnvironmentId = seeded.ProviderEnvironmentId,
+                groupId,
+                roleId = operatorRoleId
+            }));
+        var assignmentId = assignment.GetProperty("id").GetInt32();
+        var assignments = await ReadAsync(await admin.GetAsync(
+            $"/api/provider-environment-group-roles?providerEnvironmentId={seeded.ProviderEnvironmentId}"));
+        Assert.Equal(1, assignments.GetProperty("total").GetInt32());
+
+        int viewerId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            viewerId = (await db.Users.SingleAsync(x => x.Username == "admin.viewer")).Id;
+        }
+        var viewerUser = await ReadAsync(await admin.GetAsync($"/api/users/{viewerId}"));
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await SendAsync(admin, HttpMethod.Put, $"/api/users/{viewerId}", new
+            {
+                username = viewerUser.GetProperty("username").GetString(),
+                name = viewerUser.GetProperty("name").GetString(),
+                surname = viewerUser.GetProperty("surname").GetString(),
+                groupIds = new[] { groupId },
+                roleIds = Array.Empty<int>()
+            })).StatusCode);
+
+        var operatorMenu = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/menus", new
+        {
+            name = "Menu operator " + suffix,
+            path = "/menu-operator-" + suffix,
+            isActive = true,
+            hideBackButton = true,
+            isVisible = true,
+            order = 2,
+            parentId = (int?)null,
+            roleIds = new[] { operatorRoleId }
+        }));
+        var viewerMenus = await ReadAsync(await viewer.GetAsync("/api/menus"));
+        Assert.Contains(viewerMenus.EnumerateArray(),
+            item => item.GetProperty("name").GetString() == "Menu operator " + suffix);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await SendAsync(admin, HttpMethod.Delete,
+                $"/api/menus/{operatorMenu.GetProperty("id").GetInt32()}")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await SendAsync(admin, HttpMethod.Delete,
+                $"/api/provider-environment-group-roles/{assignmentId}")).StatusCode);
+
+        int ownId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            ownId = (await db.Users.SingleAsync(x => x.Username == "admin.identity")).Id;
+        }
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await SendAsync(admin, HttpMethod.Delete, $"/api/users/{ownId}")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await SendAsync(admin, HttpMethod.Delete, $"/api/users/{userId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await SendAsync(admin, HttpMethod.Delete, $"/api/roles/{roleId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await SendAsync(admin, HttpMethod.Delete, $"/api/groups/{groupId}")).StatusCode);
+    }
+
+    [Fact]
     public async Task Legacy_dry_run_maps_reference_and_catalog_fixture()
     {
         using var admin = await ClientForAsync("dryrun.admin", systemAdmin: true);

@@ -13,7 +13,7 @@ public sealed record MenuDto(
     bool IsVisible,
     int? Order,
     int? ParentId,
-    List<MenuDto> Childrens);
+    List<MenuDto> Children);
 
 public sealed class MenuService(InfraOrgItDbContext db)
 {

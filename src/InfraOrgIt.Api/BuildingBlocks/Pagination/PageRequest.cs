@@ -10,8 +10,8 @@ public sealed record PageRequest(int Page, int PageSize, string? Sort, string? Q
         return new PageRequest(
             ParseInt(query["page"], 1, 1, 100_000),
             ParseInt(query["pageSize"], 50, 1, 200),
-            Text(query["q"]),
-            Text(query["sort"]));
+            Text(query["sort"]),
+            Text(query["q"]));
     }
 
     public static int? IntQuery(HttpContext http, string name)
