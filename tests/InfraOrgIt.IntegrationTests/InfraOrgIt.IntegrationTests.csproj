@@ -22,10 +22,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\InfraOrgIt.Api\InfraOrgIt.Api.csproj" />
+    <ProjectReference Include="..\..\tools\LegacyImport\LegacyImport.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <None Update="Legacy/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\tools\LegacyImport\fixtures\rehearsal.json"
+          Link="Legacy/Fixtures/import-rehearsal.json"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

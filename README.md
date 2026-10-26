@@ -4,7 +4,7 @@ Backend di InfraOrgIT: API .NET 10, Minimal APIs, EF Core 10, MySQL LTS, Keycloa
 
 ## Stato
 
-Fase 6 — admin e RBAC — 2026-10-26. Implementati identity, BFF Keycloak, inventario, topologia/diagrammi, gestione remota e admin: CRUD utenti/gruppi/ruoli/menu, assegnazioni per ambiente, protezioni su self-delete/ultimo SystemAdmin/ruoli di sistema. RBAC D7 = B; 12 test unitari e 23 di integrazione (incluso SSH reale su container). Dettagli in `../AllInfraOrgIT/docs/domain/admin-rbac.md`.
+Fase 7 in corso — 2026-10-26. Backend completo fino a Fase 6 (identity, inventario, topologia/diagrammi, gestione remota, admin/RBAC) e importer `tools/LegacyImport`: dry-run/apply su JSON legacy-shaped, ID preservati, due fasi per i cicli FK, credenziali ricifrate o `NeedsReauth`, audit redatto, report JSON. Test: 12 unitari e 25 di integrazione (SSH reale incluso). Dettagli in `tools/LegacyImport/README.md` e `../AllInfraOrgIT/docs/migration/phase7-plan.md`.
 
 ## Stack
 
@@ -21,6 +21,7 @@ src/InfraOrgIt.Api/
   BuildingBlocks/{Auth, Authorization, Errors, Pagination, Validation}
   Features/{Auth, Session, Menus, ServerAccess, Users, Inventory, Catalog, Topology, Remote, Admin}
   Infrastructure/Ssh
+tools/LegacyImport/
   Infrastructure/Persistence/{Entities, Migrations}
   Program.cs
 tests/InfraOrgIt.UnitTests/

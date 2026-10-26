@@ -1,0 +1,154 @@
+{
+  "Environments": [
+    { "Id": 8001, "Name": "ENV-IMPORT", "Description": "Ambiente import" }
+  ],
+  "Providers": [
+    { "Id": 8101, "Name": "Provider Import" }
+  ],
+  "ProviderEnvironments": [
+    { "Id": 8201, "ProviderId": 8101, "EnvironmentId": 8001 }
+  ],
+  "Applications": [
+    { "Id": 8301, "Name": "App Import", "Description": "App import", "BasePath": "/import", "ListeningOnPort": 8080 }
+  ],
+  "ApplicationVersions": [
+    { "Id": 8401, "ApplicationId": 8301, "VersionNumber": "9.0.0" }
+  ],
+  "ApplicationVersionApis": [
+    { "Id": 8501, "ApplicationVersionId": 8401, "Url": "/health", "RequestTypeEnum": 0, "Description": "Health", "Body": null }
+  ],
+  "ApplicationApiQueryParams": [
+    { "Id": 8601, "ApplicationApiId": 8501, "Name": "verbose", "ParamType": 2 }
+  ],
+  "Projects": [
+    { "Id": 8701, "Name": "Project Import", "Description": "Progetto import" }
+  ],
+  "ApplicationProject": [
+    { "ApplicationsId": 8301, "ProjectsId": 8701 }
+  ],
+  "ServerCredentials": [
+    {
+      "Id": 9401,
+      "Name": "Import credential",
+      "Username": "root",
+      "AuthType": "Password",
+      "EncryptedSecret": "",
+      "EncryptedPassphrase": null
+    }
+  ],
+  "Servers": [
+    {
+      "Id": 8801,
+      "ProviderEnvironmentId": 8201,
+      "Name": "Import Server 1",
+      "IpAddress": "10.90.0.1",
+      "Hostname": "import-1.local",
+      "CredentialId": 9401,
+      "SshPort": 22,
+      "HostKeyFingerprint": null
+    },
+    {
+      "Id": 8802,
+      "ProviderEnvironmentId": 8201,
+      "Name": "Import Server 2",
+      "IpAddress": "10.90.0.2",
+      "Hostname": "import-2.local",
+      "CredentialId": null,
+      "SshPort": 22,
+      "HostKeyFingerprint": null
+    }
+  ],
+  "ProxyConnections": [
+    {
+      "Id": 9000,
+      "SourceServerId": 8801,
+      "TargetServerId": 8802,
+      "Direction": "Outgoing",
+      "CreatedAt": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "ServerApplications": [
+    {
+      "Id": 8901,
+      "ServerId": 8801,
+      "ApplicationVersionId": 8401,
+      "ExposedPort": 8080,
+      "ProxyRouteId": 9001
+    }
+  ],
+  "ProxyRoutes": [
+    {
+      "Id": 9001,
+      "ProxyConnectionId": 9000,
+      "Route": "/api",
+      "MappedTo": "/mapped",
+      "TargetServerApplicationId": 8901,
+      "TargetProxyConnectionId": null
+    }
+  ],
+  "CommandTemplates": [
+    {
+      "Id": 9201,
+      "Name": "Import template",
+      "Description": "",
+      "Script": "echo {{ServerName}}"
+    }
+  ],
+  "ApplicationActions": [
+    {
+      "Id": 9301,
+      "ApplicationId": 8301,
+      "Label": "Echo",
+      "Order": 1,
+      "CommandTemplateId": 9201,
+      "CustomScript": null,
+      "ParameterValues": "{}",
+      "RequiresConfirmation": false
+    }
+  ],
+  "Diagrams": [
+    {
+      "Id": 9101,
+      "Name": "Import Diagram",
+      "Description": "Diagramma import",
+      "IsDefault": false,
+      "CreatedAt": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "DiagramScopeItems": [
+    { "Id": 9102, "DiagramId": 9101, "ScopeType": "Provider", "EntityId": 8101 }
+  ],
+  "DiagramNodes": [
+    { "Id": 9103, "DiagramId": 9101, "NodeType": "Provider", "EntityId": 8101, "X": 0, "Y": 0, "Width": null, "Height": null, "Collapsed": false },
+    { "Id": 9104, "DiagramId": 9101, "NodeType": "Server", "EntityId": 8801, "X": 300, "Y": 0, "Width": 190, "Height": 80, "Collapsed": false },
+    { "Id": 9105, "DiagramId": 9101, "NodeType": "ServerApplication", "EntityId": 8901, "X": 600, "Y": 0, "Width": 190, "Height": 80, "Collapsed": false }
+  ],
+  "DiagramEdges": [
+    {
+      "Id": 9106,
+      "DiagramId": 9101,
+      "ProxyConnectionId": 9000,
+      "TargetNodeType": "ServerApplication",
+      "TargetEntityId": 8901,
+      "SourceHandle": "s-left",
+      "TargetHandle": "t-top",
+      "BendX": 10,
+      "BendY": -5
+    }
+  ],
+  "CommandExecutions": [
+    {
+      "Id": 9501,
+      "Username": "legacy",
+      "ServerId": 8801,
+      "ServerName": "Import Server 1",
+      "Kind": "Action",
+      "Label": "Legacy action",
+      "Script": "echo secret",
+      "ExitCode": 0,
+      "Output": "secret",
+      "StartedAt": "2026-01-01T00:00:00Z",
+      "EndedAt": "2026-01-01T00:00:01Z"
+    }
+  ]
+}

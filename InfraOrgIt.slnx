@@ -6,4 +6,7 @@
     <Project Path="tests/InfraOrgIt.IntegrationTests/InfraOrgIt.IntegrationTests.csproj" />
     <Project Path="tests/InfraOrgIt.UnitTests/InfraOrgIt.UnitTests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/LegacyImport/LegacyImport.csproj" />
+  </Folder>
 </Solution>
