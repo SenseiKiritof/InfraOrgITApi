@@ -37,7 +37,9 @@ public static class ServerCredentialsEndpoints
         var page = PageRequest.From(http);
         var query = db.ServerCredentials.AsNoTracking();
         if (page.Q is not null)
-            query = query.Where(x => x.Name.Contains(page.Q) || x.Username.Contains(page.Q));
+            query = query.Where(x => x.Name.Contains(page.Q) ||
+                                     x.Username.Contains(page.Q) ||
+                                     x.AuthType.Contains(page.Q));
 
         var total = await query.CountAsync(ct);
         var items = await query

@@ -35,7 +35,9 @@ public static class RolesEndpoints
         if (!string.IsNullOrWhiteSpace(scope))
             query = query.Where(x => x.ScopeEnum == scope);
         if (page.Q is not null)
-            query = query.Where(x => x.Name.Contains(page.Q) || x.Label.Contains(page.Q));
+            query = query.Where(x => x.Name.Contains(page.Q) ||
+                                     x.Label.Contains(page.Q) ||
+                                     x.ScopeEnum.Contains(page.Q));
 
         var total = await query.CountAsync(ct);
         var items = await query

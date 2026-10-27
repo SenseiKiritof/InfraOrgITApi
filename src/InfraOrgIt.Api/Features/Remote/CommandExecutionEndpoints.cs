@@ -29,6 +29,7 @@ public static class CommandExecutionEndpoints
             if (page.Q is not null)
                 query = query.Where(x => x.Username.Contains(page.Q) ||
                                          x.ServerName.Contains(page.Q) ||
+                                         x.Kind.Contains(page.Q) ||
                                          x.Label.Contains(page.Q));
 
             query = page.Sort switch

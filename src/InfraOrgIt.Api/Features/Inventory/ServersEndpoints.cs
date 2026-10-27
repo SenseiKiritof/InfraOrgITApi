@@ -40,7 +40,11 @@ public static class ServersEndpoints
         if (page.Q is not null)
             query = query.Where(x => x.Name.Contains(page.Q) ||
                                      x.IpAddress.Contains(page.Q) ||
-                                     x.Hostname.Contains(page.Q));
+                                     x.Hostname.Contains(page.Q) ||
+                                     x.ProviderEnvironment!.Provider!.Name.Contains(page.Q) ||
+                                     x.ProviderEnvironment!.EnvironmentDefinition!.Name.Contains(page.Q) ||
+                                     (x.Credential != null && x.Credential.Name.Contains(page.Q)) ||
+                                     (x.JumpServer != null && x.JumpServer.Name.Contains(page.Q)));
 
         query = page.Sort switch
         {
