@@ -574,6 +574,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         Assert.Equal(firstId, detail.GetProperty("jumpServerId").GetInt32());
         Assert.Equal("jump-a-" + suffix,
             detail.GetProperty("jumpServerName").GetString());
+        Assert.Equal("10.0.0.1",
+            detail.GetProperty("jumpServerIpAddress").GetString());
 
         var self = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{firstId}", new
         {

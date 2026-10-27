@@ -293,6 +293,7 @@ public static class ServersEndpoints
         x.HostKeyFingerprint != null,
         x.JumpServerId,
         x.JumpServer != null ? x.JumpServer.Name : null,
+        x.JumpServer != null ? x.JumpServer.IpAddress : null,
         x.CreatedAt,
         x.UpdatedAt,
         x.Version);
@@ -321,6 +322,7 @@ public sealed record ServerDto(
     bool HasHostKey,
     int? JumpServerId,
     string? JumpServerName,
+    string? JumpServerIpAddress,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     int Version);
