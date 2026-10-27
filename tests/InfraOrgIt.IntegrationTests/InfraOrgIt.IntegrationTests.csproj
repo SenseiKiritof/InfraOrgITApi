@@ -30,9 +30,7 @@
     <None Include="..\..\tools\LegacyImport\fixtures\rehearsal.json"
           Link="Legacy/Fixtures/import-rehearsal.json"
           CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\..\infraorgit-docker\legacy\*.sql"
-          Link="Legacy/Sql\%(Filename)%(Extension)"
-          CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Legacy/Sql/*.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
