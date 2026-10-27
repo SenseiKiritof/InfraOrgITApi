@@ -11,8 +11,11 @@ public sealed class Server : EntityBase
     public int? CredentialId { get; set; }
     public string? HostKeyFingerprint { get; set; }
 
+    public int? JumpServerId { get; set; }
+
     public ProviderEnvironment? ProviderEnvironment { get; set; }
     public ServerCredential? Credential { get; set; }
+    public Server? JumpServer { get; set; }
     public List<ServerApplication> ServerApplications { get; set; } = [];
     public List<ReachabilityTest> ReachabilityTests { get; set; } = [];
 }

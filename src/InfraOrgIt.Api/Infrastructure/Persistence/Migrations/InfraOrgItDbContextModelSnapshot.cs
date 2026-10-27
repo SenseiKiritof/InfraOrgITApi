@@ -1349,6 +1349,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)");
 
+                    b.Property<int?>("JumpServerId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -1372,6 +1375,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CredentialId");
+
+                    b.HasIndex("JumpServerId");
 
                     b.HasIndex("ProviderEnvironmentId");
 
@@ -1819,6 +1824,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CredentialId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", "JumpServer")
+                        .WithMany()
+                        .HasForeignKey("JumpServerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProviderEnvironment", "ProviderEnvironment")
                         .WithMany("Servers")
                         .HasForeignKey("ProviderEnvironmentId")
@@ -1826,6 +1836,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Credential");
+
+                    b.Navigation("JumpServer");
 
                     b.Navigation("ProviderEnvironment");
                 });

@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
+using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Renci.SshNet;
 using Renci.SshNet.Common;
@@ -12,11 +14,81 @@ namespace InfraOrgIt.Api.Infrastructure.Ssh;
 public sealed class SshConnector(
     CredentialCipher cipher,
     IOptions<ServerAccessOptions> options,
+    InfraOrgItDbContext db,
     ILogger<SshConnector> logger) : ISshConnector
 {
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
 
-    public async Task<ISshSession> ConnectAsync(Server server, CancellationToken ct)
+    public Task<ISshSession> ConnectAsync(Server server, CancellationToken ct) =>
+        ConnectInternalAsync(server, new HashSet<int>(), ct);
+
+    private async Task<ISshSession> ConnectInternalAsync(
+        Server server,
+        HashSet<int> visited,
+        CancellationToken ct)
+    {
+        if (!visited.Add(server.Id))
+            throw new ApiException(
+                StatusCodes.Status422UnprocessableEntity,
+                "jump_cycle",
+                "La catena dei server proxy è ciclica.");
+
+        var host = string.IsNullOrWhiteSpace(server.IpAddress)
+            ? server.Hostname
+            : server.IpAddress;
+
+        if (server.JumpServerId is not int jumpId)
+            return new SshSession(
+                await ConnectClientAsync(server, host, server.SshPort, ct),
+                options.Value.MaxOutputBytes);
+
+        var jump = await db.Servers.AsNoTracking()
+                       .Include(x => x.Credential)
+                       .SingleOrDefaultAsync(x => x.Id == jumpId, ct)
+                   ?? throw new ApiException(
+                       StatusCodes.Status422UnprocessableEntity,
+                       "jump_missing",
+                       $"Il server proxy {jumpId} non esiste più.");
+
+        var jumpSession = await ConnectInternalAsync(jump, visited, ct);
+        if (jumpSession is not SshSession tunnelHost)
+        {
+            await jumpSession.DisposeAsync();
+            throw new ApiException(
+                StatusCodes.Status422UnprocessableEntity,
+                "jump_unsupported",
+                "Il server proxy non può essere usato come tunnel.");
+        }
+
+        var forwarded = new ForwardedPortLocal(
+            "127.0.0.1", host, (uint)server.SshPort);
+        try
+        {
+            tunnelHost.Client.AddForwardedPort(forwarded);
+            forwarded.Start();
+
+            var client = await ConnectClientAsync(
+                server, "127.0.0.1", (int)forwarded.BoundPort, ct);
+
+            return new SshSession(
+                client,
+                options.Value.MaxOutputBytes,
+                forwarded,
+                jumpSession);
+        }
+        catch
+        {
+            forwarded.Dispose();
+            await jumpSession.DisposeAsync();
+            throw;
+        }
+    }
+
+    private async Task<SshClient> ConnectClientAsync(
+        Server server,
+        string host,
+        int port,
+        CancellationToken ct)
     {
         var credential = server.Credential
                          ?? throw new ApiException(
@@ -25,8 +97,7 @@ public sealed class SshConnector(
                              $"Il server {server.Name} non ha una credenziale SSH.");
 
         var auth = BuildAuthentication(credential);
-        var host = string.IsNullOrWhiteSpace(server.IpAddress) ? server.Hostname : server.IpAddress;
-        var connection = new Renci.SshNet.ConnectionInfo(host, server.SshPort, credential.Username, auth)
+        var connection = new Renci.SshNet.ConnectionInfo(host, port, credential.Username, auth)
         {
             Timeout = ConnectTimeout
         };
@@ -68,7 +139,7 @@ public sealed class SshConnector(
         }
 
         server.HostKeyFingerprint ??= received;
-        return new SshSession(client, options.Value.MaxOutputBytes);
+        return client;
     }
 
     private AuthenticationMethod BuildAuthentication(ServerCredential credential)
@@ -120,8 +191,14 @@ public sealed class SshConnector(
         }
     }
 
-    private sealed class SshSession(SshClient client, int maxOutputBytes) : ISshSession
+    private sealed class SshSession(
+        SshClient client,
+        int maxOutputBytes,
+        ForwardedPortLocal? forwarded = null,
+        ISshSession? jumpSession = null) : ISshSession
     {
+        public SshClient Client => client;
+
         public async Task<SshCommandResult> RunAsync(
             string script,
             TimeSpan timeout,
@@ -154,10 +231,12 @@ public sealed class SshConnector(
             return Task.FromResult<IShellSession>(new ShellSession(stream));
         }
 
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
             client.Dispose();
-            return ValueTask.CompletedTask;
+            forwarded?.Dispose();
+            if (jumpSession is not null)
+                await jumpSession.DisposeAsync();
         }
     }
 

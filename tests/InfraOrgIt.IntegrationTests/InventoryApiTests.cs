@@ -532,6 +532,76 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Server_jump_host_is_validated_and_exposed()
+    {
+        using var admin = await ClientForAsync("jump.admin", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
+            "jump.admin", "ServerAdmin");
+
+        var first = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/servers", new
+        {
+            providerEnvironmentId = seeded.ProviderEnvironmentId,
+            name = "jump-a-" + suffix,
+            ipAddress = "10.0.0.1",
+            hostname = "jump-a-" + suffix,
+            sshPort = 22
+        }));
+        var second = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/servers", new
+        {
+            providerEnvironmentId = seeded.ProviderEnvironmentId,
+            name = "target-" + suffix,
+            ipAddress = "10.0.0.2",
+            hostname = "target-" + suffix,
+            sshPort = 22
+        }));
+        var firstId = first.GetProperty("id").GetInt32();
+        var secondId = second.GetProperty("id").GetInt32();
+
+        var update = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{secondId}", new
+        {
+            providerEnvironmentId = seeded.ProviderEnvironmentId,
+            name = "target-" + suffix,
+            ipAddress = "10.0.0.2",
+            hostname = "target-" + suffix,
+            sshPort = 22,
+            jumpServerId = firstId
+        });
+        Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
+
+        var detail = await ReadAsync(await admin.GetAsync($"/api/servers/{secondId}"));
+        Assert.Equal(firstId, detail.GetProperty("jumpServerId").GetInt32());
+        Assert.Equal("jump-a-" + suffix,
+            detail.GetProperty("jumpServerName").GetString());
+
+        var self = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{firstId}", new
+        {
+            providerEnvironmentId = seeded.ProviderEnvironmentId,
+            name = "jump-a-" + suffix,
+            ipAddress = "10.0.0.1",
+            hostname = "jump-a-" + suffix,
+            sshPort = 22,
+            jumpServerId = firstId
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, self.StatusCode);
+
+        var cycle = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{firstId}", new
+        {
+            providerEnvironmentId = seeded.ProviderEnvironmentId,
+            name = "jump-a-" + suffix,
+            ipAddress = "10.0.0.1",
+            hostname = "jump-a-" + suffix,
+            sshPort = 22,
+            jumpServerId = secondId
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, cycle.StatusCode);
+
+        var blocked = await SendAsync(admin, HttpMethod.Delete, $"/api/servers/{firstId}");
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+    }
+
+    [Fact]
     public async Task Console_session_resumes_after_socket_close()
     {
         using var admin = await ClientForAsync("console.resume", systemAdmin: true);

@@ -83,10 +83,12 @@ public static class ServersEndpoints
             Name = Guard.Text(input.Name, "Name", 200),
             IpAddress = Guard.Text(input.IpAddress, "IpAddress", 200),
             Hostname = Guard.Text(input.Hostname, "Hostname", 200),
-            SshPort = input.SshPort == 0 ? 22 : Guard.Port(input.SshPort, "SshPort")
+            SshPort = input.SshPort == 0 ? 22 : Guard.Port(input.SshPort, "SshPort"),
+            JumpServerId = input.JumpServerId
         };
 
         await EnsureEnvironmentAsync(db, entity.ProviderEnvironmentId, ct);
+        await EnsureJumpServerAsync(db, input.JumpServerId, null, ct);
         db.Servers.Add(entity);
         await db.SaveChangesAsync(ct);
 
@@ -106,12 +108,14 @@ public static class ServersEndpoints
 
         await EnsureCanWriteAsync(entity, input, user, access, ct);
         await EnsureEnvironmentAsync(db, input.ProviderEnvironmentId, ct);
+        await EnsureJumpServerAsync(db, input.JumpServerId, entity.Id, ct);
 
         entity.ProviderEnvironmentId = input.ProviderEnvironmentId;
         entity.Name = Guard.Text(input.Name, "Name", 200);
         entity.IpAddress = Guard.Text(input.IpAddress, "IpAddress", 200);
         entity.Hostname = Guard.Text(input.Hostname, "Hostname", 200);
         entity.SshPort = input.SshPort == 0 ? 22 : Guard.Port(input.SshPort, "SshPort");
+        entity.JumpServerId = input.JumpServerId;
 
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
@@ -132,6 +136,10 @@ public static class ServersEndpoints
         var applications = await db.ServerApplications.CountAsync(x => x.ServerId == id, ct);
         if (applications > 0)
             throw Guard.Conflict($"Server con {applications} applicazioni deployate: rimuoverle prima.");
+
+        var dependents = await db.Servers.CountAsync(x => x.JumpServerId == id, ct);
+        if (dependents > 0)
+            throw Guard.Conflict($"Server usato come proxy da {dependents} server: rimuovere il collegamento prima.");
 
         db.Servers.Remove(entity);
         await db.SaveChangesAsync(ct);
@@ -233,6 +241,31 @@ public static class ServersEndpoints
             user, [entity.ProviderEnvironmentId, input.ProviderEnvironmentId], ct);
     }
 
+    private static async Task EnsureJumpServerAsync(
+        InfraOrgItDbContext db,
+        int? jumpServerId,
+        int? selfId,
+        CancellationToken ct)
+    {
+        var current = jumpServerId;
+        var seen = new HashSet<int>();
+
+        while (current is int id)
+        {
+            if (id == selfId || !seen.Add(id))
+                throw Guard.Unprocessable(
+                    "La catena dei server proxy è ciclica.");
+
+            var next = await db.Servers
+                .Where(x => x.Id == id)
+                .Select(x => new { x.JumpServerId })
+                .SingleOrDefaultAsync(ct)
+                ?? throw Guard.NotFound("Server proxy", id);
+
+            current = next.JumpServerId;
+        }
+    }
+
     private static async Task EnsureEnvironmentAsync(
         InfraOrgItDbContext db, int providerEnvironmentId, CancellationToken ct)
     {
@@ -258,6 +291,8 @@ public static class ServersEndpoints
         x.CredentialId,
         x.Credential != null ? x.Credential.Name : null,
         x.HostKeyFingerprint != null,
+        x.JumpServerId,
+        x.JumpServer != null ? x.JumpServer.Name : null,
         x.CreatedAt,
         x.UpdatedAt,
         x.Version);
@@ -268,7 +303,8 @@ public sealed record ServerInput(
     string? Name,
     string? IpAddress,
     string? Hostname,
-    int SshPort = 22);
+    int SshPort = 22,
+    int? JumpServerId = null);
 
 public sealed record ServerApplicationDeployInput(int ApplicationVersionId, int ExposedPort);
 
@@ -283,6 +319,8 @@ public sealed record ServerDto(
     int? CredentialId,
     string? CredentialName,
     bool HasHostKey,
+    int? JumpServerId,
+    string? JumpServerName,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     int Version);

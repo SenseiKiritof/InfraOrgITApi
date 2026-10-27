@@ -130,10 +130,13 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.SshPort).HasDefaultValue(22);
             e.HasIndex(x => x.ProviderEnvironmentId);
             e.HasIndex(x => x.CredentialId);
+            e.HasIndex(x => x.JumpServerId);
             e.HasOne(x => x.ProviderEnvironment).WithMany(x => x.Servers)
                 .HasForeignKey(x => x.ProviderEnvironmentId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Credential).WithMany(x => x.Servers)
                 .HasForeignKey(x => x.CredentialId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.JumpServer).WithMany()
+                .HasForeignKey(x => x.JumpServerId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ServerApplication>(e =>
