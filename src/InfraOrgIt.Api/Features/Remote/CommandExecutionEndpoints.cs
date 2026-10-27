@@ -34,8 +34,18 @@ public static class CommandExecutionEndpoints
 
             query = page.Sort switch
             {
-                "started" => query.OrderBy(x => x.StartedAt),
-                "-started" => query.OrderByDescending(x => x.StartedAt),
+                "startedAt" => query.OrderBy(x => x.StartedAt).ThenBy(x => x.Id),
+                "-startedAt" => query.OrderByDescending(x => x.StartedAt).ThenByDescending(x => x.Id),
+                "username" => query.OrderBy(x => x.Username).ThenBy(x => x.Id),
+                "-username" => query.OrderByDescending(x => x.Username).ThenByDescending(x => x.Id),
+                "serverName" => query.OrderBy(x => x.ServerName).ThenBy(x => x.Id),
+                "-serverName" => query.OrderByDescending(x => x.ServerName).ThenByDescending(x => x.Id),
+                "kind" => query.OrderBy(x => x.Kind).ThenBy(x => x.Id),
+                "-kind" => query.OrderByDescending(x => x.Kind).ThenByDescending(x => x.Id),
+                "label" => query.OrderBy(x => x.Label).ThenBy(x => x.Id),
+                "-label" => query.OrderByDescending(x => x.Label).ThenByDescending(x => x.Id),
+                "exitCode" => query.OrderBy(x => x.ExitCode).ThenBy(x => x.Id),
+                "-exitCode" => query.OrderByDescending(x => x.ExitCode).ThenByDescending(x => x.Id),
                 _ => query.OrderByDescending(x => x.StartedAt).ThenByDescending(x => x.Id)
             };
 
@@ -45,7 +55,7 @@ public static class CommandExecutionEndpoints
                 .Take(page.PageSize)
                 .Select(x => new CommandExecutionDto(
                     x.Id, x.Username, x.ServerId, x.ServerName, x.Kind, x.Label,
-                    x.Script, x.ExitCode, x.Output, x.StartedAt, x.EndedAt, x.IdempotencyKey))
+                    x.ExitCode, x.Output, x.StartedAt, x.EndedAt))
                 .ToListAsync(ct);
 
             return Results.Ok(new PagedResult<CommandExecutionDto>(
@@ -61,9 +71,7 @@ public sealed record CommandExecutionDto(
     string ServerName,
     string Kind,
     string Label,
-    string Script,
     int? ExitCode,
     string Output,
     DateTime StartedAt,
-    DateTime? EndedAt,
-    string? IdempotencyKey);
+    DateTime? EndedAt);

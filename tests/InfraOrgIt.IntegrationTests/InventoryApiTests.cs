@@ -467,7 +467,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
             .GetProperty("items");
         var audit = executions[0];
         Assert.Equal("Action", audit.GetProperty("kind").GetString());
-        Assert.DoesNotContain("secret-value", audit.GetProperty("script").GetString());
+        Assert.False(audit.TryGetProperty("script", out _));
         Assert.Contains("***", audit.GetProperty("output").GetString());
 
         var calls = _ssh.Scripts.Count;
@@ -493,6 +493,51 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         var deniedList = await SendAsync(admin, HttpMethod.Get, "/api/command-executions");
         Assert.Equal(HttpStatusCode.OK, deniedList.StatusCode);
+    }
+
+    [Fact]
+    public async Task Command_executions_page_and_sort_server_side()
+    {
+        using var admin = await ClientForAsync("exec.page", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var label = "Audit " + suffix;
+        var started = new DateTime(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            db.CommandExecutions.AddRange(
+                new CommandExecution
+                {
+                    Username = "carl", ServerName = "srv", Kind = "Console",
+                    Label = label, StartedAt = started.AddMinutes(2)
+                },
+                new CommandExecution
+                {
+                    Username = "alice", ServerName = "srv", Kind = "Console",
+                    Label = label, StartedAt = started.AddMinutes(1)
+                },
+                new CommandExecution
+                {
+                    Username = "bob", ServerName = "srv", Kind = "Console",
+                    Label = label, StartedAt = started
+                });
+            await db.SaveChangesAsync();
+        }
+
+        var first = await ReadAsync(await admin.GetAsync(
+            $"/api/command-executions?q=Audit%20{suffix}&pageSize=2&sort=username"));
+        Assert.Equal(3, first.GetProperty("total").GetInt32());
+        var firstItems = first.GetProperty("items");
+        Assert.Equal(2, firstItems.GetArrayLength());
+        Assert.Equal("alice", firstItems[0].GetProperty("username").GetString());
+        Assert.Equal("bob", firstItems[1].GetProperty("username").GetString());
+
+        var second = await ReadAsync(await admin.GetAsync(
+            $"/api/command-executions?q=Audit%20{suffix}&pageSize=2&page=2&sort=username"));
+        var secondItems = second.GetProperty("items");
+        Assert.Equal(1, secondItems.GetArrayLength());
+        Assert.Equal("carl", secondItems[0].GetProperty("username").GetString());
     }
 
     [Fact]
