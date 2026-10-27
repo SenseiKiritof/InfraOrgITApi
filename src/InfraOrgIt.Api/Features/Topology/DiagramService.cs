@@ -94,7 +94,10 @@ public sealed class DiagramService(
         EntityId = input.EntityId
     };
 
-    public async Task<DiagramGraphDto> GetGraphAsync(Diagram diagram, CancellationToken ct)
+    public async Task<DiagramGraphDto> GetGraphAsync(
+        Diagram diagram,
+        ClaimsPrincipal user,
+        CancellationToken ct)
     {
         var model = await topology.BuildAsync(ToFilter(diagram.ScopeItems), ct);
         var inScope = InScope(model);
@@ -111,7 +114,39 @@ public sealed class DiagramService(
                 .Where(x => inScope.HasEdge(x.ProxyConnectionId, x.TargetNodeType, x.TargetEntityId))
                 .OrderBy(x => x.Id)
                 .Select(ToDto)
-                .ToList());
+                .ToList(),
+            await CanWriteAsync(user, diagram, ct));
+    }
+
+    /// <summary>
+    /// Stessa regola di <see cref="RequireWriteAsync"/> ma senza eccezioni: il
+    /// client la usa per decidere se può salvare i nodi aggiunti automaticamente.
+    /// </summary>
+    public async Task<bool> CanWriteAsync(
+        ClaimsPrincipal user,
+        Diagram diagram,
+        CancellationToken ct)
+    {
+        var scopes = diagram.ScopeItems;
+        var special = scopes.Any(x =>
+            x.ScopeType is nameof(DiagramScopeType.Provider) or nameof(DiagramScopeType.Project));
+        if (diagram.IsDefault || special || scopes.Count == 0)
+            return user.IsInRole(EnvironmentAccessService.SystemAdminRole);
+
+        var environmentIds = scopes
+            .Where(x => x.ScopeType == nameof(DiagramScopeType.ProviderEnvironment))
+            .Select(x => x.EntityId)
+            .Distinct()
+            .ToList();
+        var providerEnvironmentIds = await db.ProviderEnvironments
+            .Where(x => environmentIds.Contains(x.EnvironmentDefinitionId))
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+        if (providerEnvironmentIds.Count == 0)
+            return false;
+
+        var granted = await access.GetAsync(user, ct);
+        return providerEnvironmentIds.All(id => granted.AdminEnvironmentIds.Contains(id));
     }
 
     public async Task ReplaceNodesAsync(
@@ -317,4 +352,5 @@ public sealed record DiagramGraphDto(
     DiagramDto Diagram,
     TopologyDto Topology,
     List<DiagramNodeDto> Nodes,
-    List<DiagramEdgeDto> Edges);
+    List<DiagramEdgeDto> Edges,
+    bool CanWrite);

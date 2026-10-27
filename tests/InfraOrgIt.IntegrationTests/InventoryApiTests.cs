@@ -1014,6 +1014,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NoContent, edges.StatusCode);
 
         var graph = await ReadAsync(await admin.GetAsync($"/api/diagrams/{diagramId}/graph"));
+        Assert.True(graph.GetProperty("canWrite").GetBoolean());
         Assert.Equal(2, graph.GetProperty("nodes").GetArrayLength());
         var savedEdge = graph.GetProperty("edges")[0];
         Assert.Equal(connectionId, savedEdge.GetProperty("proxyConnectionId").GetInt32());
@@ -1098,6 +1099,11 @@ public sealed class InventoryApiTests : IAsyncLifetime
             new { nodeType = "Server", entityId = seeded.ServerId, x = 1, y = 2, collapsed = false }
         });
         Assert.Equal(HttpStatusCode.NoContent, nodes.StatusCode);
+
+        var envGraph = await ReadAsync(await envAdmin.GetAsync($"/api/diagrams/{diagramId}/graph"));
+        Assert.True(envGraph.GetProperty("canWrite").GetBoolean());
+        var systemGraph = await ReadAsync(await admin.GetAsync($"/api/diagrams/{diagramId}/graph"));
+        Assert.False(systemGraph.GetProperty("canWrite").GetBoolean());
 
         var deniedProvider = await SendAsync(envAdmin, HttpMethod.Post, "/api/diagrams", new
         {

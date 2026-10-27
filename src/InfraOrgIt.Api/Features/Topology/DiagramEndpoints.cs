@@ -186,12 +186,13 @@ public static class DiagramEndpoints
 
     private static async Task<IResult> GetGraphAsync(
         int id,
+        ClaimsPrincipal user,
         DiagramService service,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
         var diagram = await LoadAsync(db, id, ct);
-        return Results.Ok(await service.GetGraphAsync(diagram, ct));
+        return Results.Ok(await service.GetGraphAsync(diagram, user, ct));
     }
 
     private static async Task<IResult> ReplaceNodesAsync(
