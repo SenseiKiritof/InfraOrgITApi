@@ -1,58 +1,58 @@
 # LegacyImport
 
-Importer standalone dalla sorgente legacy (MySQL legacy o JSON sanificato) al MySQL nuovo. Non dipende dall'API né dalle sue migration: il target deve avere lo schema già migrato (`make migrate`).
+Standalone importer from the legacy source (legacy MySQL or sanitized JSON) to the new MySQL database. It does not depend on the API or its migrations: the target must already have the migrated schema (`make migrate`).
 
-La sorgente MySQL si legge da `LEGACY_SOURCE_CONNECTION`; in alternativa `--input` legge una fixture JSON. Il dump fittizio per il rehearsal è nel Compose, profilo `legacy` (`make legacy-rehearsal`).
+The MySQL source is read from `LEGACY_SOURCE_CONNECTION`; alternatively `--input` reads a JSON fixture. The fake dump for the rehearsal lives in the Compose `legacy` profile (`make legacy-rehearsal`).
 
-## Comandi
+## Commands
 
 ```bash
-# dal meta repo
-make legacy-dry-run       # dry-run importer su fixture JSON
-make legacy-rehearsal     # dry-run contro il MySQL legacy fittizio in Docker
+# from the meta repo
+make legacy-dry-run       # importer dry-run on JSON fixtures
+make legacy-rehearsal     # dry-run against the fake legacy MySQL in Docker
 
-# dry-run con verifica delle collisioni sul target
+# dry-run with target collision checks
 LEGACY_IMPORT_CONNECTION='Server=localhost;Port=3306;Database=infraorgit;User ID=...;Password=...;' \
   make legacy-dry-run
 
-# sorgente MySQL legacy
+# legacy MySQL source
 LEGACY_SOURCE_CONNECTION='Server=localhost;Port=3308;Database=infraorgit_legacy;User ID=legacy;Password=dev-legacy-password;' \
   dotnet run --project tools/LegacyImport -- --report /tmp/import-report.json
 
-# apply su un target MySQL
+# apply to a MySQL target
 export LEGACY_IMPORT_CONNECTION='Server=localhost;Port=3306;Database=infraorgit;User ID=...;Password=...;'
 dotnet run --project tools/LegacyImport -- \
   --input tools/LegacyImport/fixtures/rehearsal.json \
   --report /tmp/import-report.json \
-  --apply          # senza chiavi aggiungi --allow-reauth
+  --apply          # without keys add --allow-reauth
 ```
 
-Segreti solo da variabili d'ambiente, mai da argomenti:
+Secrets only from environment variables, never from arguments:
 
 ```text
 LEGACY_SOURCE_CONNECTION=Server=localhost;Port=3308;Database=infraorgit_legacy;User ID=...;Password=...;
 LEGACY_IMPORT_CONNECTION=Server=localhost;Port=3306;Database=infraorgit;User ID=...;Password=...;
-LEGACY_IMPORT_OLD_KEY=<base64 32 byte della vecchia chiave ServerAccess>
-LEGACY_IMPORT_NEW_KEY=<base64 32 byte della nuova chiave>
+LEGACY_IMPORT_OLD_KEY=<32-byte base64 of the old ServerAccess key>
+LEGACY_IMPORT_NEW_KEY=<32-byte base64 of the new key>
 LEGACY_IMPORT_NEW_KEY_VERSION=1
 ```
 
-La vecchia chiave decifra `ServerCredentials`; la nuova ricifra con `LEGACY_IMPORT_NEW_KEY_VERSION` (default 1). Se una delle due manca o il record non è decifrabile, la credenziale viene importata con `NeedsReauth=true` e segreto vuoto. `--apply` rifiuta questo caso senza `--allow-reauth`; il dry-run lo segnala.
+The old key decrypts `ServerCredentials`; the new key re-encrypts them with `LEGACY_IMPORT_NEW_KEY_VERSION` (default 1). If either key is missing or the record cannot be decrypted, the credential is imported with `NeedsReauth=true` and an empty secret. `--apply` rejects that case unless `--allow-reauth` is given; the dry-run reports it.
 
-## Comportamento
+## Behavior
 
-- La fixture usa i nomi delle tabelle e delle colonne legacy. Il mapping verso le colonne nuove è in `ImportPlans.cs`.
-- Con `LEGACY_SOURCE_CONNECTION` l'adapter legge ogni tabella di `ImportPlans` con `SELECT *` e produce le stesse righe JSON della fixture; le tabelle assenti finiscono nei warning.
-- Gli ID sono preservati. Una riga già presente con lo stesso ID viene saltata solo se la chiave naturale coincide (`Name`, `Username`, `Path`, `SourceServerId`/`TargetServerId`, ecc.); altrimenti il report segnala la collisione e l'apply viene annullato.
-- L'apply usa una sola transazione: o importa tutto, o non scrive nulla. `RolledBack` e `Inserted=0` nel report indicano l'annullamento.
-- `Menus.ParentId` e `ServerApplications.ProxyRouteId` sono aggiornati dopo gli insert, nella stessa transazione, per evitare cicli FK. Gli orfani sono rifiutati dal preflight.
-- `CommandExecutions` viene redatto di default (`Script`/`Output` vuoti); `--no-redact-audit` per un import esplicito non redatto.
-- Il report JSON contiene conteggi per tabella, errori, warning, credenziali `NeedsReauth`, righe di audit redatte, `RolledBack` e la versione della nuova chiave.
-- Il dry-run senza `LEGACY_IMPORT_CONNECTION` verifica solo la fixture; con la connessione controlla anche le collisioni di ID e chiave naturale sul target, senza scrivere.
-- Le chiavi AES e la connection string non sono accettate come argomenti: finirebbero in `ps` e nella cronologia della shell.
+- The fixture uses the legacy table and column names. The mapping to the new columns is in `ImportPlans.cs`.
+- With `LEGACY_SOURCE_CONNECTION` the adapter reads every table in `ImportPlans` with `SELECT *` and produces the same JSON rows as the fixture; missing tables end up in the warnings.
+- IDs are preserved. An existing row with the same ID is skipped only when the natural key matches (`Name`, `Username`, `Path`, `SourceServerId`/`TargetServerId`, etc.); otherwise the report flags the collision and the apply is rolled back.
+- The apply uses a single transaction: it either imports everything or writes nothing. `RolledBack` and `Inserted=0` in the report mean it was rolled back.
+- `Menus.ParentId` and `ServerApplications.ProxyRouteId` are updated after the inserts, in the same transaction, to avoid FK cycles. Orphans are rejected by the preflight.
+- `CommandExecutions` is redacted by default (`Script`/`Output` empty); use `--no-redact-audit` for an explicit non-redacted import.
+- The JSON report contains per-table counts, errors, warnings, `NeedsReauth` credentials, redacted audit rows, `RolledBack` and the new key version.
+- A dry-run without `LEGACY_IMPORT_CONNECTION` checks the fixture only; with the connection it also checks ID and natural-key collisions on the target, without writing.
+- AES keys and the connection string are not accepted as arguments: they would show up in `ps` and the shell history.
 
-## Limiti
+## Limits
 
-- Il dump fittizio copre una macchina, un proxy, un servizio, un diagramma e un'esecuzione: valida l'adapter, non i dati rappresentativi. Il rehearsal su dump sanificato reale resta da fare.
-- Il preflight controlla FK e unique sulle tabelle presenti nella sorgente; le tabelle assenti sono elencate nei warning.
-- `--classes`, `--batch-size` e `--fresh` non sono ancora implementati.
+- The fake dump covers one machine, one proxy, one service, one diagram and one execution: it validates the adapter, not representative data. The rehearsal on a sanitized legacy export is still to do.
+- The preflight checks FKs and uniques on the tables present in the source; missing tables are listed in the warnings.
+- `--classes`, `--batch-size` and `--fresh` are not implemented yet.

@@ -1,20 +1,20 @@
 # InfraOrgITApi
 
-Backend di InfraOrgIT: API .NET 10, Minimal APIs, EF Core 10, MySQL LTS, Keycloak.
+InfraOrgIT backend: .NET 10 API, Minimal APIs, EF Core 10, MySQL LTS, Keycloak.
 
-## Stato
+## Status
 
-Fase 7 completata sul perimetro disponibile — 2026-10-26. Backend completo fino a Fase 6 (identity, inventario, topologia/diagrammi, gestione remota, admin/RBAC) e importer `tools/LegacyImport`: sorgente MySQL legacy (`LEGACY_SOURCE_CONNECTION`) o JSON legacy-shaped, dry-run/apply atomico, ID preservati con controllo di chiave naturale, collisioni bloccanti, due fasi per i cicli FK, credenziali ricifrate con chiave versionata (`NeedsReauth` solo con `--allow-reauth`), audit redatto, report JSON. Il dump legacy fittizio è nel Compose (`mysql-legacy`). Test: 16 unitari e 38 di integrazione (SSH reale incluso). Dettagli in `tools/LegacyImport/README.md` e `../AllInfraOrgIT/docs/migration/phase7-plan.md`.
+Phase 7 complete on the available scope — 2026-10-26. Backend complete through Phase 6 (identity, inventory, topology/diagrams, remote management, admin/RBAC) plus the `tools/LegacyImport` importer: legacy MySQL source (`LEGACY_SOURCE_CONNECTION`) or legacy-shaped JSON, atomic dry-run/apply, IDs preserved with natural key checking, blocking collisions, two phases for FK cycles, credentials re-encrypted with a versioned key (`NeedsReauth` only with `--allow-reauth`), redacted audit, JSON report. The fake legacy dump is in Compose (`mysql-legacy`). Tests: 16 unit and 38 integration (real SSH included). Details in `tools/LegacyImport/README.md` and `../AllInfraOrgIT/docs/migration/phase7-plan.md`.
 
 ## Stack
 
 - .NET 10 LTS, ASP.NET Core Minimal APIs
 - EF Core 10 + `MySql.EntityFrameworkCore` (Oracle) 10.0.x
-- MySQL LTS corrente (8.4)
-- Keycloak 26 OIDC, BFF con sessione server-side in memoria
+- Current MySQL LTS (8.4)
+- Keycloak 26 OIDC, BFF with server-side session in memory
 - xunit, Testcontainers MySQL, WebApplicationFactory
 
-## Struttura
+## Structure
 
 ```
 src/InfraOrgIt.Api/
@@ -28,70 +28,70 @@ tests/InfraOrgIt.UnitTests/
 tests/InfraOrgIt.IntegrationTests/
 ```
 
-## Comandi
+## Commands
 
 ```bash
 dotnet build -warnaserror
 dotnet test
 dotnet ef migrations add <Nome> --project src/InfraOrgIt.Api --startup-project src/InfraOrgIt.Api
-./scripts/openapi.sh   # rigenera openapi/InfraOrgIt.Api.json; la CI fallisce se è driftato
+./scripts/openapi.sh   # regenerates openapi/InfraOrgIt.Api.json; CI fails if it drifts
 ```
 
-Il contratto OpenAPI è generato dal codice in `openapi/InfraOrgIt.Api.json` (148 operazioni, 3.1.1); `docs/api/openapi.yaml` del meta repo resta il draft di dominio.
+The OpenAPI contract is generated from the code into `openapi/InfraOrgIt.Api.json` (148 operations, 3.1.1); the meta repo's `docs/api/openapi.yaml` remains the domain draft.
 
-Per avvio e migrazioni con l'infra Compose usare il meta repo:
+To start and migrate with the Compose infra, use the meta repo:
 
 ```bash
 cd ../AllInfraOrgIT
 make dev       # infra + API :5298 + Vite :3000
 make migrate
 make test
-make legacy-rehearsal  # dry-run importer contro il dump legacy fittizio
+make legacy-rehearsal  # dry-run importer against the fake legacy dump
 ```
 
-`dotnet ef` è nel manifest `.config/dotnet-tools.json` del meta repo; in alternativa `dotnet tool restore` dalla root del workspace.
+`dotnet ef` is in the meta repo's `.config/dotnet-tools.json` manifest; alternatively `dotnet tool restore` from the workspace root.
 
-## Configurazione locale
+## Local configuration
 
-- `appsettings.Development.json` contiene solo valori non segreti.
-- `Oidc:ClientSecret` e `ConnectionStrings:MySql` arrivano da env (`Oidc__ClientSecret`, `ConnectionStrings__MySql`) tramite `scripts/env.sh`.
-- `ServerAccess:CredentialKeys:<n>` (base64 di 32 byte) e `ServerAccess:CurrentKeyVersion` cifrano le credenziali SSH. In sviluppo `scripts/env.sh` genera la chiave nel `.env` ignorato; senza chiavi l'API non parte.
-- Bootstrap SystemAdmin: `Auth:BootstrapAdminUsername=admin` in Development; il primo login dell'utente Keycloak `admin` assegna il ruolo se non esiste già un SystemAdmin. In produzione la variabile resta vuota.
-- Sessioni in MySQL (`Sessions`) con payload cifrato via DataProtection, scadenza e limite per utente (`SessionStore:MaxSessionsPerUser`, default 10). Le chiavi DataProtection stanno nel volume `api-dp-keys` in produzione (`DataProtection:KeysPath`); in sviluppo si usa il profilo utente.
+- `appsettings.Development.json` contains non-secret values only.
+- `Oidc:ClientSecret` and `ConnectionStrings:MySql` come from env vars (`Oidc__ClientSecret`, `ConnectionStrings__MySql`) via `scripts/env.sh`.
+- `ServerAccess:CredentialKeys:<n>` (32-byte base64) and `ServerAccess:CurrentKeyVersion` encrypt the SSH credentials. In development `scripts/env.sh` generates the key in the ignored `.env`; without keys the API does not start.
+- SystemAdmin bootstrap: `Auth:BootstrapAdminUsername=admin` in Development; the first login of the Keycloak user `admin` assigns the role if a SystemAdmin does not exist yet. In production the variable stays empty.
+- Sessions in MySQL (`Sessions`) with payload encrypted via DataProtection, expiry and per-user limit (`SessionStore:MaxSessionsPerUser`, default 10). DataProtection keys live in the `api-dp-keys` volume in production (`DataProtection:KeysPath`); in development the user profile is used.
 
 ## Auth BFF
 
-- `GET /auth/login` → redirect Keycloak con PKCE S256.
-- `GET /auth/callback` → scambio codice, JIT provisioning utente, cookie di sessione HttpOnly.
-- `POST /auth/logout` → revoca Keycloak e cancella la sessione; richiede CSRF.
-- `GET /api/session` → utente, scadenza, CSRF token; rinnova il token lato server.
-- Mutazioni: header `X-CSRF-Token` + `Origin` ammessa; `SameSite=Lax`.
-- Nessun token è restituito al browser o leggibile da JavaScript.
+- `GET /auth/login` → Keycloak redirect with PKCE S256.
+- `GET /auth/callback` → code exchange, user JIT provisioning, HttpOnly session cookie.
+- `POST /auth/logout` → revokes Keycloak and deletes the session; requires CSRF.
+- `GET /api/session` → user, expiry, CSRF token; renews the token server-side.
+- Mutations: `X-CSRF-Token` header + allowed `Origin`; `SameSite=Lax`.
+- No token is returned to the browser or readable from JavaScript.
 
-## Sicurezza HTTP
+## HTTP security
 
-- Header su API e SPA: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, CSP e HSTS quando la richiesta arriva in HTTPS.
-- Forwarded headers accettati solo dalle reti in `ForwardedHeaders:KnownNetworks` (default loopback; il Compose passa le reti private Docker).
-- Rate limit: login 120/min per IP, callback 30/min per IP, azioni remote 30/min per utente, reachability 10/min per utente, console 5/min per utente.
-- Le mutazioni autenticate richiedono `Origin` tra `Frontend:AllowedOrigins` (o `Frontend:BaseUrl`); Origin mancante o diversa = 403 `origin_failed`.
+- Headers on API and SPA: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, CSP and HSTS when the request arrives over HTTPS.
+- Forwarded headers accepted only from the networks in `ForwardedHeaders:KnownNetworks` (default loopback; Compose passes the private Docker networks).
+- Rate limits: login 120/min per IP, callback 30/min per IP, remote actions 30/min per user, reachability 10/min per user, console 5/min per user.
+- Authenticated mutations require `Origin` among `Frontend:AllowedOrigins` (or `Frontend:BaseUrl`); missing or different Origin = 403 `origin_failed`.
 
-## Osservabilità
+## Observability
 
-- Fuori da Development i log sono JSON su console, con scope e `X-Correlation-ID` (header del client o `TraceIdentifier`); il correlation id compare anche nella risposta.
-- OpenTelemetry (tracce ASP.NET Core/HttpClient e metriche) si attiva solo impostando `OTEL_EXPORTER_OTLP_ENDPOINT`; nessun collector embedded.
-- `/health/live` controlla solo il processo; `/health/ready` controlla MySQL e la discovery Keycloak e risponde JSON con lo stato dei check.
-- In produzione i comandi SQL EF sono filtrati a `Warning`.
+- Outside Development logs are JSON on console, with scopes and `X-Correlation-ID` (client header or `TraceIdentifier`); the correlation id also appears in the response.
+- OpenTelemetry (ASP.NET Core/HttpClient traces and metrics) is enabled only by setting `OTEL_EXPORTER_OTLP_ENDPOINT`; no embedded collector.
+- `/health/live` checks the process only; `/health/ready` checks MySQL and Keycloak discovery and answers JSON with the check status.
+- In production EF SQL commands are filtered to `Warning`.
 
-## Riferimenti
+## References
 
 - `../AllInfraOrgIT/docs/security/permissions.md`
 - ADR 003, 005, 007, 008
 
-## Immagine Docker
+## Docker image
 
-Il `Dockerfile` costruisce un'immagine non-root su `aspnet:10.0`.
+The `Dockerfile` builds a non-root image on `aspnet:10.0`.
 
-- workflow `.github/workflows/docker.yml` sui tag `v*`
-- immagine `ghcr.io/senseikiritof/infraorgit-api`, tag `X.Y.Z`, `X.Y`, `sha-<commit>`, `latest`
-- build locale: `docker build --build-arg VERSION=v0.8.0 -t infraorgit-api:0.8.0 .`
-- versione: label `org.opencontainers.image.version`, env `APP_VERSION`, restituita da `GET /`
+- workflow `.github/workflows/docker.yml` on `v*` tags
+- image `ghcr.io/senseikiritof/infraorgit-api`, tags `X.Y.Z`, `X.Y`, `sha-<commit>`, `latest`
+- local build: `docker build --build-arg VERSION=v0.8.0 -t infraorgit-api:0.8.0 .`
+- version: `org.opencontainers.image.version` label, `APP_VERSION` env var, returned by `GET /`
