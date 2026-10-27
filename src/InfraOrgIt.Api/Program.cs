@@ -138,6 +138,7 @@ builder.Services.AddSingleton<LoginStateStore>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
+builder.Services.AddSingleton<ConsoleSessionRegistry>();
 builder.Services.AddScoped<TopologyService>();
 builder.Services.AddScoped<DiagramService>();
 builder.Services.AddHttpClient<OidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
@@ -280,12 +281,18 @@ app.Use(async (context, next) =>
 
     await next(context);
 });
+app.UseWebSockets();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseMiddleware<CsrfMiddleware>();
 app.UseAuthorization();
 
-app.MapGet("/", () => Results.Ok(new { name = "InfraOrgIT API", status = "ok" })).AllowAnonymous();
+app.MapGet("/", () => Results.Ok(new
+{
+    name = "InfraOrgIT API",
+    status = "ok",
+    version = Environment.GetEnvironmentVariable("APP_VERSION") ?? "dev"
+})).AllowAnonymous();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();

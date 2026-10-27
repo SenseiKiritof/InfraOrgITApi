@@ -10,4 +10,5 @@ public sealed class ServerAccessOptions
     public int MaxOutputBytes { get; set; } = 1_048_576;
     public int MaxAuditOutputBytes { get; set; } = 65_536;
     public int ConsoleMaxMinutes { get; set; } = 30;
+    public int ConsoleResumeMinutes { get; set; } = 10;
 }

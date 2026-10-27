@@ -332,6 +332,13 @@
               ],
               "format": "uint32"
             }
+          },
+          {
+            "name": "resume",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {

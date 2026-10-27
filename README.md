@@ -1,4 +1,4 @@
-# infraorgit
+# InfraOrgITApi
 
 Backend di InfraOrgIT: API .NET 10, Minimal APIs, EF Core 10, MySQL LTS, Keycloak.
 
@@ -84,6 +84,14 @@ make legacy-rehearsal  # dry-run importer contro il dump legacy fittizio
 
 ## Riferimenti
 
-- `../PLAN.md` §5.3, §5.5, §5.8
 - `../AllInfraOrgIT/docs/security/permissions.md`
 - ADR 003, 005, 007, 008
+
+## Immagine Docker
+
+Il `Dockerfile` costruisce un'immagine non-root su `aspnet:10.0`.
+
+- workflow `.github/workflows/docker.yml` sui tag `v*`
+- immagine `ghcr.io/senseikiritof/infraorgit-api`, tag `X.Y.Z`, `X.Y`, `sha-<commit>`, `latest`
+- build locale: `docker build --build-arg VERSION=v0.8.0 -t infraorgit-api:0.8.0 .`
+- versione: label `org.opencontainers.image.version`, env `APP_VERSION`, restituita da `GET /`

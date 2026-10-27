@@ -1,8 +1,8 @@
-# infraorgit — guida per agenti
+# InfraOrgITApi — guida per agenti
 
 `AGENTS.md` è un symlink a questo file, letto da opencode e dagli altri agenti: modifica solo `CLAUDE.md`.
 
-Leggi `../AGENTS.md` e `../PLAN.md`.
+Leggi `../AllInfraOrgIT/README.md` e `../AllInfraOrgIT/docs/backlog.md`.
 
 ## Regole repo
 

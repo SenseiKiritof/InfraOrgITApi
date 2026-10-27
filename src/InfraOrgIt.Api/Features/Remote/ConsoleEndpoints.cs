@@ -1,7 +1,6 @@
 using System.Net.WebSockets;
 using System.Security.Claims;
 using System.Text;
-using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Security;
@@ -27,12 +26,15 @@ public static class ConsoleEndpoints
         int id,
         uint? cols,
         uint? rows,
+        string? resume,
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         ISshConnector ssh,
+        ConsoleSessionRegistry sessions,
         IOptions<ServerAccessOptions> accessOptions,
         IOptions<FrontendOptions> frontend,
         InfraOrgItDbContext db,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         if (!http.WebSockets.IsWebSocketRequest)
@@ -50,121 +52,93 @@ public static class ConsoleEndpoints
                      ?? throw Guard.NotFound("Server", id);
         await access.RequireAdminAsync(user, [server.ProviderEnvironmentId], ct);
 
+        var username = user.Identity?.Name ?? "";
+        var console = string.IsNullOrWhiteSpace(resume)
+            ? null
+            : sessions.Find(resume, id, username);
+
         using var socket = await http.WebSockets.AcceptWebSocketAsync();
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromMinutes(accessOptions.Value.ConsoleMaxMinutes));
 
-        var startedAt = DateTime.UtcNow;
-        var execution = CommandAudit.Start(
-            db, user.Identity?.Name ?? "", server, "Console", "Console", "", startedAt);
-        db.CommandExecutions.Add(execution);
-        await db.SaveChangesAsync(ct);
+        if (console is null)
+        {
+            var execution = CommandAudit.Start(
+                db, username, server, "Console", "Console", "", DateTime.UtcNow);
+            db.CommandExecutions.Add(execution);
+            await db.SaveChangesAsync(ct);
 
-        string? error = null;
+            ISshSession? sshSession = null;
+            try
+            {
+                sshSession = await ssh.ConnectAsync(server, ct);
+                var shell = await sshSession.OpenShellAsync(
+                    Math.Clamp(cols ?? 80, 10, 500),
+                    Math.Clamp(rows ?? 24, 5, 200),
+                    ct);
+
+                console = sessions.Create(id, username, sshSession, shell, execution.Id);
+                sshSession = null; // la proprietà passa alla console
+            }
+            catch (Exception exception)
+            {
+                if (sshSession is not null)
+                    await sshSession.DisposeAsync();
+                CommandAudit.Complete(
+                    execution,
+                    new SshCommandResult(null, exception.Message),
+                    accessOptions.Value);
+                await db.SaveChangesAsync(CancellationToken.None);
+                await SendErrorAsync(socket, exception.Message);
+                return;
+            }
+        }
+
         try
         {
-            await using var session = await ssh.ConnectAsync(server, cts.Token);
-            await db.SaveChangesAsync(cts.Token);
-
-            await using var shell = await session.OpenShellAsync(
+            await console.AttachAsync(
+                socket,
                 Math.Clamp(cols ?? 80, 10, 500),
                 Math.Clamp(rows ?? 24, 5, 200),
-                cts.Token);
+                ct);
 
-            var completed = await Task.WhenAny(
-                PumpToBrowserAsync(shell, socket, cts.Token),
-                PumpFromBrowserAsync(shell, socket, cts.Token));
-            await cts.CancelAsync();
-            await completed;
+            var terminate = await console.RunBrowserAsync(socket, ct);
+            if (terminate)
+                await console.TerminateAsync("chiusa dall'utente");
+            else
+                await console.DetachAsync(socket);
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            error = "Sessione terminata per timeout.";
+            await console.DetachAsync(socket);
         }
         catch (Exception exception)
         {
-            error = exception.Message;
+            loggerFactory
+                .CreateLogger("ConsoleEndpoints")
+                .LogWarning(exception, "Console {SessionId} interrotta", console.Id);
+            await console.DetachAsync(socket);
         }
+    }
 
+    private static async Task SendErrorAsync(WebSocket socket, string error)
+    {
         try
         {
-            if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
-            {
-                if (error is not null)
-                    await socket.SendAsync(
-                        Encoding.UTF8.GetBytes($"\r\n[errore] {error}\r\n"),
-                        WebSocketMessageType.Binary, true, CancellationToken.None);
-                await socket.CloseOutputAsync(
-                    WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
-            }
+            if (socket.State is not (WebSocketState.Open or WebSocketState.CloseReceived))
+                return;
+
+            await socket.SendAsync(
+                Encoding.UTF8.GetBytes($"\r\n[errore] {error}\r\n"),
+                WebSocketMessageType.Binary,
+                true,
+                CancellationToken.None);
+            await socket.CloseOutputAsync(
+                WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
         }
-        catch (Exception exception) when (exception is WebSocketException or InvalidOperationException)
+        catch (Exception exception)
+            when (exception is WebSocketException or InvalidOperationException
+                      or ObjectDisposedException)
         {
             // browser già chiuso
-        }
-
-        CommandAudit.Complete(
-            execution,
-            new SshCommandResult(error is null ? 0 : null, error ?? ""),
-            accessOptions.Value);
-        await db.SaveChangesAsync(CancellationToken.None);
-    }
-
-    private static async Task PumpToBrowserAsync(
-        IShellSession shell,
-        WebSocket socket,
-        CancellationToken ct)
-    {
-        var buffer = new byte[4096];
-        while (true)
-        {
-            var read = await shell.Stream.ReadAsync(buffer, ct);
-            if (read <= 0)
-                return;
-            if (socket.State != WebSocketState.Open)
-                return;
-            await socket.SendAsync(buffer.AsMemory(0, read), WebSocketMessageType.Binary, true, ct);
-        }
-    }
-
-    private static async Task PumpFromBrowserAsync(
-        IShellSession shell,
-        WebSocket socket,
-        CancellationToken ct)
-    {
-        var buffer = new byte[16 * 1024];
-        while (true)
-        {
-            var message = await socket.ReceiveAsync(buffer.AsMemory(), ct);
-            if (message.MessageType == WebSocketMessageType.Close)
-                return;
-
-            if (message.MessageType == WebSocketMessageType.Binary)
-            {
-                await shell.Stream.WriteAsync(buffer.AsMemory(0, message.Count), ct);
-                await shell.Stream.FlushAsync(ct);
-            }
-            else if (message.EndOfMessage)
-            {
-                Resize(shell, buffer.AsSpan(0, message.Count));
-            }
-        }
-    }
-
-    private static void Resize(IShellSession shell, ReadOnlySpan<byte> json)
-    {
-        try
-        {
-            var root = JsonDocument.Parse(json.ToArray()).RootElement;
-            if (root.GetProperty("type").GetString() == "resize")
-                shell.Resize(
-                    Math.Clamp(root.GetProperty("cols").GetUInt32(), 10, 500),
-                    Math.Clamp(root.GetProperty("rows").GetUInt32(), 5, 200));
-        }
-        catch (Exception exception) when (exception is JsonException or KeyNotFoundException
-                                              or InvalidOperationException or FormatException)
-        {
-            // messaggio di controllo malformato: ignorato
         }
     }
 }

@@ -1,5 +1,8 @@
+using System.IO.Pipelines;
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.WebSockets;
+using System.Text;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Security;
@@ -526,6 +529,40 @@ public sealed class InventoryApiTests : IAsyncLifetime
             .GetProperty("items");
         Assert.Contains(executions.EnumerateArray(),
             item => item.GetProperty("kind").GetString() == "Reachability");
+    }
+
+    [Fact]
+    public async Task Console_session_resumes_after_socket_close()
+    {
+        using var admin = await ClientForAsync("console.resume", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
+            "console.resume", "ServerAdmin");
+
+        var cookie = admin.DefaultRequestHeaders.GetValues("Cookie").Single();
+
+        var first = await ConnectConsoleAsync(cookie, seeded.ServerId, null);
+        var sessionId = await ReadSessionIdAsync(first);
+
+        _ssh.Shells.Single().Emit("output-prima-del-refresh");
+        Assert.Contains("output-prima-del-refresh", await ReadBinaryAsync(first));
+
+        first.Abort();
+        await Task.Delay(300);
+
+        var second = await ConnectConsoleAsync(cookie, seeded.ServerId, sessionId);
+        Assert.Equal(sessionId, await ReadSessionIdAsync(second));
+        Assert.Contains("output-prima-del-refresh", await ReadBinaryAsync(second));
+
+        await second.SendAsync(
+            Encoding.UTF8.GetBytes("{\"type\":\"terminate\"}"),
+            WebSocketMessageType.Text, true, CancellationToken.None);
+        await Task.Delay(300);
+
+        var third = await ConnectConsoleAsync(cookie, seeded.ServerId, sessionId);
+        Assert.NotEqual(sessionId, await ReadSessionIdAsync(third));
+        third.Abort();
     }
 
     [Fact]
@@ -1145,10 +1182,54 @@ public sealed class InventoryApiTests : IAsyncLifetime
         int ProviderEnvironmentId,
         int ServerId);
 
+    private async Task<WebSocket> ConnectConsoleAsync(
+        string cookie, int serverId, string? resume)
+    {
+        var client = _factory.Server.CreateWebSocketClient();
+        client.ConfigureRequest = request =>
+        {
+            request.Headers["Cookie"] = cookie;
+            request.Headers["Origin"] = "http://localhost:3000";
+        };
+        var query = resume is null ? "" : $"?resume={Uri.EscapeDataString(resume)}";
+        return await client.ConnectAsync(
+            new Uri($"ws://localhost/api/socket/servers/{serverId}/console{query}"),
+            CancellationToken.None);
+    }
+
+    private static async Task<string> ReadSessionIdAsync(WebSocket socket)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var buffer = new byte[4096];
+        var result = await socket.ReceiveAsync(buffer, cts.Token);
+        Assert.Equal(WebSocketMessageType.Text, result.MessageType);
+        using var document = JsonDocument.Parse(buffer.AsMemory(0, result.Count));
+        return document.RootElement.GetProperty("id").GetString()!;
+    }
+
+    private static async Task<string> ReadBinaryAsync(WebSocket socket)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var buffer = new byte[64 * 1024];
+        var received = new List<byte>();
+        while (true)
+        {
+            var result = await socket.ReceiveAsync(buffer, cts.Token);
+            if (result.MessageType == WebSocketMessageType.Close)
+                break;
+            received.AddRange(buffer.AsSpan(0, result.Count).ToArray());
+            if (result.EndOfMessage)
+                break;
+        }
+
+        return Encoding.UTF8.GetString(received.ToArray());
+    }
+
     private sealed class FakeSsh : ISshConnector
     {
         public SshCommandResult Result { get; set; } = new(0, "");
         public List<string> Scripts { get; } = [];
+        public List<FakeShell> Shells { get; } = [];
 
         public Task<ISshSession> ConnectAsync(Server server, CancellationToken ct) =>
             Task.FromResult<ISshSession>(new FakeSession(this));
@@ -1163,11 +1244,73 @@ public sealed class InventoryApiTests : IAsyncLifetime
             }
 
             public Task<IShellSession> OpenShellAsync(
-                uint columns, uint rows, CancellationToken ct) =>
-                throw new NotSupportedException("Shell non usata nei test.");
+                uint columns, uint rows, CancellationToken ct)
+            {
+                var shell = new FakeShell();
+                owner.Shells.Add(shell);
+                return Task.FromResult<IShellSession>(shell);
+            }
 
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class FakeShell : IShellSession
+    {
+        private readonly Pipe _output = new();
+        private readonly Pipe _input = new();
+
+        public FakeShell()
+        {
+            Stream = new DuplexStream(_output.Reader.AsStream(), _input.Writer.AsStream());
+        }
+
+        public Stream Stream { get; }
+
+        public void Emit(string text) =>
+            _output.Writer.WriteAsync(Encoding.UTF8.GetBytes(text))
+                .AsTask().GetAwaiter().GetResult();
+
+        public void Resize(uint columns, uint rows)
+        {
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _output.Writer.CompleteAsync();
+            await _input.Writer.CompleteAsync();
+            await _output.Reader.CompleteAsync();
+            await _input.Reader.CompleteAsync();
+        }
+    }
+
+    private sealed class DuplexStream(Stream reader, Stream writer) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => writer.Flush();
+        public override Task FlushAsync(CancellationToken ct) => writer.FlushAsync(ct);
+        public override int Read(byte[] buffer, int offset, int count) =>
+            reader.Read(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken ct = default) =>
+            reader.ReadAsync(buffer, ct);
+        public override void Write(byte[] buffer, int offset, int count) =>
+            writer.Write(buffer, offset, count);
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer, CancellationToken ct = default) =>
+            writer.WriteAsync(buffer, ct);
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
     }
 
     private sealed record SeededCatalog(
