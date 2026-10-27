@@ -13,7 +13,8 @@ public sealed record ImportOptions(
     string? NewKey,
     bool RedactAudit,
     int NewKeyVersion = 1,
-    bool AllowReauth = false);
+    bool AllowReauth = false,
+    string? SourceConnection = null);
 
 public sealed record TableReport(string Table, int Read, int Inserted, int Skipped, int Failed);
 
@@ -105,8 +106,16 @@ public sealed class Importer
         Dictionary<string, List<JsonElement>> input;
         try
         {
-            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(options.InputPath, ct));
-            input = ReadInput(document.RootElement);
+            if (!string.IsNullOrWhiteSpace(options.SourceConnection))
+            {
+                input = await MySqlLegacySource.ReadAsync(options.SourceConnection, ct);
+            }
+            else
+            {
+                using var document = JsonDocument.Parse(
+                    await File.ReadAllTextAsync(options.InputPath, ct));
+                input = ReadInput(document.RootElement);
+            }
         }
         catch (Exception exception)
         {
@@ -157,6 +166,7 @@ public sealed class Importer
 
             var oldCipher = new LegacyCipher(options.OldKey);
             var newCipher = new LegacyCipher(options.NewKey);
+            var idMap = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
 
             try
             {
@@ -191,9 +201,24 @@ public sealed class Importer
                             continue;
                         }
 
+                        if (plan.KeyColumns is ["Id"])
+                        {
+                            var mapped = await FindByNaturalKeyAsync(
+                                connection, transaction, plan, row, idMap, ct);
+                            if (mapped is not null)
+                            {
+                                skipped++;
+                                Map(idMap, plan.Target, key, mapped);
+                                warnings.Add(
+                                    $"{plan.Legacy} {key}: riga target {mapped} con la stessa " +
+                                    "chiave naturale; ID legacy rimappato.");
+                                continue;
+                            }
+                        }
+
                         try
                         {
-                            var built = BuildValues(plan, row, options, oldCipher, newCipher);
+                            var built = BuildValues(plan, row, options, oldCipher, newCipher, idMap);
                             await InsertAsync(connection, transaction, plan, built.Values, ct);
                             inserted++;
                             if (built.NeedsReauth)
@@ -229,7 +254,7 @@ public sealed class Importer
                 }
                 else
                 {
-                    await ApplyDeferredAsync(connection, transaction, input, ct);
+                    await ApplyDeferredAsync(connection, transaction, input, idMap, ct);
                     await transaction.CommitAsync(ct);
                 }
             }
@@ -321,7 +346,7 @@ public sealed class Importer
             .Select(plan => plan.Legacy)
             .ToList();
         if (missing.Count > 0)
-            warnings.Add($"Tabelle assenti nella fixture: {string.Join(", ", missing)}.");
+            warnings.Add($"Tabelle assenti nell'input: {string.Join(", ", missing)}.");
     }
 
     private static int CountNeedsReauth(
@@ -413,8 +438,11 @@ public sealed class Importer
             foreach (var (table, columns) in Unique.Where(x => x.Table == plan.Target))
             {
                 var sourceColumns = columns.Select(column => SourceColumn(plan, column)).ToArray();
-                var values = rows.Select(row => string.Join("|", sourceColumns.Select(column =>
-                        Get(row, column)?.GetRawText() ?? "")))
+                // MySQL consente più NULL su un indice unique: solo le righe complete partecipano.
+                var values = rows
+                    .Select(row => sourceColumns.Select(column => Get(row, column)).ToArray())
+                    .Where(parts => parts.All(part => part is { ValueKind: not JsonValueKind.Null }))
+                    .Select(parts => string.Join("|", parts.Select(part => part!.Value.GetRawText())))
                     .Where(value => value.Replace("|", "").Length > 0)
                     .ToList();
                 var duplicates = values.GroupBy(x => x).Where(g => g.Count() > 1).Select(g => g.Key);
@@ -501,7 +529,8 @@ public sealed class Importer
         JsonElement row,
         ImportOptions options,
         LegacyCipher oldCipher,
-        LegacyCipher newCipher)
+        LegacyCipher newCipher,
+        Dictionary<string, Dictionary<string, string>> idMap)
     {
         var values = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var (target, source) in plan.Columns)
@@ -509,9 +538,10 @@ public sealed class Importer
             var element = Get(row, source);
             if (element is null)
                 continue;
-            values[target] = plan.Transforms.TryGetValue(target, out var transform)
+            var value = plan.Transforms.TryGetValue(target, out var transform)
                 ? transform(element.Value)
                 : Convert(element.Value, target);
+            values[target] = Remap(idMap, plan.Legacy, target, value);
         }
 
         if (plan.Audit)
@@ -571,6 +601,72 @@ public sealed class Importer
         }
 
         return new BuiltRow(values, needsReauth, redacted);
+    }
+
+    private static async Task<string?> FindByNaturalKeyAsync(
+        MySqlConnection connection,
+        MySqlTransaction transaction,
+        TablePlan plan,
+        JsonElement row,
+        Dictionary<string, Dictionary<string, string>> idMap,
+        CancellationToken ct)
+    {
+        if (plan.NaturalKey.Length == 0)
+            return null;
+
+        var where = plan.NaturalKey.Select((column, index) => $"`{column}` <=> @n{index}");
+        await using var command = new MySqlCommand(
+            $"SELECT `Id` FROM `{plan.Target}` WHERE {string.Join(" AND ", where)} LIMIT 1",
+            connection,
+            transaction);
+        for (var i = 0; i < plan.NaturalKey.Length; i++)
+        {
+            var element = Get(row, SourceColumn(plan, plan.NaturalKey[i]));
+            var value = element is null ? null : Convert(element.Value, plan.NaturalKey[i]);
+            value = Remap(idMap, plan.Legacy, plan.NaturalKey[i], value);
+            command.Parameters.AddWithValue($"@n{i}", value ?? DBNull.Value);
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct)
+            ? System.Convert.ToString(reader.GetValue(0), CultureInfo.InvariantCulture)
+            : null;
+    }
+
+    private static string? ParentTable(string legacyTable, string targetColumn) =>
+        ForeignKeys.FirstOrDefault(x => x.Table == legacyTable && x.Column == targetColumn)
+            .ParentTable;
+
+    private static object? Remap(
+        Dictionary<string, Dictionary<string, string>> idMap,
+        string legacyTable,
+        string targetColumn,
+        object? value)
+    {
+        if (value is null || ParentTable(legacyTable, targetColumn) is not { } parent)
+            return value;
+        if (!idMap.TryGetValue(parent, out var map))
+            return value;
+
+        var key = System.Convert.ToString(value, CultureInfo.InvariantCulture);
+        return key is not null && map.TryGetValue(key, out var mapped)
+            ? (long.TryParse(mapped, out var number) ? number : mapped)
+            : value;
+    }
+
+    private static void Map(
+        Dictionary<string, Dictionary<string, string>> idMap,
+        string table,
+        string legacyId,
+        string targetId)
+    {
+        if (!idMap.TryGetValue(table, out var map))
+        {
+            map = new Dictionary<string, string>(StringComparer.Ordinal);
+            idMap[table] = map;
+        }
+
+        map[legacyId] = targetId;
     }
 
     private static object? Convert(JsonElement value, string targetColumn) =>
@@ -711,6 +807,7 @@ public sealed class Importer
         MySqlConnection connection,
         MySqlTransaction transaction,
         Dictionary<string, List<JsonElement>> input,
+        Dictionary<string, Dictionary<string, string>> idMap,
         CancellationToken ct)
     {
         foreach (var plan in ImportPlans.All.Where(x => x.Deferred.Count > 0))
@@ -722,6 +819,11 @@ public sealed class Importer
                 if (id is null)
                     continue;
 
+                var rowId = idMap.TryGetValue(plan.Target, out var rowMap) &&
+                            rowMap.TryGetValue(id, out var mappedId)
+                    ? mappedId
+                    : id;
+
                 foreach (var (targetColumn, legacyColumn) in plan.Deferred)
                 {
                     var value = Get(row, legacyColumn);
@@ -732,8 +834,10 @@ public sealed class Importer
                         $"UPDATE `{plan.Target}` SET `{targetColumn}` = @value WHERE `Id` = @id",
                         connection,
                         transaction);
-                    command.Parameters.AddWithValue("@value", Convert(value.Value, targetColumn));
-                    command.Parameters.AddWithValue("@id", id);
+                    command.Parameters.AddWithValue(
+                        "@value",
+                        Remap(idMap, plan.Legacy, targetColumn, Convert(value.Value, targetColumn)));
+                    command.Parameters.AddWithValue("@id", rowId);
                     await command.ExecuteNonQueryAsync(ct);
                 }
             }

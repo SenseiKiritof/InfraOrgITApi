@@ -25,11 +25,11 @@ public sealed class CsrfMiddleware(
                 }
 
                 var origin = context.Request.Headers.Origin.ToString().TrimEnd('/');
-                if (!string.IsNullOrEmpty(origin) &&
+                if (string.IsNullOrEmpty(origin) ||
                     !frontendOptions.Value.EffectiveOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
                 {
-                    logger.LogWarning("Mutazione rifiutata per Origin non ammessa: {Origin}", origin);
-                    await WriteProblem(context, "origin_failed", "Origin non ammessa");
+                    logger.LogWarning("Mutazione rifiutata per Origin mancante o non ammessa: {Origin}", origin);
+                    await WriteProblem(context, "origin_failed", "Origin mancante o non ammessa");
                     return;
                 }
             }

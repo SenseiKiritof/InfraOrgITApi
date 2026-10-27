@@ -18,7 +18,8 @@ public static class ConsoleEndpoints
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/socket/servers/{id:int}/console", OpenAsync)
-            .RequireAuthorization();
+            .RequireAuthorization()
+            .RequireRateLimiting("console");
     }
 
     private static async Task OpenAsync(

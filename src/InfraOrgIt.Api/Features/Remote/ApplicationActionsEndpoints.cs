@@ -32,7 +32,8 @@ public static class ApplicationActionsEndpoints
 
         var deploys = app.MapGroup("/api/server-applications").RequireAuthorization();
         deploys.MapGet("/{id:int}/actions", ListForDeployAsync);
-        deploys.MapPost("/{id:int}/actions/{actionId:int}/run", RunAsync);
+        deploys.MapPost("/{id:int}/actions/{actionId:int}/run", RunAsync)
+            .RequireRateLimiting("remote-run");
     }
 
     private static async Task<IResult> ListForApplicationAsync(

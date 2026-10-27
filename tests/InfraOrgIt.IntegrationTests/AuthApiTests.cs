@@ -27,17 +27,34 @@ public sealed class AuthApiTests : IAsyncLifetime
 
     private WebApplicationFactory<Program> _factory = null!;
     private readonly FakeOidcHandler _oidcHandler = new();
+    private readonly string _keysPath = Path.Combine(
+        Path.GetTempPath(), $"ds-infr-keys-{Guid.NewGuid():N}");
 
     public async Task InitializeAsync()
     {
         await _mysql.StartAsync();
 
-        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        _factory = CreateFactory();
+
+        using var scope = _factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>().Database.MigrateAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        await _factory.DisposeAsync();
+        await _mysql.DisposeAsync();
+    }
+
+    private WebApplicationFactory<Program> CreateFactory() =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("ConnectionStrings:MySql", _mysql.GetConnectionString());
             builder.UseSetting("Auth:SecureCookies", "false");
             builder.UseSetting("Auth:BootstrapAdminUsername", "");
+            builder.UseSetting("DataProtection:KeysPath", _keysPath);
+            builder.UseSetting("SessionStore:MaxSessionsPerUser", "3");
             builder.UseSetting("Oidc:Issuer", "http://localhost:8080/realms/test");
             builder.UseSetting("Oidc:ClientId", "test");
             builder.UseSetting("Oidc:ClientSecret", "test");
@@ -55,16 +72,6 @@ public sealed class AuthApiTests : IAsyncLifetime
                     .ConfigurePrimaryHttpMessageHandler(() => _oidcHandler);
             });
         });
-
-        using var scope = _factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>().Database.MigrateAsync();
-    }
-
-    public async Task DisposeAsync()
-    {
-        await _factory.DisposeAsync();
-        await _mysql.DisposeAsync();
-    }
 
     [Fact]
     public async Task Session_without_cookie_is_unauthorized()
@@ -140,11 +147,52 @@ public sealed class AuthApiTests : IAsyncLifetime
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "/auth/logout");
         request.Headers.Add("X-CSRF-Token", "csrf");
+        request.Headers.Add("Origin", "http://localhost:3000");
         var logout = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
 
         var session = await client.GetAsync("/api/session");
         Assert.Equal(HttpStatusCode.Unauthorized, session.StatusCode);
+    }
+
+    [Fact]
+    public async Task Callback_rate_limit_returns_429()
+    {
+        using var client = _factory.CreateClient();
+
+        HttpResponseMessage response = null!;
+        for (var i = 0; i < 31; i++)
+            response = await client.GetAsync("/auth/callback");
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Responses_have_security_headers()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.GetAsync("/");
+
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal("no-referrer", response.Headers.GetValues("Referrer-Policy").Single());
+        Assert.Equal("DENY", response.Headers.GetValues("X-Frame-Options").Single());
+        Assert.Contains("frame-ancestors 'none'",
+            response.Headers.GetValues("Content-Security-Policy").Single());
+    }
+
+    [Fact]
+    public async Task Mutations_reject_missing_origin()
+    {
+        var sessionId = await CreateSessionAsync("no-origin.user", "SystemAdmin");
+        using var client = ClientWithSession(sessionId);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/auth/logout");
+        request.Headers.Add("X-CSRF-Token", "csrf");
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.Equal("origin_failed", json.RootElement.GetProperty("code").GetString());
     }
 
     [Fact]
@@ -160,6 +208,92 @@ public sealed class AuthApiTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Correlation_id_is_echoed()
+    {
+        using var client = _factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Add("X-Correlation-ID", "test-correlation");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal("test-correlation",
+            response.Headers.GetValues("X-Correlation-ID").Single());
+    }
+
+    [Fact]
+    public async Task Session_is_visible_from_another_api_instance()
+    {
+        var sessionId = await CreateSessionAsync("shared.user", "ServerOperator");
+
+        using var second = CreateFactory();
+        using var client = second.CreateClient();
+        client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Session(false)}={sessionId}");
+
+        var response = await client.GetAsync("/api/session");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public void Session_store_limits_active_sessions_per_user()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
+
+        var ids = Enumerable.Range(0, 4)
+            .Select(_ => sessions.Create(Data("limit.user")))
+            .ToList();
+
+        Assert.Null(sessions.Get(ids[0]));
+        Assert.NotNull(sessions.Get(ids[3]));
+    }
+
+    [Fact]
+    public async Task Remote_rate_limit_is_per_user_not_per_ip()
+    {
+        var first = await CreateSessionAsync("rate.one", "SystemAdmin");
+        var second = await CreateSessionAsync("rate.two", "SystemAdmin");
+        using var one = ClientWithSession(first);
+        using var two = ClientWithSession(second);
+
+        static async Task<HttpStatusCode> RunAsync(HttpClient client)
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post, "/api/server-applications/999/actions/1/run");
+            request.Headers.Add("X-CSRF-Token", "csrf");
+            request.Headers.Add("Origin", "http://localhost:3000");
+            using var response = await client.SendAsync(request);
+            return response.StatusCode;
+        }
+
+        for (var i = 0; i < 30; i++)
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, await RunAsync(one));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, await RunAsync(one));
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, await RunAsync(two));
+    }
+
+    [Fact]
+    public async Task Concurrent_logins_do_not_exceed_the_session_limit()
+    {
+        var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            using var scope = _factory.Services.CreateScope();
+            var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
+            sessions.Create(Data("race.user"));
+        }));
+
+        await Task.WhenAll(tasks);
+
+        using var check = _factory.Services.CreateScope();
+        var db = check.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        Assert.Equal(3, await db.Sessions.CountAsync(x => x.Username == "race.user"));
+    }
+
+    private static SessionData Data(string username) => new(
+        username, "Test", "User", null,
+        DateTimeOffset.UtcNow.AddHours(1), null, "csrf", []);
 
     private async Task<string> CreateSessionAsync(
         string username,
@@ -187,7 +321,7 @@ public sealed class AuthApiTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        var sessions = _factory.Services.GetRequiredService<ISessionStore>();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
         return sessions.Create(new SessionData(
             username,
             "Test",

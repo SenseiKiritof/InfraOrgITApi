@@ -4,10 +4,11 @@ var options = Parse(args);
 if (options is null)
 {
     Console.Error.WriteLine(
-        "Uso: InfraOrgIt.LegacyImport --input <fixture.json> [--report <report.json>] " +
+        "Uso: InfraOrgIt.LegacyImport [--input <fixture.json>] [--report <report.json>] " +
         "[--apply] [--allow-reauth] [--new-key-version <n>] [--no-redact-audit]\n" +
-        "Env: LEGACY_IMPORT_CONNECTION, LEGACY_IMPORT_OLD_KEY, LEGACY_IMPORT_NEW_KEY, " +
-        "LEGACY_IMPORT_NEW_KEY_VERSION.");
+        "Senza --input legge il MySQL legacy da LEGACY_SOURCE_CONNECTION.\n" +
+        "Env: LEGACY_SOURCE_CONNECTION, LEGACY_IMPORT_CONNECTION, LEGACY_IMPORT_OLD_KEY, " +
+        "LEGACY_IMPORT_NEW_KEY, LEGACY_IMPORT_NEW_KEY_VERSION.");
     return 2;
 }
 
@@ -67,6 +68,7 @@ return report.Errors.Count == 0 ? 0 : 1;
 static ImportOptions? Parse(string[] args)
 {
     string? input = null;
+    var source = Environment.GetEnvironmentVariable("LEGACY_SOURCE_CONNECTION");
     var report = "import-report.json";
     var apply = false;
     var allowReauth = false;
@@ -103,10 +105,10 @@ static ImportOptions? Parse(string[] args)
         }
     }
 
-    return string.IsNullOrWhiteSpace(input)
+    return string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(source)
         ? null
         : new ImportOptions(
-            input,
+            input ?? "mysql:legacy",
             report,
             Environment.GetEnvironmentVariable("LEGACY_IMPORT_CONNECTION"),
             apply,
@@ -114,7 +116,8 @@ static ImportOptions? Parse(string[] args)
             Environment.GetEnvironmentVariable("LEGACY_IMPORT_NEW_KEY"),
             redact,
             newKeyVersion,
-            allowReauth);
+            allowReauth,
+            source);
 }
 
 static string? Next(string[] args, ref int index) =>

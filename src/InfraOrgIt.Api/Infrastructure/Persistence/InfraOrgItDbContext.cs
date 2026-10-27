@@ -36,6 +36,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<ApplicationAction> ApplicationActions => Set<ApplicationAction>();
     public DbSet<ReachabilityTest> ReachabilityTests => Set<ReachabilityTest>();
     public DbSet<CommandExecution> CommandExecutions => Set<CommandExecution>();
+    public DbSet<SessionRecord> Sessions => Set<SessionRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -315,6 +316,18 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.HasIndex(x => x.IdempotencyKey).IsUnique();
             e.ToTable(t => t.HasCheckConstraint("CK_CommandExecutions_Kind",
                 "`Kind` IN ('Action','Reachability','Console')"));
+        });
+
+        modelBuilder.Entity<SessionRecord>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasMaxLength(64);
+            e.Property(x => x.Username).HasMaxLength(100);
+            e.Property(x => x.Payload).HasColumnType("longtext");
+            e.Property(x => x.ExpiresAt).HasColumnType("datetime(6)");
+            e.Property(x => x.CreatedAt).HasColumnType("datetime(6)");
+            e.HasIndex(x => x.Username);
+            e.HasIndex(x => x.ExpiresAt);
         });
 
         modelBuilder.Entity<DiagramEdge>(e =>

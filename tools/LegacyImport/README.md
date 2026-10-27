@@ -1,16 +1,23 @@
 # LegacyImport
 
-Importer standalone dalla sorgente legacy (JSON sanificato o export) al MySQL nuovo. Non dipende dall'API né dalle sue migration: il target deve avere lo schema già migrato (`make migrate`).
+Importer standalone dalla sorgente legacy (MySQL legacy o JSON sanificato) al MySQL nuovo. Non dipende dall'API né dalle sue migration: il target deve avere lo schema già migrato (`make migrate`).
+
+La sorgente MySQL si legge da `LEGACY_SOURCE_CONNECTION`; in alternativa `--input` legge una fixture JSON. Il dump fittizio per il rehearsal è nel Compose, profilo `legacy` (`make legacy-rehearsal`).
 
 ## Comandi
 
 ```bash
 # dal meta repo
-make legacy-dry-run
+make legacy-dry-run       # dry-run importer su fixture JSON
+make legacy-rehearsal     # dry-run contro il MySQL legacy fittizio in Docker
 
 # dry-run con verifica delle collisioni sul target
 LEGACY_IMPORT_CONNECTION='Server=localhost;Port=3306;Database=infraorgit;User ID=...;Password=...;' \
   make legacy-dry-run
+
+# sorgente MySQL legacy
+LEGACY_SOURCE_CONNECTION='Server=localhost;Port=3308;Database=infraorgit_legacy;User ID=legacy;Password=dev-legacy-password;' \
+  dotnet run --project tools/LegacyImport -- --report /tmp/import-report.json
 
 # apply su un target MySQL
 export LEGACY_IMPORT_CONNECTION='Server=localhost;Port=3306;Database=infraorgit;User ID=...;Password=...;'
@@ -23,6 +30,7 @@ dotnet run --project tools/LegacyImport -- \
 Segreti solo da variabili d'ambiente, mai da argomenti:
 
 ```text
+LEGACY_SOURCE_CONNECTION=Server=localhost;Port=3308;Database=infraorgit_legacy;User ID=...;Password=...;
 LEGACY_IMPORT_CONNECTION=Server=localhost;Port=3306;Database=infraorgit;User ID=...;Password=...;
 LEGACY_IMPORT_OLD_KEY=<base64 32 byte della vecchia chiave ServerAccess>
 LEGACY_IMPORT_NEW_KEY=<base64 32 byte della nuova chiave>
@@ -34,6 +42,7 @@ La vecchia chiave decifra `ServerCredentials`; la nuova ricifra con `LEGACY_IMPO
 ## Comportamento
 
 - La fixture usa i nomi delle tabelle e delle colonne legacy. Il mapping verso le colonne nuove è in `ImportPlans.cs`.
+- Con `LEGACY_SOURCE_CONNECTION` l'adapter legge ogni tabella di `ImportPlans` con `SELECT *` e produce le stesse righe JSON della fixture; le tabelle assenti finiscono nei warning.
 - Gli ID sono preservati. Una riga già presente con lo stesso ID viene saltata solo se la chiave naturale coincide (`Name`, `Username`, `Path`, `SourceServerId`/`TargetServerId`, ecc.); altrimenti il report segnala la collisione e l'apply viene annullato.
 - L'apply usa una sola transazione: o importa tutto, o non scrive nulla. `RolledBack` e `Inserted=0` nel report indicano l'annullamento.
 - `Menus.ParentId` e `ServerApplications.ProxyRouteId` sono aggiornati dopo gli insert, nella stessa transazione, per evitare cicli FK. Gli orfani sono rifiutati dal preflight.
@@ -44,6 +53,6 @@ La vecchia chiave decifra `ServerCredentials`; la nuova ricifra con `LEGACY_IMPO
 
 ## Limiti
 
-- La sorgente JSON è il formato di rehearsal/dry-run; l'adattatore MySQL legacy è il prossimo passo.
-- Il preflight controlla FK e unique sulle tabelle presenti nella fixture; l'import reale deve partire da un dump sanificato completo. Le tabelle assenti sono elencate nei warning.
+- Il dump fittizio copre una macchina, un proxy, un servizio, un diagramma e un'esecuzione: valida l'adapter, non i dati rappresentativi. Il rehearsal su dump sanificato reale resta da fare.
+- Il preflight controlla FK e unique sulle tabelle presenti nella sorgente; le tabelle assenti sono elencate nei warning.
 - `--classes`, `--batch-size` e `--fresh` non sono ancora implementati.

@@ -1257,7 +1257,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
             }
         }
 
-        var sessions = _factory.Services.GetRequiredService<ISessionStore>();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
         var sessionId = sessions.Create(new SessionData(
             username, "Test", "User", null,
             DateTimeOffset.UtcNow.AddHours(1), null, "csrf",
@@ -1277,6 +1277,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
     {
         using var request = new HttpRequestMessage(method, url);
         request.Headers.Add("X-CSRF-Token", "csrf");
+        request.Headers.Add("Origin", "http://localhost:3000");
         if (idempotencyKey is not null)
             request.Headers.Add("Idempotency-Key", idempotencyKey);
         if (body is not null)

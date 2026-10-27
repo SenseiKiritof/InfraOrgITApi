@@ -23,3 +23,7 @@ jobs:
         run: dotnet build InfraOrgIt.slnx --no-restore -warnaserror
       - name: Test
         run: dotnet test InfraOrgIt.slnx --no-build --verbosity normal
+      - name: OpenAPI
+        run: ./scripts/openapi.sh
+      - name: OpenAPI drift
+        run: git diff --exit-code -- openapi/InfraOrgIt.Api.json

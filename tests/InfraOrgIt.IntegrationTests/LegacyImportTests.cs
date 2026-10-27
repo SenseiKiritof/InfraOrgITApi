@@ -190,6 +190,64 @@ public sealed class LegacyImportTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Natural_key_match_remaps_ids_and_dependents()
+    {
+        var input = WriteFixture(fixture =>
+        {
+            fixture["Roles"] = new JsonArray(new JsonObject
+            {
+                ["Id"] = 8,
+                ["Name"] = "SystemAdmin",
+                ["Label"] = "System admin",
+                ["ScopeEnum"] = "System"
+            });
+            fixture["Users"] = new JsonArray(new JsonObject
+            {
+                ["Id"] = 701,
+                ["Name"] = "Legacy",
+                ["Surname"] = "User",
+                ["Username"] = "legacy-user"
+            });
+            fixture["RoleUser"] = new JsonArray(new JsonObject
+            {
+                ["RolesId"] = 8,
+                ["UsersId"] = 701
+            });
+        });
+
+        var report = await new Importer().RunAsync(
+            Options(apply: true, allowReauth: true, input: input), CancellationToken.None);
+
+        Assert.Empty(report.Errors);
+        Assert.Contains(report.Warnings, x => x.Contains("ID legacy rimappato"));
+
+        await using var db = Db();
+        var systemAdmin = await db.Roles.SingleAsync(x => x.Name == "SystemAdmin");
+        Assert.Equal(3, systemAdmin.Id);
+        Assert.True(await db.RoleUsers.AnyAsync(
+            x => x.RolesId == systemAdmin.Id && x.UsersId == 701));
+    }
+
+    [Fact]
+    public async Task Multiple_nulls_do_not_violate_unique_columns()
+    {
+        var input = WriteFixture(fixture =>
+        {
+            var rows = fixture["ServerApplications"]!.AsArray();
+            rows[0]!["ProxyRouteId"] = null;
+            var second = rows[0]!.DeepClone().AsObject();
+            second["Id"] = 8902;
+            second["ExposedPort"] = 8081;
+            rows.Add(second);
+        });
+
+        var report = await new Importer().RunAsync(
+            Options(apply: false, input: input), CancellationToken.None);
+
+        Assert.Empty(report.Errors);
+    }
+
+    [Fact]
     public async Task Deferred_orphan_is_rejected_by_preflight()
     {
         var input = WriteFixture(fixture =>

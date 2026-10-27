@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -29,6 +29,9 @@
     <None Update="Legacy/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\tools\LegacyImport\fixtures\rehearsal.json"
           Link="Legacy/Fixtures/import-rehearsal.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\infraorgit-docker\legacy\*.sql"
+          Link="Legacy/Sql\%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

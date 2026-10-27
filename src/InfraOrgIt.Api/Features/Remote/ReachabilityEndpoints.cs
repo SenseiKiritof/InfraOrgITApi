@@ -29,10 +29,12 @@ public static partial class ReachabilityEndpoints
         var servers = app.MapGroup("/api/servers").RequireAuthorization();
         servers.MapGet("/{id:int}/reachability-tests", ListForServerAsync);
         servers.MapPost("/{id:int}/reachability-tests", CreateForServerAsync);
-        servers.MapPost("/{id:int}/reachability-tests/run", RunForServerAsync);
+        servers.MapPost("/{id:int}/reachability-tests/run", RunForServerAsync)
+            .RequireRateLimiting("reachability");
 
         var environments = app.MapGroup("/api/provider-environments").RequireAuthorization();
-        environments.MapPost("/{id:int}/reachability-tests/run", RunForEnvironmentAsync);
+        environments.MapPost("/{id:int}/reachability-tests/run", RunForEnvironmentAsync)
+            .RequireRateLimiting("reachability");
     }
 
     private static async Task<IResult> ListGlobalAsync(

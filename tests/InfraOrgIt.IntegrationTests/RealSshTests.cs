@@ -232,7 +232,7 @@ public sealed class RealSshTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        var sessions = _factory.Services.GetRequiredService<ISessionStore>();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
         var sessionId = sessions.Create(new SessionData(
             username, "Test", "User", null,
             DateTimeOffset.UtcNow.AddHours(1), null, "csrf",
@@ -251,6 +251,7 @@ public sealed class RealSshTests : IAsyncLifetime
     {
         using var request = new HttpRequestMessage(method, url);
         request.Headers.Add("X-CSRF-Token", "csrf");
+        request.Headers.Add("Origin", "http://localhost:3000");
         if (body is not null)
             request.Content = JsonContent.Create(body);
         return await client.SendAsync(request);

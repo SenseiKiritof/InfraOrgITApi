@@ -13,7 +13,7 @@ public static class AuthEndpoints
     public static void Map(WebApplication app)
     {
         app.MapGet("/auth/login", StartLogin).AllowAnonymous().RequireRateLimiting("auth-login");
-        app.MapGet("/auth/callback", Callback).AllowAnonymous();
+        app.MapGet("/auth/callback", Callback).AllowAnonymous().RequireRateLimiting("auth-callback");
         app.MapPost("/auth/logout", Logout).AllowAnonymous();
     }
 
