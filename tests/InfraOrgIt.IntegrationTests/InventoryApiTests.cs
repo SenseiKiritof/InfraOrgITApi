@@ -383,6 +383,16 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var server = await ReadAsync(await admin.GetAsync($"/api/servers/{seeded.ServerId}"));
         Assert.Equal("Credenziale " + suffix, server.GetProperty("credentialName").GetString());
 
+        var byCredential = await ReadAsync(await admin.GetAsync(
+            $"/api/servers?q=Credenziale%20{suffix}&pageSize=200"));
+        Assert.Contains(byCredential.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("id").GetInt32() == seeded.ServerId);
+
+        var byEnvironment = await ReadAsync(await admin.GetAsync(
+            $"/api/servers?q=Topo%20Env%20{suffix}&pageSize=200"));
+        Assert.Contains(byEnvironment.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("id").GetInt32() == seeded.ServerId);
+
         var blocked = await SendAsync(admin, HttpMethod.Delete,
             $"/api/server-credentials/{credentialId}");
         Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
