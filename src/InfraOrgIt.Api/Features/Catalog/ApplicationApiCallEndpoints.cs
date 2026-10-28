@@ -45,7 +45,8 @@ public static class ApplicationApiCallEndpoints
                 x.RequestTypeEnum,
                 x.Body,
                 ApplicationId = x.ApplicationVersion!.ApplicationId,
-                Hostname = x.ApplicationVersion!.Application!.Hostname
+                Hostname = x.ApplicationVersion!.Application!.Hostname,
+                IgnoreSslErrors = x.ApplicationVersion!.Application!.IgnoreSslErrors
             })
             .SingleOrDefaultAsync(ct)
             ?? throw Guard.NotFound("API", id);
@@ -66,7 +67,8 @@ public static class ApplicationApiCallEndpoints
         if (sendsBody && !string.IsNullOrEmpty(body))
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
-        var client = httpClientFactory.CreateClient("application-api");
+        var client = httpClientFactory.CreateClient(
+            api.IgnoreSslErrors ? "application-api-insecure" : "application-api");
         var stopwatch = Stopwatch.StartNew();
         try
         {

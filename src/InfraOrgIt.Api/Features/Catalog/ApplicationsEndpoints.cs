@@ -78,7 +78,8 @@ public static class ApplicationsEndpoints
             Description = Guard.Text(input.Description, "Description", 200, required: false),
             BasePath = Guard.Text(input.BasePath, "BasePath", 50),
             ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort"),
-            Hostname = ValidateHostname(input.Hostname)
+            Hostname = ValidateHostname(input.Hostname),
+            IgnoreSslErrors = input.IgnoreSslErrors
         };
 
         await EnsureUniqueAsync(db, entity.Name, null, ct);
@@ -107,6 +108,7 @@ public static class ApplicationsEndpoints
         entity.BasePath = Guard.Text(input.BasePath, "BasePath", 50);
         entity.ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort");
         entity.Hostname = ValidateHostname(input.Hostname);
+        entity.IgnoreSslErrors = input.IgnoreSslErrors;
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
@@ -204,6 +206,7 @@ public static class ApplicationsEndpoints
         x.BasePath,
         x.ListeningOnPort,
         x.Hostname,
+        x.IgnoreSslErrors,
         x.Versions.Count,
         x.CreatedAt,
         x.UpdatedAt,
@@ -229,7 +232,8 @@ public sealed record ApplicationInput(
     string? Description,
     string? BasePath,
     int ListeningOnPort,
-    string? Hostname = null);
+    string? Hostname = null,
+    bool IgnoreSslErrors = false);
 
 public sealed record ApplicationDto(
     int Id,
@@ -238,6 +242,7 @@ public sealed record ApplicationDto(
     string BasePath,
     int ListeningOnPort,
     string? Hostname,
+    bool IgnoreSslErrors,
     int VersionCount,
     DateTime CreatedAt,
     DateTime UpdatedAt,

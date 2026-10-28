@@ -155,6 +155,13 @@ builder.Services.AddScoped<TopologyService>();
 builder.Services.AddScoped<DiagramService>();
 builder.Services.AddHttpClient<OidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("application-api", client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient("application-api-insecure")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback =
+            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    })
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<IConfigurationManager<OpenIdConnectConfiguration>>(sp =>
 {
     var oidc = sp.GetRequiredService<IOptions<OidcOptions>>().Value;

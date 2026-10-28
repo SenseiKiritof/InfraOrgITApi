@@ -42,6 +42,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("varchar(300)");
 
+                    b.Property<bool>("IgnoreSslErrors")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<int>("ListeningOnPort")
                         .HasColumnType("int");
 
