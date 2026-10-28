@@ -25,4 +25,4 @@ import-report.json
 *.cer
 .opencode/
 backups/
-the legacy export
+2-Topology.sql
