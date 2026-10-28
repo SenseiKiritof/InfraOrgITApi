@@ -84,7 +84,7 @@ public sealed class LegacyMySqlSourceTests : IAsyncLifetime
         Assert.False(credential.NeedsReauth);
         Assert.Equal(1, credential.KeyVersion);
         Assert.Equal("s3cret-fittizio",
-            new LegacyCipher(newKey).Decrypt(credential.EncryptedSecret));
+            SSecureUtils.Utils.SecureUtils.Decrypt(credential.EncryptedSecret, newKey));
 
         var second = await new Importer().RunAsync(
             Options(oldKey, newKey), CancellationToken.None);

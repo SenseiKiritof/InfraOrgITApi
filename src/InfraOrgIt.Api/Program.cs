@@ -29,11 +29,23 @@ using Microsoft.OpenApi;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using SSecureUtils.Extensions;
 using System.Diagnostics;
 using System.Net;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var secureSettingsFile = $"appsettings.{builder.Environment.EnvironmentName}.Secure.json";
+var secureSettingsPath = Path.Combine(builder.Environment.ContentRootPath, secureSettingsFile);
+if (File.Exists(secureSettingsPath))
+{
+    var encryptionKey = builder.Configuration["ENC_KEY"];
+    if (string.IsNullOrWhiteSpace(encryptionKey))
+        throw new InvalidOperationException($"{secureSettingsFile} esiste ma ENC_KEY non è impostata.");
+
+    builder.Configuration.AddSecureConfig(secureSettingsFile, encryptionKey);
+}
 
 if (!builder.Environment.IsDevelopment())
 {

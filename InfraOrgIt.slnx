@@ -8,5 +8,6 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/LegacyImport/LegacyImport.csproj" />
+    <Project Path="tools/RewrapCredentials/RewrapCredentials.csproj" />
   </Folder>
 </Solution>

@@ -3,6 +3,11 @@ using System.Text;
 
 namespace InfraOrgIt.LegacyImport;
 
+/// <summary>
+/// Reads and writes the legacy credential format: AES-GCM with the raw 32-byte key from
+/// base64 and no prefix. The new format is produced by SSecureUtils in the API and in
+/// <see cref="Importer"/>, never here.
+/// </summary>
 public sealed class LegacyCipher(string? base64Key)
 {
     private const int NonceSize = 12;

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using MySql.Data.MySqlClient;
+using SSecureUtils.Utils;
 
 namespace InfraOrgIt.LegacyImport;
 
@@ -165,7 +166,6 @@ public sealed class Importer
             await using var transaction = await connection.BeginTransactionAsync(ct);
 
             var oldCipher = new LegacyCipher(options.OldKey);
-            var newCipher = new LegacyCipher(options.NewKey);
             var idMap = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
 
             try
@@ -218,7 +218,7 @@ public sealed class Importer
 
                         try
                         {
-                            var built = BuildValues(plan, row, options, oldCipher, newCipher, idMap);
+                            var built = BuildValues(plan, row, options, oldCipher, idMap);
                             await InsertAsync(connection, transaction, plan, built.Values, ct);
                             inserted++;
                             if (built.NeedsReauth)
@@ -529,7 +529,6 @@ public sealed class Importer
         JsonElement row,
         ImportOptions options,
         LegacyCipher oldCipher,
-        LegacyCipher newCipher,
         Dictionary<string, Dictionary<string, string>> idMap)
     {
         var values = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -561,15 +560,18 @@ public sealed class Importer
         {
             var secret = Get(row, "EncryptedSecret")?.GetString() ?? "";
             var passphrase = Get(row, "EncryptedPassphrase")?.GetString();
-            var canMigrate = oldCipher.HasKey && newCipher.HasKey && !string.IsNullOrEmpty(secret);
+            var canMigrate = oldCipher.HasKey &&
+                             !string.IsNullOrWhiteSpace(options.NewKey) &&
+                             !string.IsNullOrEmpty(secret);
             if (canMigrate)
             {
                 try
                 {
-                    values["EncryptedSecret"] = newCipher.Encrypt(oldCipher.Decrypt(secret));
+                    values["EncryptedSecret"] =
+                        SecureUtils.Encrypt(oldCipher.Decrypt(secret), options.NewKey!);
                     values["EncryptedPassphrase"] = string.IsNullOrEmpty(passphrase)
                         ? null
-                        : newCipher.Encrypt(oldCipher.Decrypt(passphrase));
+                        : SecureUtils.Encrypt(oldCipher.Decrypt(passphrase), options.NewKey!);
                     values["KeyVersion"] = options.NewKeyVersion;
                     values["NeedsReauth"] = false;
                 }

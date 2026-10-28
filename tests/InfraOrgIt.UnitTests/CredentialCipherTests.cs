@@ -17,6 +17,7 @@ public sealed class CredentialCipherTests
 
         Assert.Equal(1, version);
         Assert.NotEqual("super-secret", ciphertext);
+        Assert.StartsWith("v2:", ciphertext);
         Assert.Equal("super-secret", cipher.Decrypt(ciphertext, version));
     }
 
@@ -25,11 +26,11 @@ public sealed class CredentialCipherTests
     {
         var cipher = CreateCipher(1);
         var (ciphertext, version) = cipher.Encrypt("super-secret");
-        var bytes = Convert.FromBase64String(ciphertext);
+        var bytes = Convert.FromBase64String(ciphertext["v2:".Length..]);
         bytes[^1] ^= 0xFF;
 
         Assert.ThrowsAny<CryptographicException>(
-            () => cipher.Decrypt(Convert.ToBase64String(bytes), version));
+            () => cipher.Decrypt("v2:" + Convert.ToBase64String(bytes), version));
     }
 
     [Fact]
