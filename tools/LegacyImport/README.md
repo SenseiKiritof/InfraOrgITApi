@@ -2,14 +2,13 @@
 
 Standalone importer from the legacy source (legacy MySQL or sanitized JSON) to the new MySQL database. It does not depend on the API or its migrations: the target must already have the migrated schema (`make migrate`).
 
-The MySQL source is read from `LEGACY_SOURCE_CONNECTION`; alternatively `--input` reads a JSON fixture. The fake dump for the rehearsal lives in the Compose `legacy` profile (`make legacy-rehearsal`).
+The MySQL source is read from `LEGACY_SOURCE_CONNECTION`; alternatively `--input` reads a JSON fixture.
 
 ## Commands
 
 ```bash
 # from the meta repo
 make legacy-dry-run       # importer dry-run on JSON fixtures
-make legacy-rehearsal     # dry-run against the fake legacy MySQL in Docker
 
 # dry-run with target collision checks
 LEGACY_IMPORT_CONNECTION='Server=localhost;Port=3306;Database=infraorgit;User ID=...;Password=...;' \

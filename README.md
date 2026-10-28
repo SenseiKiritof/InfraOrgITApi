@@ -4,7 +4,7 @@ InfraOrgIT backend: .NET 10 API, Minimal APIs, EF Core 10, MySQL LTS, Keycloak.
 
 ## Status
 
-Phase 7 complete on the available scope — 2026-10-26. Backend complete through Phase 6 (identity, inventory, topology/diagrams, remote management, admin/RBAC) plus the `tools/LegacyImport` importer: legacy MySQL source (`LEGACY_SOURCE_CONNECTION`) or legacy-shaped JSON, atomic dry-run/apply, IDs preserved with natural key checking, blocking collisions, two phases for FK cycles, credentials re-encrypted with a versioned key (`NeedsReauth` only with `--allow-reauth`), redacted audit, JSON report. The fake legacy dump is in Compose (`mysql-legacy`). Tests: 16 unit and 38 integration (real SSH included). Details in `tools/LegacyImport/README.md` and `../AllInfraOrgIT/docs/migration/phase7-plan.md`.
+Phase 7 complete on the available scope — 2026-10-26. Backend complete through Phase 6 (identity, inventory, topology/diagrams, remote management, admin/RBAC) plus the `tools/LegacyImport` importer: legacy MySQL source (`LEGACY_SOURCE_CONNECTION`) or legacy-shaped JSON, atomic dry-run/apply, IDs preserved with natural key checking, blocking collisions, two phases for FK cycles, credentials re-encrypted with a versioned key (`NeedsReauth` only with `--allow-reauth`), redacted audit, JSON report. Tests: 16 unit and 38 integration (real SSH included). Details in `tools/LegacyImport/README.md` and `../AllInfraOrgIT/docs/migration/phase7-plan.md`.
 
 ## Stack
 
@@ -22,6 +22,7 @@ src/InfraOrgIt.Api/
   Features/{Auth, Session, Menus, ServerAccess, Users, Inventory, Catalog, Topology, Remote, Admin}
   Infrastructure/Ssh
 tools/LegacyImport/
+tools/RewrapCredentials/
   Infrastructure/Persistence/{Entities, Migrations}
   Program.cs
 tests/InfraOrgIt.UnitTests/
@@ -35,6 +36,7 @@ dotnet build -warnaserror
 dotnet test
 dotnet ef migrations add <Nome> --project src/InfraOrgIt.Api --startup-project src/InfraOrgIt.Api
 ./scripts/openapi.sh   # regenerates openapi/InfraOrgIt.Api.json; CI fails if it drifts
+dotnet run --project tools/RewrapCredentials -- --self-check
 ```
 
 The OpenAPI contract is generated from the code into `openapi/InfraOrgIt.Api.json` (148 operations, 3.1.1); the meta repo's `docs/api/openapi.yaml` remains the domain draft.
@@ -46,7 +48,7 @@ cd ../AllInfraOrgIT
 make dev       # infra + API :5298 + Vite :3000
 make migrate
 make test
-make legacy-rehearsal  # dry-run importer against the fake legacy dump
+make legacy-dry-run  # dry-run importer on the JSON fixtures
 ```
 
 `dotnet ef` is in the meta repo's `.config/dotnet-tools.json` manifest; alternatively `dotnet tool restore` from the workspace root.
@@ -55,9 +57,23 @@ make legacy-rehearsal  # dry-run importer against the fake legacy dump
 
 - `appsettings.Development.json` contains non-secret values only.
 - `Oidc:ClientSecret` and `ConnectionStrings:MySql` come from env vars (`Oidc__ClientSecret`, `ConnectionStrings__MySql`) via `scripts/env.sh`.
-- `ServerAccess:CredentialKeys:<n>` (32-byte base64) and `ServerAccess:CurrentKeyVersion` encrypt the SSH credentials. In development `scripts/env.sh` generates the key in the ignored `.env`; without keys the API does not start.
+- `ServerAccess:CredentialKeys:<n>` (32-byte base64) and `ServerAccess:CurrentKeyVersion` encrypt the SSH credentials with SSecureUtils 1.1.1 (AES-GCM, `v2:` prefix, key derived with SHA-256). In development `scripts/env.sh` generates the key in the ignored `.env`; without keys the API does not start.
+- Encrypted configuration: `appsettings.<Environment>.Secure.json` is loaded when the file exists and every value is decrypted with `ENC_KEY` (SSecureUtils `AddSecureConfig`); if the file exists and `ENC_KEY` is missing the API does not start. Production mounts the file read-only, it is never baked into the image.
 - SystemAdmin bootstrap: `Auth:BootstrapAdminUsername=admin` in Development; the first login of the Keycloak user `admin` assigns the role if a SystemAdmin does not exist yet. In production the variable stays empty.
 - Sessions in MySQL (`Sessions`) with payload encrypted via DataProtection, expiry and per-user limit (`SessionStore:MaxSessionsPerUser`, default 10). DataProtection keys live in the `api-dp-keys` volume in production (`DataProtection:KeysPath`); in development the user profile is used.
+
+## Credential rewrap
+
+`tools/RewrapCredentials` converts credentials written with the pre-SSecureUtils format (`base64(nonce|tag|ciphertext)`, raw key) to the current one (`v2:` prefix, key derived with SHA-256). It is idempotent: rows already carrying `v2:` are skipped.
+
+```bash
+REWRAP_CONNECTION='Server=localhost;Port=3306;Database=infraorgit;User ID=...;Password=...;' \
+ServerAccess__CredentialKeys__1=<32-byte base64> ServerAccess__CurrentKeyVersion=1 \
+dotnet run --project tools/RewrapCredentials            # dry-run
+# add --apply to write
+```
+
+Keys for every `KeyVersion` present in the table must be provided; secrets only from environment variables.
 
 ## Auth BFF
 
