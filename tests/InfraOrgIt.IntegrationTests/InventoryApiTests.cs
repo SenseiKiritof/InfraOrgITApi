@@ -70,6 +70,35 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Application_environments_come_from_its_deployments()
+    {
+        var deployed = await SeedEnvironmentAsync("dep-env");
+        var idle = await SeedEnvironmentAsync("idle-env");
+        var catalog = await SeedCatalogAsync(deployed.ServerId, "dep-app");
+
+        using var admin = await ClientForAsync("env.deployment", systemAdmin: true);
+
+        var listed = await admin.GetFromJsonAsync<JsonElement>(
+            $"/api/applications/{catalog.ApplicationId}/environments");
+        var ids = listed.EnumerateArray()
+            .Select(x => x.GetProperty("environmentId").GetInt32())
+            .ToList();
+        Assert.Equal([deployed.EnvironmentId], ids);
+
+        var rejected = await SendAsync(
+            admin, HttpMethod.Put,
+            $"/api/applications/{catalog.ApplicationId}/environments/{idle.EnvironmentId}",
+            new { hostname = "http://idle.local", ignoreSslErrors = false });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, rejected.StatusCode);
+
+        var accepted = await SendAsync(
+            admin, HttpMethod.Put,
+            $"/api/applications/{catalog.ApplicationId}/environments/{deployed.EnvironmentId}",
+            new { hostname = "http://deployed.local", ignoreSslErrors = false });
+        Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
+    }
+
+    [Fact]
     public async Task Api_call_history_is_scoped_to_the_user()
     {
         int ownerCallId;

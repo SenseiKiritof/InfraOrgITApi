@@ -25,7 +25,9 @@ public static class ApplicationEnvironmentsEndpoints
     {
         await EnsureApplicationAsync(db, id, ct);
 
+        var environmentIds = await DeployedEnvironmentIdsAsync(db, id, ct);
         var environments = await db.EnvironmentDefinitions.AsNoTracking()
+            .Where(x => environmentIds.Contains(x.Id))
             .OrderBy(x => x.Name)
             .ToListAsync(ct);
         var rows = await db.ApplicationEnvironments.AsNoTracking()
@@ -56,6 +58,10 @@ public static class ApplicationEnvironmentsEndpoints
         await EnsureApplicationAsync(db, id, ct);
         if (!await db.EnvironmentDefinitions.AnyAsync(x => x.Id == environmentId, ct))
             throw Guard.NotFound("Ambiente", environmentId);
+        var deployed = await DeployedEnvironmentIdsAsync(db, id, ct);
+        if (!deployed.Contains(environmentId))
+            throw Guard.Unprocessable(
+                "L'applicazione non è deployata su server di questo ambiente.");
 
         var hostname = ValidateHostname(input.Hostname);
         var entity = await db.ApplicationEnvironments.SingleOrDefaultAsync(
@@ -80,6 +86,14 @@ public static class ApplicationEnvironmentsEndpoints
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
+
+    internal static async Task<List<int>> DeployedEnvironmentIdsAsync(
+        InfraOrgItDbContext db, int applicationId, CancellationToken ct) =>
+        await db.ServerApplications.AsNoTracking()
+            .Where(x => x.ApplicationVersion!.ApplicationId == applicationId)
+            .Select(x => x.Server!.ProviderEnvironment!.EnvironmentDefinitionId)
+            .Distinct()
+            .ToListAsync(ct);
 
     private static async Task EnsureApplicationAsync(
         InfraOrgItDbContext db, int applicationId, CancellationToken ct)

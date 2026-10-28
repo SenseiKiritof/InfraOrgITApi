@@ -56,6 +56,12 @@ public static class ApplicationApiCallEndpoints
             .SingleOrDefaultAsync(ct)
             ?? throw Guard.NotFound("API", id);
 
+        var deployed = await ApplicationEnvironmentsEndpoints.DeployedEnvironmentIdsAsync(
+            db, api.ApplicationId, ct);
+        if (!deployed.Contains(input.EnvironmentId))
+            throw Guard.Unprocessable(
+                "L'applicazione non è deployata su server di questo ambiente.");
+
         var environment = await db.ApplicationEnvironments.AsNoTracking()
             .SingleOrDefaultAsync(
                 x => x.ApplicationId == api.ApplicationId &&
