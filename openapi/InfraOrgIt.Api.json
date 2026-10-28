@@ -4737,6 +4737,10 @@
               "null",
               "string"
             ]
+          },
+          "ignoreSslErrors": {
+            "type": "boolean",
+            "default": false
           }
         }
       },
