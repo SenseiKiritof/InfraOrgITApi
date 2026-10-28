@@ -6,7 +6,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE/.."
 
 env ASPNETCORE_ENVIRONMENT=Testing \
-  ConnectionStrings__MySql='Server=localhost;Database=infraorgit;User ID=ds;Password=ds;' \
+  ConnectionStrings__MySql='Server=localhost;Database=infraorgit;User ID=infraorgit;Password=infraorgit;' \
   Oidc__Issuer='http://localhost:8080/realms/test' \
   Oidc__ClientId='test' \
   Oidc__ClientSecret='test' \

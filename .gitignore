@@ -9,3 +9,20 @@ appsettings.*.Secure.json
 .env.*
 !.env.example
 *.pfx
+appsettings.Local.json
+appsettings.*.Local.json
+appsettings.Production.json
+import-report.json
+*.dump
+*.bak
+*.sql.gz
+*.csv
+*.log
+*.pem
+*.key
+*.p12
+*.crt
+*.cer
+.opencode/
+backups/
+the legacy export
