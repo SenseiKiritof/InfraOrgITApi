@@ -1474,6 +1474,85 @@
         ]
       }
     },
+    "/api/applications/{id}/environments": {
+      "get": {
+        "tags": [
+          "ApplicationEnvironmentsEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/applications/{id}/environments/{environmentId}": {
+      "put": {
+        "tags": [
+          "ApplicationEnvironmentsEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplicationEnvironmentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
     "/api/applications/{applicationId}/api-keys": {
       "get": {
         "tags": [
@@ -1605,6 +1684,80 @@
               "format": "int32"
             }
           },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/api-calls": {
+      "get": {
+        "tags": [
+          "ApiCallsEndpoints"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/api-calls/{id}": {
+      "get": {
+        "tags": [
+          "ApiCallsEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "ApiCallsEndpoints"
+        ],
+        "parameters": [
           {
             "name": "id",
             "in": "path",
@@ -4620,8 +4773,19 @@
         }
       },
       "ApplicationApiCallInput": {
+        "required": [
+          "environmentId"
+        ],
         "type": "object",
         "properties": {
+          "environmentId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
           "query": {
             "type": [
               "null",
@@ -4636,6 +4800,10 @@
               "null",
               "string"
             ]
+          },
+          "save": {
+            "type": "boolean",
+            "default": true
           }
         }
       },
@@ -4664,6 +4832,15 @@
               "null",
               "string"
             ]
+          },
+          "environmentId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -4694,6 +4871,24 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "ApplicationEnvironmentInput": {
+        "required": [
+          "hostname",
+          "ignoreSslErrors"
+        ],
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ignoreSslErrors": {
+            "type": "boolean"
           }
         }
       },
@@ -4731,16 +4926,6 @@
               "string"
             ],
             "format": "int32"
-          },
-          "hostname": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "ignoreSslErrors": {
-            "type": "boolean",
-            "default": false
           }
         }
       },
@@ -5695,7 +5880,13 @@
       "name": "ApplicationsEndpoints"
     },
     {
+      "name": "ApplicationEnvironmentsEndpoints"
+    },
+    {
       "name": "ApplicationApiKeysEndpoints"
+    },
+    {
+      "name": "ApiCallsEndpoints"
     },
     {
       "name": "ApplicationVersionsEndpoints"

@@ -38,13 +38,6 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)");
 
-                    b.Property<string>("Hostname")
-                        .HasMaxLength(300)
-                        .HasColumnType("varchar(300)");
-
-                    b.Property<bool>("IgnoreSslErrors")
-                        .HasColumnType("tinyint(1)");
-
                     b.Property<int>("ListeningOnPort")
                         .HasColumnType("int");
 
@@ -119,6 +112,86 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("ApplicationActions");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationApiCall", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ApplicationVersionApiId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Binary")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("EnvironmentDefinitionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<string>("QueryJson")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<string>("RequestBody")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("ResponseBody")
+                        .HasColumnType("longtext");
+
+                    b.Property<long>("ResponseSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Truncated")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationVersionApiId");
+
+                    b.HasIndex("EnvironmentDefinitionId");
+
+                    b.HasIndex("Username", "CreatedAt");
+
+                    b.ToTable("ApplicationApiCalls");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationApiKey", b =>
                 {
                     b.Property<int>("Id")
@@ -135,6 +208,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("varchar(1000)");
+
+                    b.Property<int?>("EnvironmentDefinitionId")
+                        .HasColumnType("int");
 
                     b.Property<int>("KeyVersion")
                         .HasColumnType("int");
@@ -158,7 +234,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ApplicationId", "Name", "Location")
+                    b.HasIndex("EnvironmentDefinitionId");
+
+                    b.HasIndex("ApplicationId", "EnvironmentDefinitionId", "Name", "Location")
                         .IsUnique();
 
                     b.ToTable("ApplicationApiKeys", t =>
@@ -204,6 +282,45 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_ApplicationApiQueryParams_ParamType", "`ParamType` IN ('Int','String','Bool','DateTime','Double','Decimal')");
                         });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationEnvironment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<int>("ApplicationId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("EnvironmentDefinitionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Hostname")
+                        .HasMaxLength(300)
+                        .HasColumnType("varchar(300)");
+
+                    b.Property<bool>("IgnoreSslErrors")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnvironmentDefinitionId");
+
+                    b.HasIndex("ApplicationId", "EnvironmentDefinitionId")
+                        .IsUnique();
+
+                    b.ToTable("ApplicationEnvironments");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationProject", b =>
@@ -1620,6 +1737,24 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("CommandTemplate");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationApiCall", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationVersionApi", "ApplicationVersionApi")
+                        .WithMany()
+                        .HasForeignKey("ApplicationVersionApiId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", "EnvironmentDefinition")
+                        .WithMany()
+                        .HasForeignKey("EnvironmentDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ApplicationVersionApi");
+
+                    b.Navigation("EnvironmentDefinition");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationApiKey", b =>
                 {
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Application", "Application")
@@ -1628,7 +1763,14 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", "EnvironmentDefinition")
+                        .WithMany()
+                        .HasForeignKey("EnvironmentDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Application");
+
+                    b.Navigation("EnvironmentDefinition");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationApiQueryParam", b =>
@@ -1640,6 +1782,25 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("ApplicationApi");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationEnvironment", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Application", "Application")
+                        .WithMany("Environments")
+                        .HasForeignKey("ApplicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", "EnvironmentDefinition")
+                        .WithMany()
+                        .HasForeignKey("EnvironmentDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Application");
+
+                    b.Navigation("EnvironmentDefinition");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationProject", b =>
@@ -1937,6 +2098,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Application", b =>
                 {
                     b.Navigation("ApiKeys");
+
+                    b.Navigation("Environments");
 
                     b.Navigation("Versions");
                 });

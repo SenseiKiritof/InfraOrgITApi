@@ -70,6 +70,60 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Api_call_history_is_scoped_to_the_user()
+    {
+        int ownerCallId;
+        int otherCallId;
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var environment = new EnvironmentDefinition { Name = "TESTHIST", Description = "storico" };
+            db.EnvironmentDefinitions.Add(environment);
+            await db.SaveChangesAsync();
+            var environmentId = environment.Id;
+
+            var ownerCall = new ApplicationApiCall
+            {
+                Username = "history.owner",
+                EnvironmentDefinitionId = environmentId,
+                Method = "GET",
+                Url = "http://example.test/owner",
+                DurationMs = 1,
+                ResponseSizeBytes = 2,
+                ResponseBody = "{}"
+            };
+            var otherCall = new ApplicationApiCall
+            {
+                Username = "history.other",
+                EnvironmentDefinitionId = environmentId,
+                Method = "GET",
+                Url = "http://example.test/other",
+                DurationMs = 1,
+                ResponseSizeBytes = 2,
+                ResponseBody = "{}"
+            };
+            db.ApplicationApiCalls.AddRange(ownerCall, otherCall);
+            await db.SaveChangesAsync();
+            ownerCallId = ownerCall.Id;
+            otherCallId = otherCall.Id;
+        }
+
+        using var owner = await ClientForAsync("history.owner");
+        var ownerList = await owner.GetFromJsonAsync<JsonElement>("/api/api-calls");
+        Assert.Equal(1, ownerList.GetProperty("total").GetInt32());
+        Assert.Equal(ownerCallId, ownerList.GetProperty("items")[0].GetProperty("id").GetInt32());
+
+        var denied = await owner.GetAsync($"/api/api-calls/{otherCallId}");
+        Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+
+        using var other = await ClientForAsync("history.other");
+        var otherList = await other.GetFromJsonAsync<JsonElement>("/api/api-calls");
+        Assert.Equal(1, otherList.GetProperty("total").GetInt32());
+        Assert.Equal(otherCallId, otherList.GetProperty("items")[0].GetProperty("id").GetInt32());
+    }
+
+    [Fact]
     public async Task Provider_writes_require_system_admin()
     {
         using var viewer = await ClientForAsync("provider.viewer");

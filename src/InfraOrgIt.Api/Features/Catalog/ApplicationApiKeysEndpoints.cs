@@ -32,7 +32,7 @@ public static class ApplicationApiKeysEndpoints
             .Where(x => x.ApplicationId == applicationId)
             .OrderBy(x => x.Name)
             .Select(x => new ApplicationApiKeyDto(
-                x.Id, x.ApplicationId, x.Name, x.Location,
+                x.Id, x.ApplicationId, x.EnvironmentDefinitionId, x.Name, x.Location,
                 x.EncryptedValue != "", x.KeyVersion, x.CreatedAt, x.UpdatedAt, x.Version))
             .ToListAsync(ct);
 
@@ -53,7 +53,8 @@ public static class ApplicationApiKeysEndpoints
         var name = Guard.Text(input.Name, "Name", 200);
         var location = Location(input.Location);
         var value = Guard.OptionalText(input.Value, "Value", 1000);
-        await EnsureUniqueAsync(db, applicationId, name, location, null, ct);
+        await EnsureEnvironmentAsync(db, input.EnvironmentId, ct);
+        await EnsureUniqueAsync(db, applicationId, input.EnvironmentId, name, location, null, ct);
 
         var (ciphertext, keyVersion) = value is null
             ? ("", 0)
@@ -62,6 +63,7 @@ public static class ApplicationApiKeysEndpoints
         var entity = new ApplicationApiKey
         {
             ApplicationId = applicationId,
+            EnvironmentDefinitionId = input.EnvironmentId,
             Name = name,
             Location = location,
             EncryptedValue = ciphertext,
@@ -90,10 +92,12 @@ public static class ApplicationApiKeysEndpoints
 
         var name = Guard.Text(input.Name, "Name", 200);
         var location = Location(input.Location);
-        await EnsureUniqueAsync(db, applicationId, name, location, id, ct);
+        await EnsureEnvironmentAsync(db, input.EnvironmentId, ct);
+        await EnsureUniqueAsync(db, applicationId, input.EnvironmentId, name, location, id, ct);
 
         entity.Name = name;
         entity.Location = location;
+        entity.EnvironmentDefinitionId = input.EnvironmentId;
 
         // An empty value keeps the stored secret: the client never receives it.
         var value = Guard.OptionalText(input.Value, "Value", 1000);
@@ -127,10 +131,31 @@ public static class ApplicationApiKeysEndpoints
     }
 
     internal static async Task<List<ApplicationApiKey>> LoadAsync(
-        InfraOrgItDbContext db, int applicationId, CancellationToken ct) =>
-        await db.ApplicationApiKeys.AsNoTracking()
-            .Where(x => x.ApplicationId == applicationId && x.EncryptedValue != "")
+        InfraOrgItDbContext db, int applicationId, int environmentId, CancellationToken ct)
+    {
+        var keys = await db.ApplicationApiKeys.AsNoTracking()
+            .Where(x => x.ApplicationId == applicationId &&
+                        x.EncryptedValue != "" &&
+                        (x.EnvironmentDefinitionId == null ||
+                         x.EnvironmentDefinitionId == environmentId))
             .ToListAsync(ct);
+
+        return Resolve(keys);
+    }
+
+    /// <summary>An environment-specific key overrides a global one with the same name and location.</summary>
+    public static List<ApplicationApiKey> Resolve(IEnumerable<ApplicationApiKey> keys) =>
+        keys.GroupBy(x => (x.Name, x.Location))
+            .Select(group => group.OrderByDescending(x => x.EnvironmentDefinitionId is not null).First())
+            .ToList();
+
+    private static async Task EnsureEnvironmentAsync(
+        InfraOrgItDbContext db, int? environmentId, CancellationToken ct)
+    {
+        if (environmentId is not null &&
+            !await db.EnvironmentDefinitions.AnyAsync(x => x.Id == environmentId, ct))
+            throw Guard.NotFound("Ambiente", environmentId.Value);
+    }
 
     private static async Task EnsureApplicationAsync(
         InfraOrgItDbContext db, int applicationId, CancellationToken ct)
@@ -140,14 +165,18 @@ public static class ApplicationApiKeysEndpoints
     }
 
     private static async Task EnsureUniqueAsync(
-        InfraOrgItDbContext db, int applicationId, string name, string location,
+        InfraOrgItDbContext db, int applicationId, int? environmentId, string name, string location,
         int? id, CancellationToken ct)
     {
-        var exists = await db.ApplicationApiKeys.AnyAsync(
+        var query = db.ApplicationApiKeys.Where(
             x => x.ApplicationId == applicationId && x.Name == name && x.Location == location
-                 && (id == null || x.Id != id), ct);
-        if (exists)
-            throw Guard.Conflict($"Esiste già una API key {name} ({location}).");
+                 && (id == null || x.Id != id));
+        query = environmentId is null
+            ? query.Where(x => x.EnvironmentDefinitionId == null)
+            : query.Where(x => x.EnvironmentDefinitionId == environmentId);
+
+        if (await query.AnyAsync(ct))
+            throw Guard.Conflict($"Esiste già una API key {name} ({location}) per questo ambiente.");
     }
 
     private static string Location(string? value)
@@ -159,7 +188,7 @@ public static class ApplicationApiKeysEndpoints
     }
 
     private static ApplicationApiKeyDto ToDto(ApplicationApiKey entity) => new(
-        entity.Id, entity.ApplicationId, entity.Name, entity.Location,
+        entity.Id, entity.ApplicationId, entity.EnvironmentDefinitionId, entity.Name, entity.Location,
         entity.EncryptedValue != "", entity.KeyVersion,
         entity.CreatedAt, entity.UpdatedAt, entity.Version);
 }
@@ -167,11 +196,13 @@ public static class ApplicationApiKeysEndpoints
 public sealed record ApplicationApiKeyInput(
     string? Name,
     string? Location,
-    string? Value);
+    string? Value,
+    int? EnvironmentId = null);
 
 public sealed record ApplicationApiKeyDto(
     int Id,
     int ApplicationId,
+    int? EnvironmentId,
     string Name,
     string Location,
     bool HasValue,

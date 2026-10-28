@@ -25,6 +25,8 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<ApplicationVersionApi> ApplicationVersionApis => Set<ApplicationVersionApi>();
     public DbSet<ApplicationApiQueryParam> ApplicationApiQueryParams => Set<ApplicationApiQueryParam>();
     public DbSet<ApplicationApiKey> ApplicationApiKeys => Set<ApplicationApiKey>();
+    public DbSet<ApplicationEnvironment> ApplicationEnvironments => Set<ApplicationEnvironment>();
+    public DbSet<ApplicationApiCall> ApplicationApiCalls => Set<ApplicationApiCall>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<ProxyConnection> ProxyConnections => Set<ProxyConnection>();
     public DbSet<ProxyRoute> ProxyRoutes => Set<ProxyRoute>();
@@ -158,7 +160,6 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.Description).HasMaxLength(200);
             e.Property(x => x.BasePath).HasMaxLength(50);
-            e.Property(x => x.Hostname).HasMaxLength(300);
             e.HasIndex(x => x.Name).IsUnique();
             e.HasMany(x => x.Projects).WithMany(x => x.Applications)
                 .UsingEntity<ApplicationProject>(
@@ -203,12 +204,42 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.Location).HasMaxLength(10);
             e.Property(x => x.EncryptedValue).HasMaxLength(1000);
-            e.HasIndex(x => new { x.ApplicationId, x.Name, x.Location }).IsUnique();
+            e.HasIndex(x => new { x.ApplicationId, x.EnvironmentDefinitionId, x.Name, x.Location }).IsUnique();
             e.ToTable(t => t.HasCheckConstraint(
                 "CK_ApplicationApiKeys_Location",
                 "`Location` IN ('Header','Query')"));
             e.HasOne(x => x.Application).WithMany(x => x.ApiKeys)
                 .HasForeignKey(x => x.ApplicationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.EnvironmentDefinition).WithMany()
+                .HasForeignKey(x => x.EnvironmentDefinitionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ApplicationEnvironment>(e =>
+        {
+            e.Property(x => x.Hostname).HasMaxLength(300);
+            e.HasIndex(x => new { x.ApplicationId, x.EnvironmentDefinitionId }).IsUnique();
+            e.HasOne(x => x.Application).WithMany(x => x.Environments)
+                .HasForeignKey(x => x.ApplicationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.EnvironmentDefinition).WithMany()
+                .HasForeignKey(x => x.EnvironmentDefinitionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ApplicationApiCall>(e =>
+        {
+            e.Property(x => x.Username).HasMaxLength(100);
+            e.Property(x => x.Method).HasMaxLength(10);
+            e.Property(x => x.Url).HasMaxLength(1000);
+            e.Property(x => x.QueryJson).HasColumnType("longtext");
+            e.Property(x => x.RequestBody).HasColumnType("longtext");
+            e.Property(x => x.ContentType).HasMaxLength(200);
+            e.Property(x => x.Reason).HasMaxLength(200);
+            e.Property(x => x.ResponseBody).HasColumnType("longtext");
+            e.HasIndex(x => new { x.Username, x.CreatedAt });
+            e.HasIndex(x => x.ApplicationVersionApiId);
+            e.HasOne(x => x.ApplicationVersionApi).WithMany()
+                .HasForeignKey(x => x.ApplicationVersionApiId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.EnvironmentDefinition).WithMany()
+                .HasForeignKey(x => x.EnvironmentDefinitionId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Project>(e =>
