@@ -36,6 +36,9 @@ public sealed class LegacyCipher(string? base64Key)
     {
         var key = Key();
         var bytes = Convert.FromBase64String(ciphertext);
+        if (bytes.Length < NonceSize + TagSize)
+            throw new CryptographicException("Valore cifrato più corto del minimo.");
+
         var plain = new byte[bytes.Length - NonceSize - TagSize];
         using var aes = new AesGcm(key, TagSize);
         aes.Decrypt(

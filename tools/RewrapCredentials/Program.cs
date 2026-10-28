@@ -1,6 +1,6 @@
 using System.Collections;
 using System.Security.Cryptography;
-using System.Text;
+using InfraOrgIt.LegacyImport;
 using MySql.Data.MySqlClient;
 using SSecureUtils.Utils;
 
@@ -11,8 +11,6 @@ using SSecureUtils.Utils;
 
 const string KeyPrefix = "ServerAccess__CredentialKeys__";
 const string ConnectionVariable = "REWRAP_CONNECTION";
-const int NonceSize = 12;
-const int TagSize = 16;
 
 var unknown = args.Where(x => x is not ("--apply" or "--self-check")).ToArray();
 if (unknown.Length > 0)
@@ -164,46 +162,14 @@ static int? ReadCurrentVersion(Dictionary<string, string> keys)
 static bool IsNewFormat(string value) => value.StartsWith("v2:", StringComparison.Ordinal);
 
 static string Rewrap(string ciphertext, string oldKey, string newKey) =>
-    SecureUtils.Encrypt(OldDecrypt(ciphertext, oldKey), newKey);
-
-// Previous format: AES-GCM with the raw 32-byte key from base64, no prefix.
-static string OldDecrypt(string ciphertext, string base64Key)
-{
-    var key = Convert.FromBase64String(base64Key);
-    if (key.Length != 32)
-        throw new FormatException("La chiave AES-GCM deve essere di 32 byte.");
-
-    var bytes = Convert.FromBase64String(ciphertext);
-    if (bytes.Length < NonceSize + TagSize)
-        throw new CryptographicException("Valore cifrato più corto del minimo.");
-
-    var plain = new byte[bytes.Length - NonceSize - TagSize];
-    using var aes = new AesGcm(key, TagSize);
-    aes.Decrypt(
-        bytes.AsSpan(0, NonceSize),
-        bytes.AsSpan(NonceSize + TagSize),
-        bytes.AsSpan(NonceSize, TagSize),
-        plain);
-    return Encoding.UTF8.GetString(plain);
-}
-
-static string OldEncrypt(string plaintext, byte[] key)
-{
-    var data = Encoding.UTF8.GetBytes(plaintext);
-    var result = new byte[NonceSize + TagSize + data.Length];
-    var nonce = result.AsSpan(0, NonceSize);
-    RandomNumberGenerator.Fill(nonce);
-    using var aes = new AesGcm(key, TagSize);
-    aes.Encrypt(nonce, data, result.AsSpan(NonceSize + TagSize), result.AsSpan(NonceSize, TagSize));
-    return Convert.ToBase64String(result);
-}
+    SecureUtils.Encrypt(new LegacyCipher(oldKey).Decrypt(ciphertext), newKey);
 
 static int SelfCheck()
 {
     var key = Convert.ToBase64String(Enumerable.Range(0, 32).Select(x => (byte)x).ToArray());
     const string plaintext = "super-secret";
 
-    var legacy = OldEncrypt(plaintext, Convert.FromBase64String(key));
+    var legacy = new LegacyCipher(key).Encrypt(plaintext);
     if (IsNewFormat(legacy))
         throw new InvalidOperationException("Il formato legacy non deve avere il prefisso v2:");
 
