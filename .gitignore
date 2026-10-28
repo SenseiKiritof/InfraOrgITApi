@@ -13,6 +13,8 @@ appsettings.Local.json
 appsettings.*.Local.json
 appsettings.Production.json
 import-report.json
+*.sql
+!tests/**/*.sql
 *.dump
 *.bak
 *.sql.gz
@@ -25,4 +27,3 @@ import-report.json
 *.cer
 .opencode/
 backups/
-2-Topology.sql
