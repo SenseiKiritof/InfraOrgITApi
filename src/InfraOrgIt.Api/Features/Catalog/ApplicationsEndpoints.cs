@@ -35,7 +35,8 @@ public static class ApplicationsEndpoints
         if (page.Q is not null)
             query = query.Where(x => x.Name.Contains(page.Q) ||
                                      x.Description.Contains(page.Q) ||
-                                     x.BasePath.Contains(page.Q));
+                                     x.BasePath.Contains(page.Q) ||
+                                     (x.Hostname ?? "").Contains(page.Q));
 
         query = page.Sort switch
         {
@@ -76,7 +77,8 @@ public static class ApplicationsEndpoints
             Name = Guard.Text(input.Name, "Name", 200),
             Description = Guard.Text(input.Description, "Description", 200, required: false),
             BasePath = Guard.Text(input.BasePath, "BasePath", 50),
-            ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort")
+            ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort"),
+            Hostname = ValidateHostname(input.Hostname)
         };
 
         await EnsureUniqueAsync(db, entity.Name, null, ct);
@@ -104,6 +106,7 @@ public static class ApplicationsEndpoints
         entity.Description = Guard.Text(input.Description, "Description", 200, required: false);
         entity.BasePath = Guard.Text(input.BasePath, "BasePath", 50);
         entity.ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort");
+        entity.Hostname = ValidateHostname(input.Hostname);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
@@ -200,17 +203,33 @@ public static class ApplicationsEndpoints
         x.Description,
         x.BasePath,
         x.ListeningOnPort,
+        x.Hostname,
         x.Versions.Count,
         x.CreatedAt,
         x.UpdatedAt,
         x.Version);
+
+    private static string? ValidateHostname(string? value)
+    {
+        var text = Guard.OptionalText(value, "Hostname", 300);
+        if (text is null)
+            return null;
+
+        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            throw Guard.Unprocessable(
+                "Il campo Hostname deve essere un URL http/https, es. http://host:8080.");
+
+        return text.TrimEnd('/');
+    }
 }
 
 public sealed record ApplicationInput(
     string? Name,
     string? Description,
     string? BasePath,
-    int ListeningOnPort);
+    int ListeningOnPort,
+    string? Hostname = null);
 
 public sealed record ApplicationDto(
     int Id,
@@ -218,6 +237,7 @@ public sealed record ApplicationDto(
     string Description,
     string BasePath,
     int ListeningOnPort,
+    string? Hostname,
     int VersionCount,
     DateTime CreatedAt,
     DateTime UpdatedAt,

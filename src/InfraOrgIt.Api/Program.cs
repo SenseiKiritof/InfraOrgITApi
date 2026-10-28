@@ -154,6 +154,7 @@ builder.Services.AddSingleton<ConsoleSessionRegistry>();
 builder.Services.AddScoped<TopologyService>();
 builder.Services.AddScoped<DiagramService>();
 builder.Services.AddHttpClient<OidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient("application-api", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<IConfigurationManager<OpenIdConnectConfiguration>>(sp =>
 {
     var oidc = sp.GetRequiredService<IOptions<OidcOptions>>().Value;
@@ -324,6 +325,8 @@ ProviderEnvironmentsEndpoints.Map(app);
 ServersEndpoints.Map(app);
 ServerApplicationsEndpoints.Map(app);
 ApplicationsEndpoints.Map(app);
+ApplicationApiKeysEndpoints.Map(app);
+ApplicationApiCallEndpoints.Map(app);
 ApplicationVersionsEndpoints.Map(app);
 ApplicationVersionApisEndpoints.Map(app);
 ApplicationApiQueryParamsEndpoints.Map(app);

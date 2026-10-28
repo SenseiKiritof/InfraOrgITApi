@@ -24,6 +24,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<ApplicationVersion> ApplicationVersions => Set<ApplicationVersion>();
     public DbSet<ApplicationVersionApi> ApplicationVersionApis => Set<ApplicationVersionApi>();
     public DbSet<ApplicationApiQueryParam> ApplicationApiQueryParams => Set<ApplicationApiQueryParam>();
+    public DbSet<ApplicationApiKey> ApplicationApiKeys => Set<ApplicationApiKey>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<ProxyConnection> ProxyConnections => Set<ProxyConnection>();
     public DbSet<ProxyRoute> ProxyRoutes => Set<ProxyRoute>();
@@ -157,6 +158,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.Description).HasMaxLength(200);
             e.Property(x => x.BasePath).HasMaxLength(50);
+            e.Property(x => x.Hostname).HasMaxLength(300);
             e.HasIndex(x => x.Name).IsUnique();
             e.HasMany(x => x.Projects).WithMany(x => x.Applications)
                 .UsingEntity<ApplicationProject>(
@@ -194,6 +196,19 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
                 "`ParamType` IN ('Int','String','Bool','DateTime','Double','Decimal')"));
             e.HasOne(x => x.ApplicationApi).WithMany(x => x.QueryParams)
                 .HasForeignKey(x => x.ApplicationApiId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ApplicationApiKey>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Location).HasMaxLength(10);
+            e.Property(x => x.EncryptedValue).HasMaxLength(1000);
+            e.HasIndex(x => new { x.ApplicationId, x.Name, x.Location }).IsUnique();
+            e.ToTable(t => t.HasCheckConstraint(
+                "CK_ApplicationApiKeys_Location",
+                "`Location` IN ('Header','Query')"));
+            e.HasOne(x => x.Application).WithMany(x => x.ApiKeys)
+                .HasForeignKey(x => x.ApplicationId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Project>(e =>
