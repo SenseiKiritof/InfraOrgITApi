@@ -65,7 +65,7 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.ToTable("Applications", t =>
                         {
-                            t.HasCheckConstraint("CK_Applications_Type", "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka')");
+                            t.HasCheckConstraint("CK_Applications_Type", "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka','MySql','MongoDb','Redis')");
                         });
                 });
 
@@ -1338,6 +1338,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<int?>("ListenPort")
+                        .HasColumnType("int");
+
                     b.Property<string>("MappedTo")
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)");
@@ -1363,13 +1366,17 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("int");
 
+                    b.Property<string>("VirtualHost")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("TargetProxyConnectionId");
 
                     b.HasIndex("TargetServerApplicationId");
 
-                    b.HasIndex("ProxyConnectionId", "Route")
+                    b.HasIndex("ProxyConnectionId", "VirtualHost", "ListenPort", "Route")
                         .IsUnique();
 
                     b.ToTable("ProxyRoutes");
@@ -1509,11 +1516,21 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int");
 
+                    b.Property<int?>("CpuCores")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
                     b.Property<int?>("CredentialId")
                         .HasColumnType("int");
+
+                    b.Property<int?>("DiskGb")
+                        .HasColumnType("int");
+
+                    b.Property<string>("HaNode")
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
 
                     b.Property<string>("HostKeyFingerprint")
                         .HasMaxLength(100)
@@ -1532,13 +1549,28 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<int?>("JumpServerId")
                         .HasColumnType("int");
 
+                    b.Property<string>("ManagedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int?>("MemoryGb")
+                        .HasColumnType("int");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)");
 
+                    b.Property<string>("OperatingSystem")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
                     b.Property<int>("ProviderEnvironmentId")
                         .HasColumnType("int");
+
+                    b.Property<string>("PublicIpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("varchar(45)");
 
                     b.Property<int>("SshPort")
                         .ValueGeneratedOnAdd()
@@ -1572,14 +1604,37 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<int>("ApplicationVersionId")
                         .HasColumnType("int");
 
+                    b.Property<string>("ComposeDirectory")
+                        .HasMaxLength(300)
+                        .HasColumnType("varchar(300)");
+
+                    b.Property<string>("ContainerImage")
+                        .HasMaxLength(300)
+                        .HasColumnType("varchar(300)");
+
+                    b.Property<string>("ContainerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
                     b.Property<int>("ExposedPort")
                         .HasColumnType("int");
 
+                    b.Property<string>("HaRole")
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<int?>("HostPort")
+                        .HasColumnType("int");
+
                     b.Property<int?>("ProxyRouteId")
                         .HasColumnType("int");
+
+                    b.Property<string>("Runtime")
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
 
                     b.Property<int>("ServerId")
                         .HasColumnType("int");
@@ -1600,7 +1655,12 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ServerId");
 
-                    b.ToTable("ServerApplications");
+                    b.ToTable("ServerApplications", t =>
+                        {
+                            t.HasCheckConstraint("CK_ServerApplications_HaRole", "`HaRole` IN ('Primary','Secondary')");
+
+                            t.HasCheckConstraint("CK_ServerApplications_Runtime", "`Runtime` IN ('Container','Native')");
+                        });
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerCredential", b =>

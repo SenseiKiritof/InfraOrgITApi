@@ -1283,6 +1283,25 @@ public sealed class InventoryApiTests : IAsyncLifetime
             new { route = "/api" });
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
 
+        var shop = await SendAsync(envAdmin, HttpMethod.Post, $"/api/proxy-connections/{connectionId}/routes",
+            new { route = "/app", virtualHost = "shop.acme.example", listenPort = 443 });
+        Assert.Equal(HttpStatusCode.OK, shop.StatusCode);
+        var shopDto = await ReadAsync(shop);
+        Assert.Equal("shop.acme.example", shopDto.GetProperty("virtualHost").GetString());
+        Assert.Equal(443, shopDto.GetProperty("listenPort").GetInt32());
+
+        var otherHost = await SendAsync(envAdmin, HttpMethod.Post, $"/api/proxy-connections/{connectionId}/routes",
+            new { route = "/app", virtualHost = "admin.acme.example", listenPort = 443 });
+        Assert.Equal(HttpStatusCode.OK, otherHost.StatusCode);
+
+        var sameHost = await SendAsync(envAdmin, HttpMethod.Post, $"/api/proxy-connections/{connectionId}/routes",
+            new { route = "/app", virtualHost = "shop.acme.example", listenPort = 443 });
+        Assert.Equal(HttpStatusCode.Conflict, sameHost.StatusCode);
+
+        var otherPort = await SendAsync(envAdmin, HttpMethod.Post, $"/api/proxy-connections/{connectionId}/routes",
+            new { route = "/app", virtualHost = "shop.acme.example", listenPort = 8443 });
+        Assert.Equal(HttpStatusCode.OK, otherPort.StatusCode);
+
         var self = await SendAsync(envAdmin, HttpMethod.Post, "/api/proxy-connections", new
         {
             sourceServerId = first.ServerId,
@@ -1293,6 +1312,185 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         var deleted = await SendAsync(envAdmin, HttpMethod.Delete, $"/api/proxy-connections/{connectionId}");
         Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+    }
+
+
+    [Fact]
+    public async Task Server_inventory_details_round_trip_and_validation()
+    {
+        using var systemAdmin = await ClientForAsync("details.system", systemAdmin: true);
+        using var admin = await ClientForAsync("details.admin");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync("details-" + suffix);
+        await AssignEnvironmentRoleAsync(
+            systemAdmin, seeded.ProviderEnvironmentId, "details.admin", "ServerAdmin");
+        var body = new Dictionary<string, object?>
+        {
+            ["providerEnvironmentId"] = seeded.ProviderEnvironmentId,
+            ["name"] = "Details Server " + suffix,
+            ["ipAddress"] = "10.20.0.9",
+            ["hostname"] = "details.local",
+            ["sshPort"] = 22,
+            ["jumpServerId"] = null,
+            ["publicIpAddress"] = "203.0.113.10",
+            ["cpuCores"] = 4,
+            ["memoryGb"] = 16,
+            ["diskGb"] = 200,
+            ["operatingSystem"] = "Debian 12",
+            ["haNode"] = "A",
+            ["managedBy"] = "Acme Hosting"
+        };
+
+        var saved = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{seeded.ServerId}", body);
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+
+        var dto = await ReadAsync(await admin.GetAsync($"/api/servers/{seeded.ServerId}"));
+        Assert.Equal("203.0.113.10", dto.GetProperty("publicIpAddress").GetString());
+        Assert.Equal(4, dto.GetProperty("cpuCores").GetInt32());
+        Assert.Equal(16, dto.GetProperty("memoryGb").GetInt32());
+        Assert.Equal(200, dto.GetProperty("diskGb").GetInt32());
+        Assert.Equal("Debian 12", dto.GetProperty("operatingSystem").GetString());
+        Assert.Equal("A", dto.GetProperty("haNode").GetString());
+        Assert.Equal("Acme Hosting", dto.GetProperty("managedBy").GetString());
+
+        var searched = await ReadAsync(await admin.GetAsync("/api/servers?q=203.0.113.10"));
+        Assert.Contains(
+            searched.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("id").GetInt32() == seeded.ServerId);
+
+        body["publicIpAddress"] = "1.2.3";
+        var shortIp = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{seeded.ServerId}", body);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, shortIp.StatusCode);
+
+        body["publicIpAddress"] = "203.0.113.10";
+        body["cpuCores"] = 0;
+        var noCores = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{seeded.ServerId}", body);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, noCores.StatusCode);
+
+        body["cpuCores"] = 4;
+        body["memoryGb"] = -1;
+        var negativeMemory = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{seeded.ServerId}", body);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, negativeMemory.StatusCode);
+    }
+
+    [Fact]
+    public async Task Deployment_details_round_trip_and_validation()
+    {
+        using var systemAdmin = await ClientForAsync("deploy.system", systemAdmin: true);
+        using var admin = await ClientForAsync("deploy.details");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync("deploy-" + suffix);
+        await AssignEnvironmentRoleAsync(
+            systemAdmin, seeded.ProviderEnvironmentId, "deploy.details", "ServerAdmin");
+        var catalog = await SeedCatalogAsync(seeded.ServerId, suffix);
+
+        var created = await SendAsync(admin, HttpMethod.Post, $"/api/servers/{seeded.ServerId}/applications", new
+        {
+            applicationVersionId = catalog.VersionId,
+            exposedPort = 3000,
+            runtime = "Container",
+            containerImage = "registry.acme.internal/acme/crm-api",
+            containerName = "crm-api",
+            composeDirectory = "/opt/acme/crm-api",
+            hostPort = 7001,
+            haRole = "Primary"
+        });
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var createdDto = await ReadAsync(created);
+        var deployId = createdDto.GetProperty("id").GetInt32();
+        Assert.Equal("Container", createdDto.GetProperty("runtime").GetString());
+        Assert.Equal("crm-api", createdDto.GetProperty("containerName").GetString());
+        Assert.Equal("/opt/acme/crm-api", createdDto.GetProperty("composeDirectory").GetString());
+        Assert.Equal(7001, createdDto.GetProperty("hostPort").GetInt32());
+        Assert.Equal("Primary", createdDto.GetProperty("haRole").GetString());
+
+        // HostPort equal to ExposedPort is stored as null, container data is cleared.
+        var replaced = await SendAsync(admin, HttpMethod.Put, $"/api/server-applications/{deployId}", new
+        {
+            serverId = seeded.ServerId,
+            applicationVersionId = catalog.VersionId,
+            exposedPort = 7001,
+            hostPort = 7001,
+            runtime = "Native"
+        });
+        Assert.Equal(HttpStatusCode.NoContent, replaced.StatusCode);
+
+        var updated = await ReadAsync(await admin.GetAsync($"/api/server-applications/{deployId}"));
+        Assert.Equal("Native", updated.GetProperty("runtime").GetString());
+        Assert.Equal(JsonValueKind.Null, updated.GetProperty("hostPort").ValueKind);
+        Assert.Equal(JsonValueKind.Null, updated.GetProperty("containerImage").ValueKind);
+
+        var nativeWithImage = await SendAsync(admin, HttpMethod.Put, $"/api/server-applications/{deployId}", new
+        {
+            serverId = seeded.ServerId,
+            applicationVersionId = catalog.VersionId,
+            exposedPort = 3000,
+            runtime = "Native",
+            containerImage = "acme/app"
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, nativeWithImage.StatusCode);
+
+        var unknownRuntime = await SendAsync(admin, HttpMethod.Put, $"/api/server-applications/{deployId}", new
+        {
+            serverId = seeded.ServerId,
+            applicationVersionId = catalog.VersionId,
+            exposedPort = 3000,
+            runtime = "Docker"
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, unknownRuntime.StatusCode);
+
+        var unknownHaRole = await SendAsync(admin, HttpMethod.Put, $"/api/server-applications/{deployId}", new
+        {
+            serverId = seeded.ServerId,
+            applicationVersionId = catalog.VersionId,
+            exposedPort = 3000,
+            haRole = "Master"
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, unknownHaRole.StatusCode);
+
+        var badHostPort = await SendAsync(admin, HttpMethod.Put, $"/api/server-applications/{deployId}", new
+        {
+            serverId = seeded.ServerId,
+            applicationVersionId = catalog.VersionId,
+            exposedPort = 3000,
+            hostPort = 70000
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, badHostPort.StatusCode);
+    }
+
+    [Fact]
+    public async Task Application_types_include_database_products()
+    {
+        using var admin = await ClientForAsync("types.admin", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        foreach (var (type, expected) in new[]
+                 {
+                     ("MongoDb", "MongoDb"), ("mysql", "MySql"), ("Redis", "Redis")
+                 })
+        {
+            var created = await SendAsync(admin, HttpMethod.Post, "/api/applications", new
+            {
+                name = $"Type {type} {suffix}",
+                description = "",
+                basePath = "/types",
+                listeningOnPort = 8080,
+                type
+            });
+            Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+            var dto = await ReadAsync(created);
+            Assert.Equal(expected, dto.GetProperty("type").GetString());
+        }
+
+        var invalid = await SendAsync(admin, HttpMethod.Post, "/api/applications", new
+        {
+            name = "Type Oracle " + suffix,
+            description = "",
+            basePath = "/types",
+            listeningOnPort = 8080,
+            type = "Oracle"
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
     }
 
     [Fact]

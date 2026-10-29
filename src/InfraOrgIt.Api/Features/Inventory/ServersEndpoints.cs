@@ -41,6 +41,8 @@ public static class ServersEndpoints
             query = query.Where(x => x.Name.Contains(page.Q) ||
                                      x.IpAddress.Contains(page.Q) ||
                                      x.Hostname.Contains(page.Q) ||
+                                     (x.PublicIpAddress != null && x.PublicIpAddress.Contains(page.Q)) ||
+                                     (x.ManagedBy != null && x.ManagedBy.Contains(page.Q)) ||
                                      x.ProviderEnvironment!.Provider!.Name.Contains(page.Q) ||
                                      x.ProviderEnvironment!.EnvironmentDefinition!.Name.Contains(page.Q) ||
                                      (x.Credential != null && x.Credential.Name.Contains(page.Q)) ||
@@ -88,7 +90,14 @@ public static class ServersEndpoints
             IpAddress = Guard.Text(input.IpAddress, "IpAddress", 200),
             Hostname = Guard.Text(input.Hostname, "Hostname", 200),
             SshPort = input.SshPort == 0 ? 22 : Guard.Port(input.SshPort, "SshPort"),
-            JumpServerId = input.JumpServerId
+            JumpServerId = input.JumpServerId,
+            PublicIpAddress = Guard.OptionalIpAddress(input.PublicIpAddress, "PublicIpAddress"),
+            CpuCores = Guard.OptionalPositive(input.CpuCores, "CpuCores"),
+            MemoryGb = Guard.OptionalPositive(input.MemoryGb, "MemoryGb"),
+            DiskGb = Guard.OptionalPositive(input.DiskGb, "DiskGb"),
+            OperatingSystem = Guard.OptionalText(input.OperatingSystem, "OperatingSystem", 100),
+            HaNode = Guard.OptionalText(input.HaNode, "HaNode", 20),
+            ManagedBy = Guard.OptionalText(input.ManagedBy, "ManagedBy", 100)
         };
 
         await EnsureEnvironmentAsync(db, entity.ProviderEnvironmentId, ct);
@@ -120,6 +129,13 @@ public static class ServersEndpoints
         entity.Hostname = Guard.Text(input.Hostname, "Hostname", 200);
         entity.SshPort = input.SshPort == 0 ? 22 : Guard.Port(input.SshPort, "SshPort");
         entity.JumpServerId = input.JumpServerId;
+        entity.PublicIpAddress = Guard.OptionalIpAddress(input.PublicIpAddress, "PublicIpAddress");
+        entity.CpuCores = Guard.OptionalPositive(input.CpuCores, "CpuCores");
+        entity.MemoryGb = Guard.OptionalPositive(input.MemoryGb, "MemoryGb");
+        entity.DiskGb = Guard.OptionalPositive(input.DiskGb, "DiskGb");
+        entity.OperatingSystem = Guard.OptionalText(input.OperatingSystem, "OperatingSystem", 100);
+        entity.HaNode = Guard.OptionalText(input.HaNode, "HaNode", 20);
+        entity.ManagedBy = Guard.OptionalText(input.ManagedBy, "ManagedBy", 100);
 
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
@@ -212,12 +228,22 @@ public static class ServersEndpoints
         await access.RequireAdminAsync(user, [server.ProviderEnvironmentId], ct);
         await ServerApplicationsEndpoints.EnsureVersionAsync(db, input.ApplicationVersionId, ct);
 
+        var details = ServerApplicationsEndpoints.ValidateDeployment(
+            input.Runtime,
+            input.ContainerImage,
+            input.ContainerName,
+            input.ComposeDirectory,
+            input.HostPort,
+            input.ExposedPort,
+            input.HaRole);
+
         var entity = new ServerApplication
         {
             ServerId = id,
             ApplicationVersionId = input.ApplicationVersionId,
-            ExposedPort = Guard.Port(input.ExposedPort, "ExposedPort")
+            ExposedPort = details.ExposedPort
         };
+        ServerApplicationsEndpoints.ApplyDetails(entity, details);
         db.ServerApplications.Add(entity);
         await db.SaveChangesAsync(ct);
 
@@ -300,7 +326,14 @@ public static class ServersEndpoints
         x.JumpServer != null ? x.JumpServer.IpAddress : null,
         x.CreatedAt,
         x.UpdatedAt,
-        x.Version);
+        x.Version,
+        x.PublicIpAddress,
+        x.CpuCores,
+        x.MemoryGb,
+        x.DiskGb,
+        x.OperatingSystem,
+        x.HaNode,
+        x.ManagedBy);
 }
 
 public sealed record ServerInput(
@@ -309,9 +342,24 @@ public sealed record ServerInput(
     string? IpAddress,
     string? Hostname,
     int SshPort = 22,
-    int? JumpServerId = null);
+    int? JumpServerId = null,
+    string? PublicIpAddress = null,
+    int? CpuCores = null,
+    int? MemoryGb = null,
+    int? DiskGb = null,
+    string? OperatingSystem = null,
+    string? HaNode = null,
+    string? ManagedBy = null);
 
-public sealed record ServerApplicationDeployInput(int ApplicationVersionId, int ExposedPort);
+public sealed record ServerApplicationDeployInput(
+    int ApplicationVersionId,
+    int ExposedPort,
+    string? Runtime = null,
+    string? ContainerImage = null,
+    string? ContainerName = null,
+    string? ComposeDirectory = null,
+    int? HostPort = null,
+    string? HaRole = null);
 
 public sealed record ServerDto(
     int Id,
@@ -329,4 +377,11 @@ public sealed record ServerDto(
     string? JumpServerIpAddress,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    int Version);
+    int Version,
+    string? PublicIpAddress,
+    int? CpuCores,
+    int? MemoryGb,
+    int? DiskGb,
+    string? OperatingSystem,
+    string? HaNode,
+    string? ManagedBy);

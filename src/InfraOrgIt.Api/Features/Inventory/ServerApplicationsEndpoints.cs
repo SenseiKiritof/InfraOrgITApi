@@ -84,13 +84,23 @@ public static class ServerApplicationsEndpoints
         await EnsureVersionAsync(db, input.ApplicationVersionId, ct);
         await EnsureProxyRouteAsync(db, input.ProxyRouteId, ct);
 
+        var details = ValidateDeployment(
+            input.Runtime,
+            input.ContainerImage,
+            input.ContainerName,
+            input.ComposeDirectory,
+            input.HostPort,
+            input.ExposedPort,
+            input.HaRole);
+
         var entity = new ServerApplication
         {
             ServerId = input.ServerId,
             ApplicationVersionId = input.ApplicationVersionId,
-            ExposedPort = Guard.Port(input.ExposedPort, "ExposedPort"),
+            ExposedPort = details.ExposedPort,
             ProxyRouteId = input.ProxyRouteId
         };
+        ApplyDetails(entity, details);
         db.ServerApplications.Add(entity);
         await db.SaveChangesAsync(ct);
 
@@ -119,10 +129,20 @@ public static class ServerApplicationsEndpoints
         await EnsureVersionAsync(db, input.ApplicationVersionId, ct);
         await EnsureProxyRouteAsync(db, input.ProxyRouteId, ct);
 
+        var details = ValidateDeployment(
+            input.Runtime,
+            input.ContainerImage,
+            input.ContainerName,
+            input.ComposeDirectory,
+            input.HostPort,
+            input.ExposedPort,
+            input.HaRole);
+
         entity.ServerId = input.ServerId;
         entity.ApplicationVersionId = input.ApplicationVersionId;
-        entity.ExposedPort = Guard.Port(input.ExposedPort, "ExposedPort");
+        entity.ExposedPort = details.ExposedPort;
         entity.ProxyRouteId = input.ProxyRouteId;
+        ApplyDetails(entity, details);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
@@ -159,6 +179,50 @@ public static class ServerApplicationsEndpoints
             throw Guard.NotFound("Route proxy", proxyRouteId.Value);
     }
 
+    internal static DeploymentDetails ValidateDeployment(
+        string? runtime,
+        string? containerImage,
+        string? containerName,
+        string? composeDirectory,
+        int? hostPort,
+        int exposedPort,
+        string? haRole)
+    {
+        var parsedRuntime = Guard.OptionalEnum<DeploymentRuntime>(runtime, "Runtime");
+        var image = Guard.OptionalText(containerImage, "ContainerImage", 300);
+        var name = Guard.OptionalText(containerName, "ContainerName", 200);
+        var directory = Guard.OptionalText(composeDirectory, "ComposeDirectory", 300);
+
+        if (parsedRuntime != nameof(DeploymentRuntime.Container) &&
+            (image is not null || name is not null || directory is not null))
+            throw Guard.Unprocessable(
+                "ContainerImage, ContainerName e ComposeDirectory richiedono Runtime = Container.");
+
+        var port = Guard.Port(exposedPort, "ExposedPort");
+        var host = hostPort is null ? (int?)null : Guard.Port(hostPort.Value, "HostPort");
+        if (host == port)
+            host = null;
+
+        return new DeploymentDetails(
+            port,
+            parsedRuntime,
+            image,
+            name,
+            directory,
+            host,
+            Guard.OptionalEnum<DeploymentHaRole>(haRole, "HaRole"));
+    }
+
+    internal static void ApplyDetails(ServerApplication entity, DeploymentDetails details)
+    {
+        entity.Runtime = details.Runtime;
+        entity.ContainerImage = details.ContainerImage;
+        entity.ContainerName = details.ContainerName;
+        entity.ComposeDirectory = details.ComposeDirectory;
+        entity.HostPort = details.HostPort;
+        entity.HaRole = details.HaRole;
+    }
+
     internal static async Task EnsureVersionAsync(
         InfraOrgItDbContext db, int applicationVersionId, CancellationToken ct)
     {
@@ -186,14 +250,47 @@ public static class ServerApplicationsEndpoints
             x.ProxyRouteId,
             x.CreatedAt,
             x.UpdatedAt,
-            x.Version);
+            x.Version,
+            x.Runtime,
+            x.ContainerImage,
+            x.ContainerName,
+            x.ComposeDirectory,
+            x.HostPort,
+            x.HaRole);
+}
+
+internal sealed record DeploymentDetails(
+    int ExposedPort,
+    string? Runtime,
+    string? ContainerImage,
+    string? ContainerName,
+    string? ComposeDirectory,
+    int? HostPort,
+    string? HaRole);
+
+public enum DeploymentRuntime
+{
+    Container,
+    Native
+}
+
+public enum DeploymentHaRole
+{
+    Primary,
+    Secondary
 }
 
 public sealed record ServerApplicationInput(
     int ServerId,
     int ApplicationVersionId,
     int ExposedPort,
-    int? ProxyRouteId = null);
+    int? ProxyRouteId = null,
+    string? Runtime = null,
+    string? ContainerImage = null,
+    string? ContainerName = null,
+    string? ComposeDirectory = null,
+    int? HostPort = null,
+    string? HaRole = null);
 
 public sealed record ServerApplicationDto(
     int Id,
@@ -207,4 +304,10 @@ public sealed record ServerApplicationDto(
     int? ProxyRouteId,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    int Version);
+    int Version,
+    string? Runtime,
+    string? ContainerImage,
+    string? ContainerName,
+    string? ComposeDirectory,
+    int? HostPort,
+    string? HaRole);

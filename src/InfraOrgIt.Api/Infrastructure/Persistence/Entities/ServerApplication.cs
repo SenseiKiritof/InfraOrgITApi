@@ -6,6 +6,13 @@ public sealed class ServerApplication : EntityBase
     public int ApplicationVersionId { get; set; }
     public int ExposedPort { get; set; }
 
+    public string? Runtime { get; set; }
+    public string? ContainerImage { get; set; }
+    public string? ContainerName { get; set; }
+    public string? ComposeDirectory { get; set; }
+    public int? HostPort { get; set; }
+    public string? HaRole { get; set; }
+
     public int? ProxyRouteId { get; set; }
 
     public Server? Server { get; set; }

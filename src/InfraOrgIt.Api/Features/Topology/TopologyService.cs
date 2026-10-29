@@ -150,7 +150,8 @@ public sealed class TopologyService(InfraOrgItDbContext db)
                     .DistinctBy(p => p.Id)
                     .ToList(),
                 c.Routes.OrderBy(r => r.Id).Select(r => new TopologyProxyRouteDto(
-                    r.Id, r.Route, r.MappedTo, r.TargetServerApplicationId)).ToList()))
+                    r.Id, r.Route, r.MappedTo, r.TargetServerApplicationId,
+                    r.VirtualHost, r.ListenPort)).ToList()))
             .ToList());
     }
 

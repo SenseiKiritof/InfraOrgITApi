@@ -6,7 +6,7 @@ public sealed class Application : EntityBase
     public string Description { get; set; } = "";
     public string BasePath { get; set; } = "";
     public int ListeningOnPort { get; set; }
-    /// <summary>Backend, Frontend, Sftp, RabbitMq, Nginx, Elastic, Kibana, Kafka.</summary>
+    /// <summary>Backend, Frontend, Sftp, RabbitMq, Nginx, Elastic, Kibana, Kafka, MySql, MongoDb, Redis.</summary>
     public string Type { get; set; } = "Backend";
     public List<ApplicationVersion> Versions { get; set; } = [];
     public List<Project> Projects { get; set; } = [];

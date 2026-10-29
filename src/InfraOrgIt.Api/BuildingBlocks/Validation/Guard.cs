@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 
 namespace InfraOrgIt.Api.BuildingBlocks.Validation;
@@ -30,6 +32,31 @@ public static class Guard
             throw Unprocessable($"Il campo {field} deve essere tra 1 e 65535.");
         return value;
     }
+
+    public static string? OptionalIpAddress(string? value, string field)
+    {
+        var text = OptionalText(value, field, 45);
+        if (text is null)
+            return null;
+
+        // TryParse alone reads "1" as 0.0.0.1: require four dotted parts for IPv4.
+        if (!IPAddress.TryParse(text, out var address) ||
+            (address.AddressFamily == AddressFamily.InterNetwork &&
+             text.Split('.').Length != 4))
+            throw Unprocessable($"Il campo {field} non è un indirizzo IP valido.");
+        return text;
+    }
+
+    public static int? OptionalPositive(int? value, string field)
+    {
+        if (value is < 1)
+            throw Unprocessable($"Il campo {field} deve essere maggiore di zero.");
+        return value;
+    }
+
+    public static string? OptionalEnum<TEnum>(string? value, string field)
+        where TEnum : struct, System.Enum =>
+        string.IsNullOrWhiteSpace(value) ? null : Enum<TEnum>(value, field);
 
     public static string Enum<TEnum>(string? value, string field) where TEnum : struct, System.Enum
     {

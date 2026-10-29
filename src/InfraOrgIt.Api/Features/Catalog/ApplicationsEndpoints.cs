@@ -182,7 +182,8 @@ public static class ApplicationsEndpoints
 
     private static readonly string[] ApplicationTypes =
     [
-        "Backend", "Frontend", "Sftp", "RabbitMq", "Nginx", "Elastic", "Kibana", "Kafka"
+        "Backend", "Frontend", "Sftp", "RabbitMq", "Nginx", "Elastic", "Kibana", "Kafka",
+        "MySql", "MongoDb", "Redis"
     ];
 
     private static string ApplicationType(string? value)

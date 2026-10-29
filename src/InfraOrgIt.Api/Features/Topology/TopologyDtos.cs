@@ -47,7 +47,9 @@ public sealed record TopologyProxyRouteDto(
     int Id,
     string Route,
     string? MappedTo,
-    int? TargetServerApplicationId);
+    int? TargetServerApplicationId,
+    string? VirtualHost,
+    int? ListenPort);
 
 public sealed record TopologyFilter(int? ProviderId, int? EnvironmentId, int? ProjectId);
 

@@ -5579,6 +5579,21 @@
               "string"
             ],
             "format": "int32"
+          },
+          "virtualHost": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "listenPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -5681,6 +5696,45 @@
               "string"
             ],
             "format": "int32"
+          },
+          "runtime": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "containerImage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "containerName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "composeDirectory": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hostPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "haRole": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -5724,6 +5778,45 @@
               "string"
             ],
             "format": "int32"
+          },
+          "runtime": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "containerImage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "containerName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "composeDirectory": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hostPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "haRole": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -5821,6 +5914,57 @@
               "string"
             ],
             "format": "int32"
+          },
+          "publicIpAddress": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "cpuCores": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "memoryGb": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "diskGb": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "operatingSystem": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "haNode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "managedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

@@ -278,19 +278,30 @@ public static class ProxyEndpoints
         await RequireRouteAdminAsync(user, access, db, connection, input, ct);
         await ValidateRouteTargetsAsync(db, connection.Id, input, ct);
 
+        var route = Guard.Text(input.Route, "Route", 200);
+        var virtualHost = Guard.OptionalText(input.VirtualHost, "VirtualHost", 200);
+        var listenPort = input.ListenPort is null
+            ? (int?)null
+            : Guard.Port(input.ListenPort.Value, "ListenPort");
+
+        var duplicate = await db.ProxyRoutes.AnyAsync(
+            x => x.ProxyConnectionId == connection.Id &&
+                 x.Route == route &&
+                 x.VirtualHost == virtualHost &&
+                 x.ListenPort == listenPort, ct);
+        if (duplicate)
+            throw Guard.Conflict(RouteConflictMessage(route, virtualHost, listenPort));
+
         var entity = new ProxyRoute
         {
             ProxyConnectionId = connection.Id,
-            Route = Guard.Text(input.Route, "Route", 200),
+            Route = route,
+            VirtualHost = virtualHost,
+            ListenPort = listenPort,
             MappedTo = Guard.OptionalText(input.MappedTo, "MappedTo", 50),
             TargetServerApplicationId = input.TargetServerApplicationId,
             TargetProxyConnectionId = input.TargetProxyConnectionId
         };
-
-        var duplicate = await db.ProxyRoutes.AnyAsync(
-            x => x.ProxyConnectionId == connection.Id && x.Route == entity.Route, ct);
-        if (duplicate)
-            throw Guard.Conflict($"La route {entity.Route} esiste già su questa connessione.");
 
         db.ProxyRoutes.Add(entity);
         await db.SaveChangesAsync(ct);
@@ -326,13 +337,24 @@ public static class ProxyEndpoints
         await ValidateRouteTargetsAsync(db, connectionId, input, ct);
 
         var route = Guard.Text(input.Route, "Route", 200);
+        var virtualHost = Guard.OptionalText(input.VirtualHost, "VirtualHost", 200);
+        var listenPort = input.ListenPort is null
+            ? (int?)null
+            : Guard.Port(input.ListenPort.Value, "ListenPort");
+
         var duplicate = await db.ProxyRoutes.AnyAsync(
-            x => x.Id != id && x.ProxyConnectionId == connectionId && x.Route == route, ct);
+            x => x.Id != id &&
+                 x.ProxyConnectionId == connectionId &&
+                 x.Route == route &&
+                 x.VirtualHost == virtualHost &&
+                 x.ListenPort == listenPort, ct);
         if (duplicate)
-            throw Guard.Conflict($"La route {route} esiste già su questa connessione.");
+            throw Guard.Conflict(RouteConflictMessage(route, virtualHost, listenPort));
 
         entity.ProxyConnectionId = connectionId;
         entity.Route = route;
+        entity.VirtualHost = virtualHost;
+        entity.ListenPort = listenPort;
         entity.MappedTo = Guard.OptionalText(input.MappedTo, "MappedTo", 50);
         entity.TargetServerApplicationId = input.TargetServerApplicationId;
         entity.TargetProxyConnectionId = input.TargetProxyConnectionId;
@@ -467,6 +489,10 @@ public static class ProxyEndpoints
         }
     }
 
+    private static string RouteConflictMessage(
+        string route, string? virtualHost, int? listenPort) =>
+        $"La route {route} per host {virtualHost ?? "*"} e porta {listenPort?.ToString() ?? "*"} esiste già su questa connessione.";
+
     private static async Task<ProxyConnectionDto> LoadConnectionAsync(
         InfraOrgItDbContext db, int id, CancellationToken ct) =>
         await db.ProxyConnections.AsNoTracking()
@@ -512,7 +538,9 @@ public static class ProxyEndpoints
                     : null,
             x.CreatedAt,
             x.UpdatedAt,
-            x.Version);
+            x.Version,
+            x.VirtualHost,
+            x.ListenPort);
 }
 
 public enum ProxyDirection
@@ -540,7 +568,9 @@ public sealed record ProxyRouteInput(
     string? Route,
     string? MappedTo,
     int? TargetServerApplicationId,
-    int? TargetProxyConnectionId);
+    int? TargetProxyConnectionId,
+    string? VirtualHost = null,
+    int? ListenPort = null);
 
 public sealed record ProxyRouteDto(
     int Id,
@@ -552,4 +582,6 @@ public sealed record ProxyRouteDto(
     string? TargetLabel,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    int Version);
+    int Version,
+    string? VirtualHost,
+    int? ListenPort);

@@ -131,6 +131,10 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.IpAddress).HasMaxLength(200);
             e.Property(x => x.Hostname).HasMaxLength(200);
             e.Property(x => x.HostKeyFingerprint).HasMaxLength(100);
+            e.Property(x => x.PublicIpAddress).HasMaxLength(45);
+            e.Property(x => x.OperatingSystem).HasMaxLength(100);
+            e.Property(x => x.HaNode).HasMaxLength(20);
+            e.Property(x => x.ManagedBy).HasMaxLength(100);
             e.Property(x => x.SshPort).HasDefaultValue(22);
             e.HasIndex(x => x.ProviderEnvironmentId);
             e.HasIndex(x => x.CredentialId);
@@ -145,6 +149,18 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
 
         modelBuilder.Entity<ServerApplication>(e =>
         {
+            e.Property(x => x.Runtime).HasMaxLength(20);
+            e.Property(x => x.ContainerImage).HasMaxLength(300);
+            e.Property(x => x.ContainerName).HasMaxLength(200);
+            e.Property(x => x.ComposeDirectory).HasMaxLength(300);
+            e.Property(x => x.HaRole).HasMaxLength(20);
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_ServerApplications_Runtime",
+                    "`Runtime` IN ('Container','Native')");
+                t.HasCheckConstraint("CK_ServerApplications_HaRole",
+                    "`HaRole` IN ('Primary','Secondary')");
+            });
             e.HasIndex(x => x.ServerId);
             e.HasIndex(x => x.ApplicationVersionId);
             e.HasOne(x => x.Server).WithMany(x => x.ServerApplications)
@@ -164,7 +180,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.Type).HasMaxLength(20);
             e.ToTable(t => t.HasCheckConstraint(
                 "CK_Applications_Type",
-                "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka')"));
+                "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka','MySql','MongoDb','Redis')"));
             e.HasIndex(x => x.Name).IsUnique();
             e.HasMany(x => x.Projects).WithMany(x => x.Applications)
                 .UsingEntity<ApplicationProject>(
@@ -275,8 +291,9 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
         modelBuilder.Entity<ProxyRoute>(e =>
         {
             e.Property(x => x.Route).HasMaxLength(200);
+            e.Property(x => x.VirtualHost).HasMaxLength(200);
             e.Property(x => x.MappedTo).HasMaxLength(50);
-            e.HasIndex(x => new { x.ProxyConnectionId, x.Route }).IsUnique();
+            e.HasIndex(x => new { x.ProxyConnectionId, x.VirtualHost, x.ListenPort, x.Route }).IsUnique();
             e.HasIndex(x => x.TargetServerApplicationId);
             e.HasIndex(x => x.TargetProxyConnectionId);
             e.HasOne(x => x.ProxyConnection).WithMany(x => x.Routes)
