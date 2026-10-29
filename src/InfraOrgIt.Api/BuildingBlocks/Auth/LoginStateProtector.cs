@@ -12,7 +12,7 @@ namespace InfraOrgIt.Api.BuildingBlocks.Auth;
 /// </summary>
 public sealed class LoginStateProtector(IDataProtectionProvider provider)
 {
-    private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(30);
     private readonly IDataProtector _protector = provider.CreateProtector("InfraOrgIT.LoginState.v1");
 
     public string Protect(string state, string verifier) =>

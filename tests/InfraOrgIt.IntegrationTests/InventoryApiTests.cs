@@ -99,6 +99,26 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Callback_without_login_cookie_retries_login_once()
+    {
+        using var client = _factory.CreateClient(
+            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var first = await client.GetAsync("/auth/callback?code=abc&state=def");
+        Assert.Equal(HttpStatusCode.Redirect, first.StatusCode);
+        Assert.Equal("/auth/login", first.Headers.Location?.OriginalString);
+
+        var cookie = first.Headers.GetValues("Set-Cookie")
+            .First(value => value.StartsWith("infraorgit_relogin="))
+            .Split(';')[0];
+        client.DefaultRequestHeaders.Add("Cookie", cookie);
+
+        var second = await client.GetAsync("/auth/callback?code=abc&state=def");
+        Assert.Equal(HttpStatusCode.Redirect, second.StatusCode);
+        Assert.Contains("/login-error", second.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
     public async Task Menus_are_translated_by_language()
     {
         using var admin = await ClientForAsync("menu.i18n", systemAdmin: true);

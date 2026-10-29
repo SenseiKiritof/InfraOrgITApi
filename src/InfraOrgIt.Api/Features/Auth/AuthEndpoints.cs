@@ -38,7 +38,7 @@ public static class AuthEndpoints
         http.Response.Cookies.Append(
             SessionCookie.Login(secure, state),
             loginId,
-            SessionCookie.Options(secure, DateTimeOffset.UtcNow.AddMinutes(10)));
+            SessionCookie.Options(secure, DateTimeOffset.UtcNow.AddMinutes(30)));
 
         return Results.Redirect(oidc.BuildAuthorizationUrl(state, challenge));
     }
@@ -100,6 +100,7 @@ public static class AuthEndpoints
                 sessionId,
                 SessionCookie.Options(secure, refreshExpiresAt ?? session.AccessExpiresAt));
             SessionCookie.Delete(http.Response, secure, loginCookie);
+            SessionCookie.Delete(http.Response, secure, SessionCookie.Relogin(secure));
 
             return Results.Redirect(frontend.Value.BaseUrl);
         }
@@ -163,6 +164,22 @@ public static class AuthEndpoints
         var sessionId = http.Request.Cookies[SessionCookie.Session(secure)];
         if (!string.IsNullOrEmpty(sessionId) && sessions.Get(sessionId) is not null)
             return Results.Redirect(frontendBaseUrl);
+
+        // A stale callback URL (old tab, expired login page) or a lost cookie:
+        // retry the login once before showing the error page.
+        if (reason is "login_cookie_assente" or "state_non_valido")
+        {
+            var retryCookie = SessionCookie.Relogin(secure);
+            if (!http.Request.Cookies.ContainsKey(retryCookie))
+            {
+                http.Response.Cookies.Append(
+                    retryCookie, "1",
+                    SessionCookie.Options(secure, DateTimeOffset.UtcNow.AddMinutes(2)));
+                return Results.Redirect("/auth/login");
+            }
+
+            SessionCookie.Delete(http.Response, secure, retryCookie);
+        }
 
         return LoginError(http, frontendBaseUrl, reason);
     }
