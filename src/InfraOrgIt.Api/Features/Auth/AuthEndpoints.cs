@@ -19,7 +19,7 @@ public static class AuthEndpoints
 
     private static IResult StartLogin(
         HttpContext http,
-        LoginStateStore states,
+        LoginStateProtector loginStates,
         ISessionStore sessions,
         OidcClient oidc,
         IOptions<AuthOptions> auth,
@@ -32,7 +32,7 @@ public static class AuthEndpoints
 
         var state = CryptoRandom.Token(16);
         var verifier = CryptoRandom.Token(32);
-        var loginId = states.Create(state, verifier);
+        var loginId = loginStates.Protect(state, verifier);
         var challenge = CryptoRandom.Sha256Base64Url(verifier);
 
         http.Response.Cookies.Append(
@@ -47,7 +47,7 @@ public static class AuthEndpoints
         HttpContext http,
         string? code,
         string? state,
-        LoginStateStore states,
+        LoginStateProtector loginStates,
         OidcClient oidc,
         IOidcIdentityValidator identityValidator,
         UserProvisioningService users,
@@ -60,19 +60,19 @@ public static class AuthEndpoints
         var secure = auth.Value.SecureCookies;
 
         if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
-            return LoginError(http, frontend.Value.BaseUrl, "callback_non_valido");
+            return LoginFailure(http, sessions, secure, frontend.Value.BaseUrl, loggerFactory, "callback_non_valido");
 
         var loginCookie = SessionCookie.Login(secure, state);
-        if (!http.Request.Cookies.TryGetValue(loginCookie, out var loginId))
-            return LoginError(http, frontend.Value.BaseUrl, "callback_non_valido");
+        if (!http.Request.Cookies.TryGetValue(loginCookie, out var loginValue))
+            return LoginFailure(http, sessions, secure, frontend.Value.BaseUrl, loggerFactory, "login_cookie_assente");
 
-        var login = states.Consume(loginId);
-        if (login is null || !FixedTimeEquals(login.State, state))
-            return LoginError(http, frontend.Value.BaseUrl, "state_non_valido");
+        var verifier = loginStates.Verifier(loginValue, state);
+        if (verifier is null)
+            return LoginFailure(http, sessions, secure, frontend.Value.BaseUrl, loggerFactory, "state_non_valido");
 
         try
         {
-            var token = await oidc.ExchangeCodeAsync(code, login.CodeVerifier, ct);
+            var token = await oidc.ExchangeCodeAsync(code, verifier, ct);
             if (string.IsNullOrWhiteSpace(token.IdToken))
                 throw new InvalidOperationException("Keycloak non ha restituito id_token.");
 
@@ -107,7 +107,8 @@ public static class AuthEndpoints
         {
             loggerFactory.CreateLogger("AuthEndpoints").LogWarning(exception, "Login fallito");
             SessionCookie.Delete(http.Response, secure, loginCookie);
-            return LoginError(http, frontend.Value.BaseUrl, "login_fallito");
+            return LoginFailure(
+                http, sessions, secure, frontend.Value.BaseUrl, loggerFactory, "login_fallito");
         }
     }
 
@@ -143,6 +144,27 @@ public static class AuthEndpoints
 
         SessionCookie.Delete(http.Response, secure, SessionCookie.Session(secure));
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// A second callback for the same login (back button, refresh, parallel tab)
+    /// no longer fails when the first one already created the session.
+    /// </summary>
+    private static IResult LoginFailure(
+        HttpContext http,
+        ISessionStore sessions,
+        bool secure,
+        string frontendBaseUrl,
+        ILoggerFactory loggerFactory,
+        string reason)
+    {
+        loggerFactory.CreateLogger("AuthEndpoints").LogWarning("Login non completato: {Reason}", reason);
+
+        var sessionId = http.Request.Cookies[SessionCookie.Session(secure)];
+        if (!string.IsNullOrEmpty(sessionId) && sessions.Get(sessionId) is not null)
+            return Results.Redirect(frontendBaseUrl);
+
+        return LoginError(http, frontendBaseUrl, reason);
     }
 
     private static IResult LoginError(HttpContext http, string frontendBaseUrl, string code) =>

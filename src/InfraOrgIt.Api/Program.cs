@@ -146,7 +146,7 @@ builder.Services.AddOptions<SessionStoreOptions>()
     .Bind(builder.Configuration.GetSection(SessionStoreOptions.SectionName))
     .Validate(o => o.MaxSessionsPerUser is >= 1 and <= 100, "MaxSessionsPerUser tra 1 e 100.")
     .ValidateOnStart();
-builder.Services.AddSingleton<LoginStateStore>();
+builder.Services.AddSingleton<LoginStateProtector>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
