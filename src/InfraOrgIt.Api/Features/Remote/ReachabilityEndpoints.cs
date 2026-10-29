@@ -38,11 +38,9 @@ public static partial class ReachabilityEndpoints
     }
 
     private static async Task<IResult> ListGlobalAsync(
-        ClaimsPrincipal user,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
-        EnvironmentAccessService.RequireSystemAdmin(user);
         var items = await db.ReachabilityTests.AsNoTracking()
             .Where(x => x.ServerId == null)
             .OrderBy(x => x.Hostname)
@@ -149,6 +147,7 @@ public static partial class ReachabilityEndpoints
 
     private static async Task<IResult> RunForServerAsync(
         int id,
+        ReachabilityRunInput? input,
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         ISshConnector ssh,
@@ -158,12 +157,14 @@ public static partial class ReachabilityEndpoints
     {
         var server = await LoadServerAsync(db, id, ct);
         await access.RequireOperatorAsync(user, [server.ProviderEnvironmentId], ct);
-        var results = await RunOnServersAsync(user, [server], ssh, options.Value, db, ct);
+        var results = await RunOnServersAsync(
+            user, [server], ssh, options.Value, db, input?.TestIds, ct);
         return Results.Ok(results);
     }
 
     private static async Task<IResult> RunForEnvironmentAsync(
         int id,
+        ReachabilityRunInput? input,
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         ISshConnector ssh,
@@ -183,7 +184,8 @@ public static partial class ReachabilityEndpoints
             .OrderBy(x => x.Id)
             .ToListAsync(ct);
 
-        var results = await RunOnServersAsync(user, servers, ssh, options.Value, db, ct);
+        var results = await RunOnServersAsync(
+            user, servers, ssh, options.Value, db, input?.TestIds, ct);
         return Results.Ok(results);
     }
 
@@ -193,6 +195,7 @@ public static partial class ReachabilityEndpoints
         ISshConnector ssh,
         ServerAccessOptions options,
         InfraOrgItDbContext db,
+        IReadOnlyCollection<int>? testIds,
         CancellationToken ct)
     {
         var globals = await db.ReachabilityTests.AsNoTracking()
@@ -205,7 +208,10 @@ public static partial class ReachabilityEndpoints
 
         foreach (var server in servers)
         {
-            var tests = globals.Concat(server.ReachabilityTests).ToList();
+            var tests = globals
+                .Concat(server.ReachabilityTests)
+                .Where(test => testIds is null || testIds.Contains(test.Id))
+                .ToList();
             if (tests.Count == 0)
                 continue;
 
@@ -309,3 +315,5 @@ public sealed record ReachabilityResultDto(
     int? Port,
     bool Reachable,
     string? Error);
+
+public sealed record ReachabilityRunInput(int[]? TestIds = null);
