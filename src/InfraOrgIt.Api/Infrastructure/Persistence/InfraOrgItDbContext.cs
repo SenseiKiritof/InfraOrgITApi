@@ -161,6 +161,10 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.Description).HasMaxLength(200);
             e.Property(x => x.BasePath).HasMaxLength(50);
+            e.Property(x => x.Type).HasMaxLength(20);
+            e.ToTable(t => t.HasCheckConstraint(
+                "CK_Applications_Type",
+                "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka')"));
             e.HasIndex(x => x.Name).IsUnique();
             e.HasMany(x => x.Projects).WithMany(x => x.Applications)
                 .UsingEntity<ApplicationProject>(

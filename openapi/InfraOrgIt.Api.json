@@ -4984,9 +4984,11 @@
             ],
             "format": "int32"
           },
-          "isFrontend": {
-            "type": "boolean",
-            "default": false
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

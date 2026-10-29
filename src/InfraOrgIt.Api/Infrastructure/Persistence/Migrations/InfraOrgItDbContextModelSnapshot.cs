@@ -38,9 +38,6 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)");
 
-                    b.Property<bool>("IsFrontend")
-                        .HasColumnType("tinyint(1)");
-
                     b.Property<int>("ListeningOnPort")
                         .HasColumnType("int");
 
@@ -48,6 +45,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
@@ -61,7 +63,10 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Applications");
+                    b.ToTable("Applications", t =>
+                        {
+                            t.HasCheckConstraint("CK_Applications_Type", "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka')");
+                        });
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationAction", b =>

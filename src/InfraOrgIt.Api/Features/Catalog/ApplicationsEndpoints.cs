@@ -77,7 +77,7 @@ public static class ApplicationsEndpoints
             Description = Guard.Text(input.Description, "Description", 200, required: false),
             BasePath = Guard.Text(input.BasePath, "BasePath", 50),
             ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort"),
-            IsFrontend = input.IsFrontend
+            Type = ApplicationType(input.Type)
         };
 
         await EnsureUniqueAsync(db, entity.Name, null, ct);
@@ -105,7 +105,7 @@ public static class ApplicationsEndpoints
         entity.Description = Guard.Text(input.Description, "Description", 200, required: false);
         entity.BasePath = Guard.Text(input.BasePath, "BasePath", 50);
         entity.ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort");
-        entity.IsFrontend = input.IsFrontend;
+        entity.Type = ApplicationType(input.Type);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
@@ -180,6 +180,23 @@ public static class ApplicationsEndpoints
         return Results.Ok(await ApplicationVersionsEndpoints.LoadAsync(db, entity.Id, ct));
     }
 
+    private static readonly string[] ApplicationTypes =
+    [
+        "Backend", "Frontend", "Sftp", "RabbitMq", "Nginx", "Elastic", "Kibana", "Kafka"
+    ];
+
+    private static string ApplicationType(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "Backend";
+
+        var match = ApplicationTypes.FirstOrDefault(
+            type => string.Equals(type, value.Trim(), StringComparison.OrdinalIgnoreCase));
+        return match
+               ?? throw Guard.Unprocessable(
+                   $"Il campo Type ammette: {string.Join(", ", ApplicationTypes)}.");
+    }
+
     internal static async Task EnsureUniqueAsync(
         InfraOrgItDbContext db, string name, int? id, CancellationToken ct)
     {
@@ -202,7 +219,7 @@ public static class ApplicationsEndpoints
         x.Description,
         x.BasePath,
         x.ListeningOnPort,
-        x.IsFrontend,
+        x.Type,
         x.Versions.Count,
         x.CreatedAt,
         x.UpdatedAt,
@@ -214,7 +231,7 @@ public sealed record ApplicationInput(
     string? Description,
     string? BasePath,
     int ListeningOnPort,
-    bool IsFrontend = false);
+    string? Type = null);
 
 public sealed record ApplicationDto(
     int Id,
@@ -222,7 +239,7 @@ public sealed record ApplicationDto(
     string Description,
     string BasePath,
     int ListeningOnPort,
-    bool IsFrontend,
+    string Type,
     int VersionCount,
     DateTime CreatedAt,
     DateTime UpdatedAt,
