@@ -76,7 +76,8 @@ public static class ApplicationsEndpoints
             Name = Guard.Text(input.Name, "Name", 200),
             Description = Guard.Text(input.Description, "Description", 200, required: false),
             BasePath = Guard.Text(input.BasePath, "BasePath", 50),
-            ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort")
+            ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort"),
+            IsFrontend = input.IsFrontend
         };
 
         await EnsureUniqueAsync(db, entity.Name, null, ct);
@@ -104,6 +105,7 @@ public static class ApplicationsEndpoints
         entity.Description = Guard.Text(input.Description, "Description", 200, required: false);
         entity.BasePath = Guard.Text(input.BasePath, "BasePath", 50);
         entity.ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort");
+        entity.IsFrontend = input.IsFrontend;
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
@@ -200,6 +202,7 @@ public static class ApplicationsEndpoints
         x.Description,
         x.BasePath,
         x.ListeningOnPort,
+        x.IsFrontend,
         x.Versions.Count,
         x.CreatedAt,
         x.UpdatedAt,
@@ -210,7 +213,8 @@ public sealed record ApplicationInput(
     string? Name,
     string? Description,
     string? BasePath,
-    int ListeningOnPort);
+    int ListeningOnPort,
+    bool IsFrontend = false);
 
 public sealed record ApplicationDto(
     int Id,
@@ -218,6 +222,7 @@ public sealed record ApplicationDto(
     string Description,
     string BasePath,
     int ListeningOnPort,
+    bool IsFrontend,
     int VersionCount,
     DateTime CreatedAt,
     DateTime UpdatedAt,

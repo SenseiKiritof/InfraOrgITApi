@@ -4926,6 +4926,10 @@
               "string"
             ],
             "format": "int32"
+          },
+          "isFrontend": {
+            "type": "boolean",
+            "default": false
           }
         }
       },

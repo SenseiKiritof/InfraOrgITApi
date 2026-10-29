@@ -38,6 +38,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)");
 
+                    b.Property<bool>("IsFrontend")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<int>("ListeningOnPort")
                         .HasColumnType("int");
 
