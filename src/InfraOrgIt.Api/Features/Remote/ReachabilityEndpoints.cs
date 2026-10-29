@@ -244,8 +244,9 @@ public static partial class ReachabilityEndpoints
             results.AddRange(rows);
             var summary = string.Join("\n", rows.Select(row =>
                 $"{row.Hostname}:{row.Port} {(row.Reachable ? "OK" : "KO")} {row.Error}".TrimEnd()));
+            // Etichetta neutra come per la console: la traduce la UI.
             var execution = CommandAudit.Add(
-                db, username, server, "Reachability", "Test di raggiungibilità",
+                db, username, server, "Reachability", "Reachability",
                 "", startedAt, new SshCommandResult(rows.All(x => x.Reachable) ? 0 : 1, summary),
                 options);
             await db.SaveChangesAsync(ct);
