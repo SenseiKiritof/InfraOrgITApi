@@ -9,6 +9,7 @@ public static class MenuEndpoints
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/menus", async (
+            string? lang,
             ClaimsPrincipal user,
             MenuService menus,
             EnvironmentAccessService access,
@@ -24,7 +25,10 @@ public static class MenuEndpoints
             if (environmentAccess.OperatorEnvironmentIds.Count > 0)
                 roles.Add(EnvironmentAccessService.OperatorRole);
 
-            return Results.Ok(await menus.GetForRolesAsync(roles.ToArray(), ct));
+            var language = string.IsNullOrWhiteSpace(lang)
+                ? "it"
+                : lang.Trim().ToLowerInvariant();
+            return Results.Ok(await menus.GetForRolesAsync(roles.ToArray(), language, ct));
         }).RequireAuthorization();
     }
 }

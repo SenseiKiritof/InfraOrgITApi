@@ -17,7 +17,8 @@ public sealed record MenuDto(
 
 public sealed class MenuService(InfraOrgItDbContext db)
 {
-    public async Task<List<MenuDto>> GetForRolesAsync(IReadOnlyCollection<string> roles, CancellationToken ct)
+    public async Task<List<MenuDto>> GetForRolesAsync(
+        IReadOnlyCollection<string> roles, string language, CancellationToken ct)
     {
         var menus = await db.Menus
             .AsNoTracking()
@@ -25,28 +26,35 @@ public sealed class MenuService(InfraOrgItDbContext db)
             .Where(x => x.IsActive && x.IsVisible)
             .ToListAsync(ct);
 
+        var translations = await db.Translations.AsNoTracking()
+            .Where(x => x.EntityType == "Menu" && x.Field == "Name" && x.Language == language)
+            .ToDictionaryAsync(x => x.EntityId, x => x.Value, ct);
+
         var visible = menus
             .Where(x => x.Roles.Count == 0 ||
                         x.Roles.Any(role => roles.Contains(role.Name, StringComparer.OrdinalIgnoreCase)))
             .ToList();
 
         var byParent = visible.ToLookup(x => x.ParentId);
-        return BuildTree(null, byParent);
+        return BuildTree(null, byParent, translations);
     }
 
-    private static List<MenuDto> BuildTree(int? parentId, ILookup<int?, Menu> byParent) =>
+    private static List<MenuDto> BuildTree(
+        int? parentId,
+        ILookup<int?, Menu> byParent,
+        IReadOnlyDictionary<int, string> translations) =>
         byParent[parentId]
             .OrderBy(x => x.Order ?? int.MaxValue)
             .ThenBy(x => x.Id)
             .Select(x => new MenuDto(
                 x.Id,
-                x.Name,
+                translations.GetValueOrDefault(x.Id, x.Name),
                 x.Path,
                 x.IsActive,
                 x.HideBackButton,
                 x.IsVisible,
                 x.Order,
                 x.ParentId,
-                BuildTree(x.Id, byParent)))
+                BuildTree(x.Id, byParent, translations)))
             .ToList();
 }

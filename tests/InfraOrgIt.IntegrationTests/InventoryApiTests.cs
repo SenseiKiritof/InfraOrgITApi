@@ -99,6 +99,25 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Menus_are_translated_by_language()
+    {
+        using var admin = await ClientForAsync("menu.i18n", systemAdmin: true);
+
+        var english = await admin.GetFromJsonAsync<JsonElement>("/api/menus?lang=en");
+        var englishNames = english.EnumerateArray()
+            .Select(x => x.GetProperty("name").GetString())
+            .ToList();
+        Assert.Contains("Environments", englishNames);
+        Assert.Contains("Applications", englishNames);
+
+        var italian = await admin.GetFromJsonAsync<JsonElement>("/api/menus?lang=it");
+        var italianNames = italian.EnumerateArray()
+            .Select(x => x.GetProperty("name").GetString())
+            .ToList();
+        Assert.Contains("Ambienti", italianNames);
+    }
+
+    [Fact]
     public async Task Api_call_history_is_scoped_to_the_user()
     {
         int ownerCallId;

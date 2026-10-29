@@ -40,6 +40,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<ReachabilityTest> ReachabilityTests => Set<ReachabilityTest>();
     public DbSet<CommandExecution> CommandExecutions => Set<CommandExecution>();
     public DbSet<SessionRecord> Sessions => Set<SessionRecord>();
+    public DbSet<Translation> Translations => Set<Translation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -365,6 +366,15 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.HasIndex(x => x.IdempotencyKey).IsUnique();
             e.ToTable(t => t.HasCheckConstraint("CK_CommandExecutions_Kind",
                 "`Kind` IN ('Action','Reachability','Console')"));
+        });
+
+        modelBuilder.Entity<Translation>(e =>
+        {
+            e.Property(x => x.EntityType).HasMaxLength(50);
+            e.Property(x => x.Field).HasMaxLength(50);
+            e.Property(x => x.Language).HasMaxLength(10);
+            e.Property(x => x.Value).HasMaxLength(200);
+            e.HasIndex(x => new { x.EntityType, x.EntityId, x.Field, x.Language }).IsUnique();
         });
 
         modelBuilder.Entity<SessionRecord>(e =>

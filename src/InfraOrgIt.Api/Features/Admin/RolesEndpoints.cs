@@ -25,6 +25,7 @@ public static class RolesEndpoints
 
     private static async Task<IResult> ListAsync(
         HttpContext http,
+        string? lang,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -52,11 +53,13 @@ public static class RolesEndpoints
                 x.CreatedAt, x.UpdatedAt, x.Version))
             .ToListAsync(ct);
 
+        items = await WithTranslationsAsync(db, Normalize(lang), items, ct);
         return Results.Ok(new PagedResult<RoleDto>(items, total, page.Page, page.PageSize));
     }
 
     private static async Task<IResult> GetAsync(
         int id,
+        string? lang,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -69,7 +72,11 @@ public static class RolesEndpoints
                 db.ProviderEnvironmentGroupRoles.Count(a => a.RoleId == x.Id),
                 x.CreatedAt, x.UpdatedAt, x.Version))
             .SingleOrDefaultAsync(ct);
-        return dto is null ? throw Guard.NotFound("Ruolo", id) : Results.Ok(dto);
+        if (dto is null)
+            throw Guard.NotFound("Ruolo", id);
+
+        var localized = await WithTranslationsAsync(db, Normalize(lang), [dto], ct);
+        return Results.Ok(localized[0]);
     }
 
     private static async Task<IResult> CreateAsync(
@@ -150,6 +157,29 @@ public static class RolesEndpoints
         db.Roles.Remove(entity);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
+    }
+
+    private static string Normalize(string? lang) =>
+        string.IsNullOrWhiteSpace(lang) ? "it" : lang.Trim().ToLowerInvariant();
+
+    private static async Task<List<RoleDto>> WithTranslationsAsync(
+        InfraOrgItDbContext db,
+        string language,
+        List<RoleDto> items,
+        CancellationToken ct)
+    {
+        if (language == "it" || items.Count == 0)
+            return items;
+
+        var ids = items.Select(x => x.Id).ToList();
+        var labels = await db.Translations.AsNoTracking()
+            .Where(x => x.EntityType == "Role" && x.Field == "Label" &&
+                        x.Language == language && ids.Contains(x.EntityId))
+            .ToDictionaryAsync(x => x.EntityId, x => x.Value, ct);
+
+        return items
+            .Select(x => labels.TryGetValue(x.Id, out var label) ? x with { Label = label } : x)
+            .ToList();
     }
 
     private static async Task EnsureUniqueAsync(
