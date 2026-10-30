@@ -1,0 +1,82 @@
+name: tag
+
+# A merge on main whose title contains [Major], [Minor] or [Patch] creates
+# the next vX.Y.Z tag on that merge commit and starts the image build.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: tag-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+  actions: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read the merged pull request title
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '[.[] | select(.merged_at != null)][0].title // empty' 2>/dev/null || true)
+          if [ -z "$title" ]; then
+            title=$(git log -1 --pretty=%s)
+          fi
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+      - name: Detect the bump
+        id: bump
+        env:
+          TITLE: ${{ steps.pr.outputs.title }}
+        run: |
+          lower=$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]')
+          case "$lower" in
+            *"[major]"*) echo "kind=major" >> "$GITHUB_OUTPUT" ;;
+            *"[minor]"*) echo "kind=minor" >> "$GITHUB_OUTPUT" ;;
+            *"[patch]"*) echo "kind=patch" >> "$GITHUB_OUTPUT" ;;
+            *) echo "kind=" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Compute the next version
+        if: steps.bump.outputs.kind != ''
+        id: version
+        env:
+          KIND: ${{ steps.bump.outputs.kind }}
+        run: |
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          latest=${latest#v}
+          if [ -z "$latest" ]; then
+            latest=0.1.0
+          fi
+          IFS=. read -r major minor patch <<< "$latest"
+          case "$KIND" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            patch) patch=$((patch+1)) ;;
+          esac
+          echo "tag=v$major.$minor.$patch" >> "$GITHUB_OUTPUT"
+
+      - name: Tag main and start the image build
+        if: steps.bump.outputs.kind != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists."
+            exit 0
+          fi
+          git tag -a "$TAG" -m "$TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+          gh workflow run docker.yml --ref "$TAG"
