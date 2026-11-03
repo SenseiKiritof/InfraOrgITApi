@@ -14,6 +14,7 @@ using InfraOrgIt.Api.Features.Topology;
 using InfraOrgIt.Api.Features.Users;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Health;
+using InfraOrgIt.Api.Infrastructure.Files;
 using InfraOrgIt.Api.Infrastructure.Ssh;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
@@ -188,6 +189,7 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("remote-run", context => Partition(UserKey(context), 30));
     options.AddPolicy("reachability", context => Partition(UserKey(context), 10));
     options.AddPolicy("console", context => Partition(UserKey(context), 5));
+    options.AddPolicy("files", context => Partition(UserKey(context), 60));
 });
 
 var forwardedNetworks = builder.Configuration["ForwardedHeaders:KnownNetworks"];
@@ -228,7 +230,9 @@ builder.Services.AddOptions<ServerAccessOptions>()
         "MaxAuditOutputBytes tra 1 KB e MaxOutputBytes.")
     .ValidateOnStart();
 builder.Services.AddSingleton<CredentialCipher>();
+builder.Services.AddScoped<ServerCredentialResolver>();
 builder.Services.AddScoped<ISshConnector, SshConnector>();
+builder.Services.AddScoped<IFileTransferConnector, FileTransferConnector>();
 builder.Services.AddOptions<FrontendOptions>()
     .Bind(builder.Configuration.GetSection("Frontend"))
     .Validate(o => Uri.TryCreate(o.BaseUrl, UriKind.Absolute, out _), "Frontend:BaseUrl non è un URI assoluto.")
@@ -348,6 +352,7 @@ ApplicationActionsEndpoints.Map(app);
 ReachabilityEndpoints.Map(app);
 CommandExecutionEndpoints.Map(app);
 ConsoleEndpoints.Map(app);
+FileTransferEndpoints.Map(app);
 UsersEndpoints.Map(app);
 GroupsEndpoints.Map(app);
 RolesEndpoints.Map(app);
