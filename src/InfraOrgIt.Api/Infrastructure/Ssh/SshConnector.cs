@@ -1,8 +1,7 @@
-using System.Security.Cryptography;
-using System.Text;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
-using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.BuildingBlocks.Security;
+using InfraOrgIt.Api.Infrastructure.Files;
+using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -12,7 +11,7 @@ using Renci.SshNet.Common;
 namespace InfraOrgIt.Api.Infrastructure.Ssh;
 
 public sealed class SshConnector(
-    CredentialCipher cipher,
+    ServerCredentialResolver credentials,
     IOptions<ServerAccessOptions> options,
     InfraOrgItDbContext db,
     ILogger<SshConnector> logger) : ISshConnector
@@ -22,8 +21,76 @@ public sealed class SshConnector(
     public Task<ISshSession> ConnectAsync(Server server, CancellationToken ct) =>
         ConnectInternalAsync(server, new HashSet<int>(), ct);
 
+    public Task<IFileTransferSession> OpenSftpAsync(
+        Server server,
+        ServerCredential credential,
+        int port,
+        CancellationToken ct) =>
+        OpenSftpInternalAsync(server, credential, port, new HashSet<int>(), ct);
+
+    private async Task<IFileTransferSession> OpenSftpInternalAsync(
+        Server server,
+        ServerCredential credential,
+        int port,
+        HashSet<int> visited,
+        CancellationToken ct)
+    {
+        var host = HostOf(server);
+        if (server.JumpServerId is not int jumpId)
+            return new SftpFileSession(
+                await ConnectSftpClientAsync(server, credential, host, port, ct));
+
+        var (jumpSession, forwarded) =
+            await OpenTunnelAsync(server, host, port, visited, ct);
+        try
+        {
+            var client = await ConnectSftpClientAsync(
+                server, credential, "127.0.0.1", (int)forwarded.BoundPort, ct);
+            return new SftpFileSession(client, forwarded, jumpSession);
+        }
+        catch
+        {
+            forwarded.Dispose();
+            await jumpSession.DisposeAsync();
+            throw;
+        }
+    }
+
     private async Task<ISshSession> ConnectInternalAsync(
         Server server,
+        HashSet<int> visited,
+        CancellationToken ct)
+    {
+        var host = HostOf(server);
+        if (server.JumpServerId is not int jumpId)
+            return new SshSession(
+                await ConnectClientAsync(server, host, server.SshPort, ct),
+                options.Value.MaxOutputBytes);
+
+        var (jumpSession, forwarded) = await OpenTunnelAsync(
+            server, host, server.SshPort, visited, ct);
+        try
+        {
+            var client = await ConnectClientAsync(
+                server, "127.0.0.1", (int)forwarded.BoundPort, ct);
+            return new SshSession(
+                client,
+                options.Value.MaxOutputBytes,
+                forwarded,
+                jumpSession);
+        }
+        catch
+        {
+            forwarded.Dispose();
+            await jumpSession.DisposeAsync();
+            throw;
+        }
+    }
+
+    private async Task<(SshSession TunnelHost, ForwardedPortLocal Forwarded)> OpenTunnelAsync(
+        Server server,
+        string host,
+        int port,
         HashSet<int> visited,
         CancellationToken ct)
     {
@@ -33,15 +100,7 @@ public sealed class SshConnector(
                 "jump_cycle",
                 "La catena dei server proxy è ciclica.");
 
-        var host = string.IsNullOrWhiteSpace(server.IpAddress)
-            ? server.Hostname
-            : server.IpAddress;
-
-        if (server.JumpServerId is not int jumpId)
-            return new SshSession(
-                await ConnectClientAsync(server, host, server.SshPort, ct),
-                options.Value.MaxOutputBytes);
-
+        var jumpId = server.JumpServerId!.Value;
         var jump = await db.Servers.AsNoTracking()
                        .Include(x => x.Credential)
                        .SingleOrDefaultAsync(x => x.Id == jumpId, ct)
@@ -60,21 +119,12 @@ public sealed class SshConnector(
                 "Il server proxy non può essere usato come tunnel.");
         }
 
-        var forwarded = new ForwardedPortLocal(
-            "127.0.0.1", host, (uint)server.SshPort);
+        var forwarded = new ForwardedPortLocal("127.0.0.1", host, (uint)port);
         try
         {
             tunnelHost.Client.AddForwardedPort(forwarded);
             forwarded.Start();
-
-            var client = await ConnectClientAsync(
-                server, "127.0.0.1", (int)forwarded.BoundPort, ct);
-
-            return new SshSession(
-                client,
-                options.Value.MaxOutputBytes,
-                forwarded,
-                jumpSession);
+            return (tunnelHost, forwarded);
         }
         catch
         {
@@ -96,13 +146,38 @@ public sealed class SshConnector(
                              "credential_missing",
                              $"Il server {server.Name} non ha una credenziale SSH.");
 
-        var auth = BuildAuthentication(credential);
-        var connection = new Renci.SshNet.ConnectionInfo(host, port, credential.Username, auth)
+        var client = new SshClient(ConnectionFor(credential, host, port));
+        await ConnectAsync(client, server, credential, ct);
+        return client;
+    }
+
+    private async Task<SftpClient> ConnectSftpClientAsync(
+        Server server,
+        ServerCredential credential,
+        string host,
+        int port,
+        CancellationToken ct)
+    {
+        var client = new SftpClient(ConnectionFor(credential, host, port));
+        await ConnectAsync(client, server, credential, ct);
+        return client;
+    }
+
+    private Renci.SshNet.ConnectionInfo ConnectionFor(
+        ServerCredential credential,
+        string host,
+        int port) =>
+        new(host, port, credential.Username, credentials.BuildAuthentication(credential))
         {
             Timeout = ConnectTimeout
         };
 
-        var client = new SshClient(connection);
+    private async Task ConnectAsync(
+        BaseClient client,
+        Server server,
+        ServerCredential credential,
+        CancellationToken ct)
+    {
         string? received = null;
         client.HostKeyReceived += (_, args) =>
         {
@@ -131,7 +206,11 @@ public sealed class SshConnector(
                     $"La host key di {server.Name} è cambiata: verificare il server e azzerare quella salvata.");
             }
 
-            logger.LogWarning(exception, "Connessione SSH fallita per il server {ServerId}", server.Id);
+            logger.LogWarning(
+                exception,
+                "Connessione SSH fallita per il server {ServerId} ({Credential})",
+                server.Id,
+                credential.Name);
             throw new ApiException(
                 StatusCodes.Status502BadGateway,
                 "ssh_unreachable",
@@ -139,57 +218,10 @@ public sealed class SshConnector(
         }
 
         server.HostKeyFingerprint ??= received;
-        return client;
     }
 
-    private AuthenticationMethod BuildAuthentication(ServerCredential credential)
-    {
-        string secret;
-        try
-        {
-            secret = cipher.Decrypt(credential.EncryptedSecret, credential.KeyVersion);
-        }
-        catch (Exception exception) when (exception is CryptographicException or FormatException)
-        {
-            throw new ApiException(
-                StatusCodes.Status409Conflict,
-                "credential_rejected",
-                $"La credenziale {credential.Name} non è decifrabile: reinserire il segreto.");
-        }
-
-        if (credential.AuthType == "Password")
-            return new PasswordAuthenticationMethod(credential.Username, secret);
-
-        string? passphrase = null;
-        if (!string.IsNullOrEmpty(credential.EncryptedPassphrase))
-        {
-            try
-            {
-                passphrase = cipher.Decrypt(credential.EncryptedPassphrase, credential.KeyVersion);
-            }
-            catch (Exception exception) when (exception is CryptographicException or FormatException)
-            {
-                throw new ApiException(
-                    StatusCodes.Status409Conflict,
-                    "credential_rejected",
-                    $"La passphrase della credenziale {credential.Name} non è decifrabile.");
-            }
-        }
-
-        try
-        {
-            return new PrivateKeyAuthenticationMethod(
-                credential.Username,
-                new PrivateKeyFile(new MemoryStream(Encoding.UTF8.GetBytes(secret)), passphrase));
-        }
-        catch (Exception exception)
-        {
-            throw new ApiException(
-                StatusCodes.Status409Conflict,
-                "credential_rejected",
-                $"La chiave privata della credenziale {credential.Name} non è valida: {exception.Message}");
-        }
-    }
+    private static string HostOf(Server server) =>
+        string.IsNullOrWhiteSpace(server.IpAddress) ? server.Hostname : server.IpAddress;
 
     private sealed class SshSession(
         SshClient client,
@@ -250,6 +282,66 @@ public sealed class SshConnector(
         public ValueTask DisposeAsync()
         {
             stream.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class SftpFileSession(
+        SftpClient client,
+        ForwardedPortLocal? forwarded = null,
+        ISshSession? jumpSession = null) : IFileTransferSession
+    {
+        public async Task<IReadOnlyList<RemoteFileEntry>> ListAsync(
+            string path,
+            CancellationToken ct)
+        {
+            var entries = new List<RemoteFileEntry>();
+            await foreach (var entry in client.ListDirectoryAsync(
+                               RemotePath.Normalize(path), ct))
+            {
+                if (entry.Name is "." or "..") continue;
+                entries.Add(new RemoteFileEntry(
+                    entry.Name,
+                    RemotePath.Normalize(entry.FullName),
+                    entry.IsDirectory,
+                    entry.IsDirectory ? 0 : entry.Length,
+                    entry.LastWriteTimeUtc));
+            }
+
+            return entries
+                .OrderByDescending(entry => entry.IsDirectory)
+                .ThenBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        public Task DownloadAsync(string path, Stream destination, CancellationToken ct) =>
+            client.DownloadFileAsync(RemotePath.Normalize(path), destination, ct);
+
+        public Task UploadAsync(string path, Stream source, CancellationToken ct) =>
+            client.UploadFileAsync(source, RemotePath.Normalize(path), true, null, ct);
+
+        public Task CreateDirectoryAsync(string path, CancellationToken ct) =>
+            client.CreateDirectoryAsync(RemotePath.Normalize(path), ct);
+
+        public Task RenameAsync(
+            string path,
+            string newPath,
+            bool isDirectory,
+            CancellationToken ct) =>
+            client.RenameFileAsync(
+                RemotePath.Normalize(path), RemotePath.Normalize(newPath), ct);
+
+        public Task DeleteAsync(string path, bool isDirectory, CancellationToken ct) =>
+            isDirectory
+                ? client.DeleteDirectoryAsync(RemotePath.Normalize(path), ct)
+                : client.DeleteFileAsync(RemotePath.Normalize(path), ct);
+
+        public ValueTask DisposeAsync()
+        {
+            client.Dispose();
+            forwarded?.Dispose();
+            if (jumpSession is not null)
+                return jumpSession.DisposeAsync();
             return ValueTask.CompletedTask;
         }
     }

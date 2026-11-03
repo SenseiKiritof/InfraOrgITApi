@@ -1528,6 +1528,16 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<int?>("DiskGb")
                         .HasColumnType("int");
 
+                    b.Property<int?>("FileTransferCredentialId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("FileTransferPort")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FileTransferProtocol")
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
                     b.Property<string>("HaNode")
                         .HasMaxLength(20)
                         .HasColumnType("varchar(20)");
@@ -1588,11 +1598,16 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CredentialId");
 
+                    b.HasIndex("FileTransferCredentialId");
+
                     b.HasIndex("JumpServerId");
 
                     b.HasIndex("ProviderEnvironmentId");
 
-                    b.ToTable("Servers");
+                    b.ToTable("Servers", t =>
+                        {
+                            t.HasCheckConstraint("CK_Servers_FileTransferProtocol", "`FileTransferProtocol` IS NULL OR `FileTransferProtocol` IN ('Sftp','Ftp')");
+                        });
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerApplication", b =>
@@ -2166,6 +2181,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CredentialId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerCredential", "FileTransferCredential")
+                        .WithMany()
+                        .HasForeignKey("FileTransferCredentialId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", "JumpServer")
                         .WithMany()
                         .HasForeignKey("JumpServerId")
@@ -2178,6 +2198,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Credential");
+
+                    b.Navigation("FileTransferCredential");
 
                     b.Navigation("JumpServer");
 

@@ -136,13 +136,19 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.HaNode).HasMaxLength(20);
             e.Property(x => x.ManagedBy).HasMaxLength(100);
             e.Property(x => x.SshPort).HasDefaultValue(22);
+            e.Property(x => x.FileTransferProtocol).HasMaxLength(10);
             e.HasIndex(x => x.ProviderEnvironmentId);
             e.HasIndex(x => x.CredentialId);
+            e.HasIndex(x => x.FileTransferCredentialId);
             e.HasIndex(x => x.JumpServerId);
+            e.ToTable(t => t.HasCheckConstraint("CK_Servers_FileTransferProtocol",
+                "`FileTransferProtocol` IS NULL OR `FileTransferProtocol` IN ('Sftp','Ftp')"));
             e.HasOne(x => x.ProviderEnvironment).WithMany(x => x.Servers)
                 .HasForeignKey(x => x.ProviderEnvironmentId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Credential).WithMany(x => x.Servers)
                 .HasForeignKey(x => x.CredentialId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.FileTransferCredential).WithMany()
+                .HasForeignKey(x => x.FileTransferCredentialId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.JumpServer).WithMany()
                 .HasForeignKey(x => x.JumpServerId).OnDelete(DeleteBehavior.Restrict);
         });

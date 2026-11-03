@@ -199,6 +199,116 @@ public sealed class RealSshTests : IAsyncLifetime
         Assert.Equal("host_key_mismatch", problem.RootElement.GetProperty("code").GetString());
     }
 
+    [Fact]
+    public async Task Real_sftp_lists_downloads_uploads_and_deletes()
+    {
+        using var admin = await ClientForAsync("sftp.admin", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+
+        var provider = new Provider { Name = "SFTP Provider " + suffix };
+        var environment = new EnvironmentDefinition { Name = "SFTP Env " + suffix, Description = "" };
+        db.Providers.Add(provider);
+        db.EnvironmentDefinitions.Add(environment);
+        await db.SaveChangesAsync();
+
+        var providerEnvironment = new ProviderEnvironment
+        {
+            ProviderId = provider.Id,
+            EnvironmentDefinitionId = environment.Id
+        };
+        db.ProviderEnvironments.Add(providerEnvironment);
+        await db.SaveChangesAsync();
+
+        var server = new Server
+        {
+            ProviderEnvironmentId = providerEnvironment.Id,
+            Name = "SFTP Server " + suffix,
+            IpAddress = "127.0.0.1",
+            Hostname = "localhost",
+            SshPort = _ssh.GetMappedPublicPort(2222)
+        };
+        db.Servers.Add(server);
+        await db.SaveChangesAsync();
+
+        var credential = await ReadAsync(await SendAsync(admin, HttpMethod.Post,
+            "/api/server-credentials", new
+            {
+                name = "SFTP Credential " + suffix,
+                username = "test",
+                authType = "Password",
+                secret = "testpass"
+            }));
+        await SendAsync(admin, HttpMethod.Put, $"/api/servers/{server.Id}/file-transfer", new
+        {
+            protocol = "Sftp",
+            port = _ssh.GetMappedPublicPort(2222),
+            credentialId = credential.GetProperty("id").GetInt32()
+        });
+        await AssignServerAdminAsync(admin, providerEnvironment.Id, "sftp.admin");
+
+        await _ssh.ExecAsync(
+            ["sh", "-c", "mkdir -p /config/sftp && chown 1000:1000 /config/sftp && echo ciao > /config/sftp/hello.txt"]);
+
+        var listing = await ReadAsync(await admin.GetAsync(
+            $"/api/servers/{server.Id}/files?path=/config/sftp"));
+        Assert.Contains(
+            listing.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("name").GetString() == "hello.txt");
+
+        var download = await admin.GetAsync(
+            $"/api/servers/{server.Id}/files/download?path=/config/sftp/hello.txt");
+        Assert.Equal(HttpStatusCode.OK, download.StatusCode);
+        Assert.Contains("ciao", await download.Content.ReadAsStringAsync());
+
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent("contenuto caricato"), "file", "uploaded.txt");
+        using var uploadRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/servers/{server.Id}/files/upload?path=/config/sftp")
+        {
+            Content = form
+        };
+        uploadRequest.Headers.Add("X-CSRF-Token", "csrf");
+        uploadRequest.Headers.Add("Origin", "http://localhost:3000");
+        var upload = await admin.SendAsync(uploadRequest);
+        Assert.True(
+            upload.StatusCode == HttpStatusCode.OK,
+            await upload.Content.ReadAsStringAsync());
+        var uploaded = await _ssh.ExecAsync(["cat", "/config/sftp/uploaded.txt"]);
+        Assert.Equal(0, uploaded.ExitCode);
+        Assert.Contains("contenuto caricato", uploaded.Stdout);
+
+        var deleted = await SendAsync(
+            admin,
+            HttpMethod.Delete,
+            $"/api/servers/{server.Id}/files?path=/config/sftp/uploaded.txt&isDirectory=false");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        var removed = await _ssh.ExecAsync(["test", "-e", "/config/sftp/uploaded.txt"]);
+        Assert.NotEqual(0, removed.ExitCode);
+    }
+
+    private async Task AssignServerAdminAsync(
+        HttpClient admin, int environmentId, string username)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        var user = await db.Users.SingleAsync(x => x.Username == username);
+        var group = new Group { Name = "SFTP Group " + Guid.NewGuid().ToString("N")[..8] };
+        db.Groups.Add(group);
+        await db.SaveChangesAsync();
+        db.GroupUsers.Add(new GroupUser { GroupsId = group.Id, UsersId = user.Id });
+        var role = await db.Roles.SingleAsync(x => x.Name == "ServerAdmin");
+        await db.SaveChangesAsync();
+
+        var response = await SendAsync(admin, HttpMethod.Post,
+            $"/api/provider-environments/{environmentId}/group-roles",
+            new { groupId = group.Id, roleId = role.Id });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     private async Task AssignOperatorAsync(HttpClient admin, int environmentId, string username)
     {
         using var scope = _factory.Services.CreateScope();

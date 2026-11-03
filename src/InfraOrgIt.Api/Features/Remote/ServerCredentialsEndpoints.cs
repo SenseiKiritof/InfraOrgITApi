@@ -156,7 +156,8 @@ public static class ServerCredentialsEndpoints
         var entity = await db.ServerCredentials.SingleOrDefaultAsync(x => x.Id == id, ct)
                      ?? throw Guard.NotFound("Credenziale", id);
 
-        var servers = await db.Servers.CountAsync(x => x.CredentialId == id, ct);
+        var servers = await db.Servers.CountAsync(
+            x => x.CredentialId == id || x.FileTransferCredentialId == id, ct);
         if (servers > 0)
             throw Guard.Conflict($"Credenziale usata da {servers} server: rimuovere l'assegnazione prima.");
 
