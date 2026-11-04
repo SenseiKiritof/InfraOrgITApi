@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Security;
+using InfraOrgIt.Api.Infrastructure.Files;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 using InfraOrgIt.Api.Infrastructure.Ssh;
@@ -33,6 +34,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
     private WebApplicationFactory<Program> _factory = null!;
     private readonly FakeSsh _ssh = new();
+    private readonly FakeFileTransfer _files = new();
 
     public async Task InitializeAsync()
     {
@@ -56,6 +58,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
             {
                 services.RemoveAll<ISshConnector>();
                 services.AddSingleton<ISshConnector>(_ssh);
+                services.RemoveAll<IFileTransferConnector>();
+                services.AddSingleton<IFileTransferConnector>(_files);
             });
         });
 
@@ -778,6 +782,54 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         var blocked = await SendAsync(admin, HttpMethod.Delete, $"/api/servers/{firstId}");
         Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+    }
+
+    [Fact]
+    public async Task File_transfer_configuration_and_listing_respect_roles()
+    {
+        using var system = await ClientForAsync("files.system", systemAdmin: true);
+        using var admin = await ClientForAsync("files.admin");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        await AssignEnvironmentRoleAsync(
+            system, seeded.ProviderEnvironmentId, "files.admin", "ServerAdmin");
+
+        var denied = await SendAsync(
+            admin,
+            HttpMethod.Put,
+            $"/api/servers/{seeded.ServerId}/file-transfer",
+            new { protocol = "Sftp", port = 22 });
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+        var invalid = await SendAsync(
+            system,
+            HttpMethod.Put,
+            $"/api/servers/{seeded.ServerId}/file-transfer",
+            new { protocol = "Ftps", port = 21 });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
+
+        var saved = await SendAsync(
+            system,
+            HttpMethod.Put,
+            $"/api/servers/{seeded.ServerId}/file-transfer",
+            new { protocol = "Sftp", port = 2222 });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+
+        var server = await system.GetFromJsonAsync<JsonElement>(
+            $"/api/servers/{seeded.ServerId}");
+        Assert.Equal("Sftp", server.GetProperty("fileTransferProtocol").GetString());
+        Assert.Equal(2222, server.GetProperty("fileTransferPort").GetInt32());
+
+        var noRole = await system.GetAsync(
+            $"/api/servers/{seeded.ServerId}/files?path=/");
+        Assert.Equal(HttpStatusCode.Forbidden, noRole.StatusCode);
+
+        var listing = await ReadAsync(await admin.GetAsync(
+            $"/api/servers/{seeded.ServerId}/files?path=/"));
+        Assert.Equal("/", listing.GetProperty("path").GetString());
+        Assert.Equal(
+            "readme.txt",
+            listing.GetProperty("items")[0].GetProperty("name").GetString());
     }
 
     [Fact]
@@ -1678,6 +1730,45 @@ public sealed class InventoryApiTests : IAsyncLifetime
         return Encoding.UTF8.GetString(received.ToArray());
     }
 
+    private sealed class FakeFileTransfer : IFileTransferConnector
+    {
+        public Task<IFileTransferSession> ConnectAsync(
+            Server server, CancellationToken ct) =>
+            Task.FromResult<IFileTransferSession>(new Session());
+
+        private sealed class Session : IFileTransferSession
+        {
+            public Task<IReadOnlyList<RemoteFileEntry>> ListAsync(
+                string path, CancellationToken ct) =>
+                Task.FromResult<IReadOnlyList<RemoteFileEntry>>(
+                [
+                    new RemoteFileEntry(
+                        "readme.txt", "/readme.txt", false, 12, DateTime.UtcNow)
+                ]);
+
+            public Task DownloadAsync(
+                string path, Stream destination, CancellationToken ct) =>
+                Task.CompletedTask;
+
+            public Task UploadAsync(
+                string path, Stream source, CancellationToken ct) =>
+                Task.CompletedTask;
+
+            public Task CreateDirectoryAsync(string path, CancellationToken ct) =>
+                Task.CompletedTask;
+
+            public Task RenameAsync(
+                string path, string newPath, bool isDirectory, CancellationToken ct) =>
+                Task.CompletedTask;
+
+            public Task DeleteAsync(
+                string path, bool isDirectory, CancellationToken ct) =>
+                Task.CompletedTask;
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
+
     private sealed class FakeSsh : ISshConnector
     {
         public SshCommandResult Result { get; set; } = new(0, "");
@@ -1686,6 +1777,10 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         public Task<ISshSession> ConnectAsync(Server server, CancellationToken ct) =>
             Task.FromResult<ISshSession>(new FakeSession(this));
+
+        public Task<InfraOrgIt.Api.Infrastructure.Files.IFileTransferSession> OpenSftpAsync(
+            Server server, ServerCredential credential, int port, CancellationToken ct) =>
+            throw new NotSupportedException();
 
         private sealed class FakeSession(FakeSsh owner) : ISshSession
         {
