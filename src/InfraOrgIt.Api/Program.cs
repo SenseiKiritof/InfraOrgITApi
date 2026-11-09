@@ -1,3 +1,4 @@
+using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
@@ -27,6 +28,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.OpenApi;
+using ModelContextProtocol.AspNetCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -151,6 +153,12 @@ builder.Services.AddSingleton<LoginStateProtector>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
+builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<ApiTokenService>();
+builder.Services
+    .AddMcpServer()
+    .WithHttpTransport(options => options.Stateless = true)
+    .WithToolsFromAssembly();
 builder.Services.AddSingleton<ConsoleSessionRegistry>();
 builder.Services.AddScoped<TopologyService>();
 builder.Services.AddScoped<DiagramService>();
@@ -241,8 +249,15 @@ builder.Services.AddOptions<FrontendOptions>()
 builder.Services
     .AddAuthentication(SessionAuthenticationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, SessionAuthenticationHandler>(
-        SessionAuthenticationHandler.SchemeName, _ => { });
-builder.Services.AddAuthorization();
+        SessionAuthenticationHandler.SchemeName, _ => { })
+    .AddScheme<AuthenticationSchemeOptions, ApiTokenAuthenticationHandler>(
+        ApiTokenAuthenticationHandler.SchemeName, _ => { });
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("Mcp", policy => policy
+        .AddAuthenticationSchemes(ApiTokenAuthenticationHandler.SchemeName)
+        .RequireAuthenticatedUser());
+});
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 
@@ -359,6 +374,10 @@ RolesEndpoints.Map(app);
 MenusAdminEndpoints.Map(app);
 ProviderEnvironmentGroupRolesEndpoints.Map(app);
 ProxyEndpoints.Map(app);
+ApiTokensEndpoints.Map(app);
+
+if (builder.Configuration.GetValue("Mcp:Enabled", true))
+    app.MapMcp("/mcp").RequireAuthorization("Mcp");
 
 app.Run();
 

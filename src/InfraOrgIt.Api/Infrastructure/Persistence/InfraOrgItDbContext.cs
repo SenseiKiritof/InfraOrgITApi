@@ -41,6 +41,8 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<CommandExecution> CommandExecutions => Set<CommandExecution>();
     public DbSet<SessionRecord> Sessions => Set<SessionRecord>();
     public DbSet<Translation> Translations => Set<Translation>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -393,6 +395,41 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.HasIndex(x => x.IdempotencyKey).IsUnique();
             e.ToTable(t => t.HasCheckConstraint("CK_CommandExecutions_Kind",
                 "`Kind` IN ('Action','Reachability','Console')"));
+        });
+
+        modelBuilder.Entity<AuditEvent>(e =>
+        {
+            e.Property(x => x.Kind).HasMaxLength(30);
+            e.Property(x => x.ActorUsername).HasMaxLength(100);
+            e.Property(x => x.ClientId).HasMaxLength(100);
+            e.Property(x => x.Action).HasMaxLength(100);
+            e.Property(x => x.TargetType).HasMaxLength(30);
+            e.Property(x => x.TargetHost).HasMaxLength(300);
+            e.Property(x => x.Outcome).HasMaxLength(20);
+            e.Property(x => x.ErrorCode).HasMaxLength(100);
+            e.Property(x => x.CorrelationId).HasMaxLength(100);
+            e.Property(x => x.DetailJson).HasColumnType("longtext");
+            e.HasIndex(x => x.OccurredAt);
+            e.HasIndex(x => new { x.Kind, x.OccurredAt });
+            e.HasIndex(x => new { x.ActorUsername, x.OccurredAt });
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_AuditEvents_Kind",
+                    "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError')");
+                t.HasCheckConstraint("CK_AuditEvents_Outcome",
+                    "`Outcome` IN ('Ok','Error','Denied')");
+            });
+        });
+
+        modelBuilder.Entity<ApiToken>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.Property(x => x.Scopes).HasMaxLength(500);
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Translation>(e =>
