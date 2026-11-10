@@ -285,7 +285,16 @@ builder.Services.AddAuthorization(options =>
         };
         if (mcpOidcConfigured)
             schemes.Add(JwtBearerDefaults.AuthenticationScheme);
-        policy.AddAuthenticationSchemes([.. schemes]).RequireAuthenticatedUser();
+        policy.AddAuthenticationSchemes([.. schemes])
+            .RequireAuthenticatedUser()
+            .RequireAssertion(context =>
+            {
+                var scopes = context.User.FindAll("scope")
+                    .SelectMany(claim => claim.Value.Split(
+                        ' ', StringSplitOptions.RemoveEmptyEntries));
+                return scopes.Contains("mcp:read", StringComparer.Ordinal) ||
+                       scopes.Contains("mcp:operate", StringComparer.Ordinal);
+            });
     });
 });
 builder.Services.AddProblemDetails();
