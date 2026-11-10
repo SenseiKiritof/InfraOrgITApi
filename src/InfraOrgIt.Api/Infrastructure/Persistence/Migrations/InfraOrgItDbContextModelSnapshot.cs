@@ -917,6 +917,47 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("GroupUser", (string)null);
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpGrant", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("EnvironmentDefinitionId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("GroupId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnvironmentDefinitionId");
+
+                    b.HasIndex("GroupId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("Action", "EnvironmentDefinitionId");
+
+                    b.ToTable("McpGrants", t =>
+                        {
+                            t.HasCheckConstraint("CK_McpGrants_Action", "`Action` IN ('reachability.run','actions.run','*')");
+
+                            t.HasCheckConstraint("CK_McpGrants_Subject", "((`UserId` IS NULL) + (`GroupId` IS NULL)) = 1");
+                        });
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Menu", b =>
                 {
                     b.Property<int>("Id")
@@ -2163,6 +2204,30 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasForeignKey("UsersId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Group");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpGrant", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", "EnvironmentDefinition")
+                        .WithMany()
+                        .HasForeignKey("EnvironmentDefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Group", "Group")
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("EnvironmentDefinition");
 
                     b.Navigation("Group");
 

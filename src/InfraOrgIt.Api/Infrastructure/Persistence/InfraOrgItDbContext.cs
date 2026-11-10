@@ -43,6 +43,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<Translation> Translations => Set<Translation>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
+    public DbSet<McpGrant> McpGrants => Set<McpGrant>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -430,6 +431,28 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.HasIndex(x => x.UserId);
             e.HasOne(x => x.User).WithMany()
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<McpGrant>(e =>
+        {
+            e.Property(x => x.Action).HasMaxLength(50);
+            e.HasIndex(x => x.UserId);
+            e.HasIndex(x => x.GroupId);
+            e.HasIndex(x => new { x.Action, x.EnvironmentDefinitionId });
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_McpGrants_Subject",
+                    "((`UserId` IS NULL) + (`GroupId` IS NULL)) = 1");
+                t.HasCheckConstraint("CK_McpGrants_Action",
+                    "`Action` IN ('reachability.run','actions.run','*')");
+            });
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Group).WithMany()
+                .HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.EnvironmentDefinition).WithMany()
+                .HasForeignKey(x => x.EnvironmentDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Translation>(e =>
