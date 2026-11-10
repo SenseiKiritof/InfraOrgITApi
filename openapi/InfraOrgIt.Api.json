@@ -342,6 +342,23 @@
         ]
       }
     },
+    "/api/audit-events": {
+      "get": {
+        "tags": [
+          "InfraOrgIt.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
     "/api/socket/servers/{id}/console": {
       "get": {
         "tags": [
