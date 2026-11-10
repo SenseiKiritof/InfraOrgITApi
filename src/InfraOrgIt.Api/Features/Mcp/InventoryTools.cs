@@ -69,6 +69,22 @@ public static class InventoryTools
         CancellationToken ct,
         [Description("Server id")] int id)
     {
+        var json = await LoadServerJsonAsync(db, id, ct);
+        if (json is null)
+        {
+            await McpToolAudit.RecordAsync(audit, user, "get_server", "Error", new { id }, "not_found", ct);
+            throw new McpException($"Server {id} non trovato.");
+        }
+
+        await McpToolAudit.OkAsync(audit, user, "get_server", new { id }, ct);
+        return json;
+    }
+
+    internal static async Task<string?> LoadServerJsonAsync(
+        InfraOrgItDbContext db,
+        int id,
+        CancellationToken ct)
+    {
         var item = await db.Servers.AsNoTracking()
             .Where(x => x.Id == id)
             .Select(x => new
@@ -100,14 +116,52 @@ public static class InventoryTools
             })
             .SingleOrDefaultAsync(ct);
 
-        if (item is null)
-        {
-            await McpToolAudit.RecordAsync(audit, user, "get_server", "Error", new { id }, "not_found", ct);
-            throw new McpException($"Server {id} non trovato.");
-        }
+        return item is null
+            ? null
+            : JsonSerializer.Serialize(item, JsonOptions);
+    }
 
-        await McpToolAudit.OkAsync(audit, user, "get_server", new { id }, ct);
-        return JsonSerializer.Serialize(item, JsonOptions);
+    internal static async Task<string?> LoadApplicationJsonAsync(
+        InfraOrgItDbContext db,
+        int id,
+        CancellationToken ct)
+    {
+        var item = await db.Applications.AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => new
+            {
+                id = x.Id,
+                name = x.Name,
+                description = x.Description,
+                basePath = x.BasePath,
+                listeningOnPort = x.ListeningOnPort,
+                type = x.Type,
+                versions = x.Versions
+                    .OrderByDescending(v => v.CreatedAt)
+                    .Select(v => new
+                    {
+                        id = v.Id,
+                        versionNumber = v.VersionNumber,
+                        createdAt = v.CreatedAt
+                    }),
+                deployments = x.Versions
+                    .SelectMany(v => v.ServerApplications)
+                    .Select(sa => new
+                    {
+                        id = sa.Id,
+                        serverId = sa.ServerId,
+                        serverName = sa.Server!.Name,
+                        version = sa.ApplicationVersion!.VersionNumber,
+                        exposedPort = sa.ExposedPort,
+                        hostPort = sa.HostPort,
+                        containerName = sa.ContainerName
+                    })
+            })
+            .SingleOrDefaultAsync(ct);
+
+        return item is null
+            ? null
+            : JsonSerializer.Serialize(item, JsonOptions);
     }
 
     [McpServerTool(Name = "list_applications")]
