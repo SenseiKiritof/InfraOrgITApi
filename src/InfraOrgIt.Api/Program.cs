@@ -159,6 +159,7 @@ builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddHostedService<TunnelSessionCleanupService>();
 builder.Services.AddOptions<AuditRetentionOptions>()
     .Bind(builder.Configuration.GetSection(AuditRetentionOptions.SectionName))
     .Validate(o => o.RetentionDays is >= 1 and <= 3650, "Audit:RetentionDays tra 1 e 3650.")
@@ -213,6 +214,8 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("reachability", context => Partition(UserKey(context), 10));
     options.AddPolicy("console", context => Partition(UserKey(context), 5));
     options.AddPolicy("files", context => Partition(UserKey(context), 60));
+    options.AddPolicy("mcp", context => Partition(ActorKey(context), 120));
+    options.AddPolicy("tunnels", context => Partition(ActorKey(context), 120));
 });
 
 var forwardedNetworks = builder.Configuration["ForwardedHeaders:KnownNetworks"];
@@ -468,7 +471,7 @@ static bool HasScope(ClaimsPrincipal user, params string[] allowed)
 if (builder.Configuration.GetValue("Mcp:Enabled", true))
     app.MapMcp("/mcp")
         .RequireAuthorization("Mcp")
-        .RequireRateLimiting("remote-run");
+        .RequireRateLimiting("mcp");
 
 app.Run();
 
@@ -489,6 +492,12 @@ public partial class Program
 
     private static string UserKey(HttpContext context) =>
         context.User.Identity?.Name ?? ClientKey(context);
+
+    // Token callers get one budget per token; cookie/JWT callers per username.
+    private static string ActorKey(HttpContext context) =>
+        context.User.FindFirst("api_token_id")?.Value is { Length: > 0 } tokenId
+            ? $"token:{tokenId}"
+            : UserKey(context);
 
     private static Task WriteHealth(HttpContext context, HealthReport report)
     {
