@@ -78,19 +78,25 @@ public sealed class EnvironmentAccessService(InfraOrgItDbContext db)
     /// Token principals (API tokens, OAuth) carry no role claims, so resolve
     /// SystemAdmin from the database by username.
     /// </summary>
-    public async Task RequireSystemAdminAsync(
+    public async Task<bool> IsSystemAdminAsync(
         ClaimsPrincipal user,
         CancellationToken ct)
     {
         var username = user.Identity?.Name ?? "";
-        var isAdmin = await (
+        return await (
                 from u in db.Users.AsNoTracking()
                 join ru in db.RoleUsers.AsNoTracking() on u.Id equals ru.UsersId
                 join role in db.Roles.AsNoTracking() on ru.RolesId equals role.Id
                 where u.Username == username && role.Name == SystemAdminRole
                 select role.Id)
             .AnyAsync(ct);
-        if (!isAdmin)
+    }
+
+    public async Task RequireSystemAdminAsync(
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        if (!await IsSystemAdminAsync(user, ct))
             throw Guard.Forbidden($"Operazione riservata a {SystemAdminRole}.");
     }
 }

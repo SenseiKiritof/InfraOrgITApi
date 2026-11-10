@@ -44,6 +44,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
     public DbSet<McpGrant> McpGrants => Set<McpGrant>();
+    public DbSet<TunnelSession> TunnelSessions => Set<TunnelSession>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -462,6 +463,25 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.Language).HasMaxLength(10);
             e.Property(x => x.Value).HasMaxLength(200);
             e.HasIndex(x => new { x.EntityType, x.EntityId, x.Field, x.Language }).IsUnique();
+        });
+
+        modelBuilder.Entity<TunnelSession>(e =>
+        {
+            e.Property(x => x.SessionKey).HasMaxLength(100);
+            e.Property(x => x.ActorUsername).HasMaxLength(100);
+            e.Property(x => x.ClientId).HasMaxLength(100);
+            e.Property(x => x.TargetHost).HasMaxLength(255);
+            e.Property(x => x.Outcome).HasMaxLength(20);
+            e.Property(x => x.ErrorCode).HasMaxLength(100);
+            e.Property(x => x.StartedAt).HasColumnType("datetime(6)");
+            e.Property(x => x.LastSeenAt).HasColumnType("datetime(6)");
+            e.Property(x => x.EndedAt).HasColumnType("datetime(6)");
+            e.HasIndex(x => new { x.UserId, x.SessionKey }).IsUnique();
+            e.HasIndex(x => new { x.Outcome, x.LastSeenAt });
+            e.HasIndex(x => x.ServerId);
+            e.HasIndex(x => x.ActorUsername);
+            e.ToTable(t => t.HasCheckConstraint("CK_TunnelSessions_Outcome",
+                "`Outcome` IN ('Active','Stopped','Error','Stale')"));
         });
 
         modelBuilder.Entity<SessionRecord>(e =>
