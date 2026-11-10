@@ -7,6 +7,7 @@ using InfraOrgIt.Api.Features.Admin;
 using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Features.Catalog;
 using InfraOrgIt.Api.Features.Inventory;
+using InfraOrgIt.Api.Features.Mcp;
 using InfraOrgIt.Api.Features.Menus;
 using InfraOrgIt.Api.Features.Remote;
 using InfraOrgIt.Api.Features.ServerAccess;
@@ -155,6 +156,8 @@ builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<ReachabilityRunner>();
+builder.Services.AddScoped<McpGrantService>();
 builder.Services.AddScoped<ApiTokenService>();
 builder.Services
     .AddMcpServer()
@@ -431,8 +434,12 @@ ProviderEnvironmentGroupRolesEndpoints.Map(app);
 ProxyEndpoints.Map(app);
 ApiTokensEndpoints.Map(app);
 
+McpGrantsEndpoints.Map(app);
+
 if (builder.Configuration.GetValue("Mcp:Enabled", true))
-    app.MapMcp("/mcp").RequireAuthorization("Mcp");
+    app.MapMcp("/mcp")
+        .RequireAuthorization("Mcp")
+        .RequireRateLimiting("remote-run");
 
 app.Run();
 

@@ -3,12 +3,16 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
+using InfraOrgIt.Api.Infrastructure.Files;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
+using InfraOrgIt.Api.Infrastructure.Ssh;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
@@ -22,6 +26,7 @@ public sealed class McpApiTests : IAsyncLifetime
         .Build();
 
     private WebApplicationFactory<Program> _factory = null!;
+    private readonly FakeSsh _ssh = new();
 
     public async Task InitializeAsync()
     {
@@ -41,6 +46,11 @@ public sealed class McpApiTests : IAsyncLifetime
             builder.UseSetting("ServerAccess:CurrentKeyVersion", "1");
             builder.UseSetting("ServerAccess:CredentialKeys:1",
                 Convert.ToBase64String(Enumerable.Range(0, 32).Select(x => (byte)x).ToArray()));
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<ISshConnector>();
+                services.AddSingleton<ISshConnector>(_ssh);
+            });
         });
 
         using var scope = _factory.Services.CreateScope();
@@ -233,10 +243,21 @@ public sealed class McpApiTests : IAsyncLifetime
         };
         db.Servers.Add(server);
         await db.SaveChangesAsync();
-        return new SeededServer(server.Id, server.Name);
+        db.ReachabilityTests.Add(new ReachabilityTest
+        {
+            ServerId = server.Id,
+            Hostname = "example.com",
+            Port = 443,
+            Description = "MCP test"
+        });
+        await db.SaveChangesAsync();
+
+        return new SeededServer(
+            server.Id, server.Name, providerEnvironment.Id, environment.Id);
     }
 
-    private async Task<HttpClient> SessionClientAsync(string username)
+    private async Task<HttpClient> SessionClientAsync(
+        string username, bool systemAdmin = false)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
@@ -248,10 +269,26 @@ public sealed class McpApiTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
+        if (systemAdmin)
+        {
+            var role = await db.Roles.SingleAsync(x => x.Name == "SystemAdmin");
+            if (!await db.RoleUsers.AnyAsync(
+                    x => x.RolesId == role.Id && x.UsersId == user.Id))
+            {
+                db.RoleUsers.Add(new RoleUser
+                {
+                    RolesId = role.Id,
+                    UsersId = user.Id
+                });
+                await db.SaveChangesAsync();
+            }
+        }
+
         var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
         var sessionId = sessions.Create(new SessionData(
             username, "Test", "User", null,
-            DateTimeOffset.UtcNow.AddHours(1), null, "csrf", []));
+            DateTimeOffset.UtcNow.AddHours(1), null, "csrf",
+            systemAdmin ? ["SystemAdmin"] : []));
 
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("Cookie",
@@ -277,5 +314,146 @@ public sealed class McpApiTests : IAsyncLifetime
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    private sealed record SeededServer(int Id, string Name);
+    private sealed record SeededServer(
+        int Id,
+        string Name,
+        int ProviderEnvironmentId,
+        int EnvironmentDefinitionId);
+
+    [Fact]
+    public async Task Mcp_action_requires_scope_grant_and_rbac()
+    {
+        var seeded = await SeedServerAsync();
+        using var userSession = await SessionClientAsync("mcp.action");
+
+        var operate = await SendAsync(userSession, HttpMethod.Post,
+            "/api/api-tokens",
+            new { name = "action", scopes = "mcp:read mcp:operate" });
+        var operateToken = (await ReadAsync(operate)).GetProperty("token").GetString()!;
+        using var mcp = McpClientFor(operateToken);
+
+        var noConfirm = await CallTool(mcp, "run_reachability_tests",
+            new { serverId = seeded.Id });
+        Assert.True(noConfirm.GetProperty("isError").GetBoolean());
+
+        var noGrant = await CallTool(mcp, "run_reachability_tests",
+            new { serverId = seeded.Id, confirm = true });
+        Assert.True(noGrant.GetProperty("isError").GetBoolean());
+
+        int userId;
+        int grantId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            userId = await db.Users
+                .Where(x => x.Username == "mcp.action")
+                .Select(x => x.Id)
+                .SingleAsync();
+            var role = await db.Roles.SingleAsync(x => x.Name == "ServerOperator");
+            var group = new Group { Name = "MCP operators " + Guid.NewGuid().ToString("N")[..8] };
+            db.Groups.Add(group);
+            await db.SaveChangesAsync();
+            db.GroupUsers.Add(new GroupUser
+            {
+                GroupsId = group.Id,
+                UsersId = userId
+            });
+            db.ProviderEnvironmentGroupRoles.Add(new ProviderEnvironmentGroupRole
+            {
+                ProviderEnvironmentId = seeded.ProviderEnvironmentId,
+                GroupId = group.Id,
+                RoleId = role.Id
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var admin = await SessionClientAsync("mcp.admin", systemAdmin: true);
+        var grant = await SendAsync(admin, HttpMethod.Post, "/api/mcp/grants",
+            new
+            {
+                userId,
+                action = "reachability.run",
+                environmentDefinitionId = seeded.EnvironmentDefinitionId
+            });
+        grantId = (await ReadAsync(grant)).GetInt32();
+
+        var run = await CallTool(mcp, "run_reachability_tests",
+            new { serverId = seeded.Id, confirm = true });
+        Assert.False(
+            run.TryGetProperty("isError", out var isError) &&
+            isError.GetBoolean());
+        var payload = JsonDocument.Parse(
+            run.GetProperty("content").EnumerateArray().Single()
+                .GetProperty("text").GetString()!);
+        Assert.True(payload.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Single(payload.RootElement.GetProperty("results").EnumerateArray());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var audit = await db.AuditEvents
+                .Where(x => x.Action == "run_reachability_tests")
+                .OrderByDescending(x => x.Id)
+                .FirstAsync();
+            Assert.Equal("Ok", audit.Outcome);
+            Assert.Equal(seeded.Id, audit.ServerId);
+        }
+
+        var removed = await SendAsync(admin, HttpMethod.Delete,
+            $"/api/mcp/grants/{grantId}");
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+
+        var afterRemove = await CallTool(mcp, "run_reachability_tests",
+            new { serverId = seeded.Id, confirm = true });
+        Assert.True(afterRemove.GetProperty("isError").GetBoolean());
+
+        var readOnly = await SendAsync(userSession, HttpMethod.Post,
+            "/api/api-tokens",
+            new { name = "read-only", scopes = "mcp:read" });
+        var readOnlyToken = (await ReadAsync(readOnly)).GetProperty("token").GetString()!;
+        using var readMcp = McpClientFor(readOnlyToken);
+        var noScope = await CallTool(readMcp, "run_reachability_tests",
+            new { serverId = seeded.Id, confirm = true });
+        Assert.True(noScope.GetProperty("isError").GetBoolean());
+    }
+
+    private static async Task<JsonElement> CallTool(
+        HttpClient client, string name, object arguments)
+    {
+        var response = await McpAsync(client, new
+        {
+            jsonrpc = "2.0",
+            id = 10,
+            method = "tools/call",
+            @params = new { name, arguments }
+        });
+        return response.GetProperty("result");
+    }
+
+    private sealed class FakeSsh : ISshConnector
+    {
+        public Task<ISshSession> ConnectAsync(
+            Server server, CancellationToken ct) =>
+            Task.FromResult<ISshSession>(new Session());
+
+        public Task<IFileTransferSession> OpenSftpAsync(
+            Server server,
+            ServerCredential credential,
+            int port,
+            CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        private sealed class Session : ISshSession
+        {
+            public Task<SshCommandResult> RunAsync(
+                string script, TimeSpan timeout, CancellationToken ct) =>
+                Task.FromResult(new SshCommandResult(0, ""));
+
+            public Task<IShellSession> OpenShellAsync(
+                uint columns, uint rows, CancellationToken ct) =>
+                throw new NotSupportedException();
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
 }
