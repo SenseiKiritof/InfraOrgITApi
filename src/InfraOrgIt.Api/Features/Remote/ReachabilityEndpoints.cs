@@ -13,7 +13,6 @@ namespace InfraOrgIt.Api.Features.Remote;
 
 public static partial class ReachabilityEndpoints
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
 
     [GeneratedRegex(@"^[A-Za-z0-9.:\-]{1,200}$")]
     private static partial Regex ValidHost();
@@ -150,15 +149,13 @@ public static partial class ReachabilityEndpoints
         ReachabilityRunInput? input,
         ClaimsPrincipal user,
         EnvironmentAccessService access,
-        ISshConnector ssh,
-        IOptions<ServerAccessOptions> options,
+        ReachabilityRunner runner,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
         var server = await LoadServerAsync(db, id, ct);
         await access.RequireOperatorAsync(user, [server.ProviderEnvironmentId], ct);
-        var results = await RunOnServersAsync(
-            user, [server], ssh, options.Value, db, input?.TestIds, ct);
+        var results = await runner.RunAsync(user, [server], input?.TestIds, ct);
         return Results.Ok(results);
     }
 
@@ -167,8 +164,7 @@ public static partial class ReachabilityEndpoints
         ReachabilityRunInput? input,
         ClaimsPrincipal user,
         EnvironmentAccessService access,
-        ISshConnector ssh,
-        IOptions<ServerAccessOptions> options,
+        ReachabilityRunner runner,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -184,75 +180,8 @@ public static partial class ReachabilityEndpoints
             .OrderBy(x => x.Id)
             .ToListAsync(ct);
 
-        var results = await RunOnServersAsync(
-            user, servers, ssh, options.Value, db, input?.TestIds, ct);
+        var results = await runner.RunAsync(user, servers, input?.TestIds, ct);
         return Results.Ok(results);
-    }
-
-    private static async Task<List<ReachabilityResultDto>> RunOnServersAsync(
-        ClaimsPrincipal user,
-        IReadOnlyCollection<Server> servers,
-        ISshConnector ssh,
-        ServerAccessOptions options,
-        InfraOrgItDbContext db,
-        IReadOnlyCollection<int>? testIds,
-        CancellationToken ct)
-    {
-        var globals = await db.ReachabilityTests.AsNoTracking()
-            .Where(x => x.ServerId == null)
-            .OrderBy(x => x.Hostname)
-            .ToListAsync(ct);
-
-        var username = user.Identity?.Name ?? "";
-        var results = new List<ReachabilityResultDto>();
-
-        foreach (var server in servers)
-        {
-            var tests = globals
-                .Concat(server.ReachabilityTests)
-                .Where(test => testIds is null || testIds.Contains(test.Id))
-                .ToList();
-            if (tests.Count == 0)
-                continue;
-
-            var startedAt = DateTime.UtcNow;
-            var rows = new List<ReachabilityResultDto>();
-            try
-            {
-                await using var session = await ssh.ConnectAsync(server, ct);
-                await db.SaveChangesAsync(ct);
-
-                foreach (var test in tests)
-                {
-                    var result = await session.RunAsync(
-                        Script(test), TestTimeout, ct);
-                    rows.Add(new ReachabilityResultDto(
-                        server.Id,
-                        server.Name,
-                        test.Hostname,
-                        test.Port,
-                        result.ExitCode == 0,
-                        result.ExitCode == 0 ? null : result.Output.Trim()));
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                rows.Add(new ReachabilityResultDto(
-                    server.Id, server.Name, null, null, false, exception.Message));
-            }
-
-            results.AddRange(rows);
-            var summary = string.Join("\n", rows.Select(row =>
-                $"{row.Hostname}:{row.Port} {(row.Reachable ? "OK" : "KO")} {row.Error}".TrimEnd()));
-            // Etichetta neutra come per la console: la traduce la UI.
-            var execution = CommandAudit.Add(
-                db, username, server, "Reachability", "Reachability",
-                "", startedAt, new SshCommandResult(rows.All(x => x.Reachable) ? 0 : 1, summary),
-                options);
-            await db.SaveChangesAsync(ct);
-        }
-
-        return results.OrderBy(x => x.ServerName).ThenBy(x => x.Hostname).ToList();
     }
 
     private static async Task RequireAdminForAsync(
@@ -292,9 +221,6 @@ public static partial class ReachabilityEndpoints
             throw Guard.Unprocessable("Hostname non valido: lettere, cifre, punto, trattino e due punti.");
         return value;
     }
-
-    private static string Script(ReachabilityTest test) =>
-        $"timeout 5 bash -c '</dev/tcp/{test.Hostname}/{test.Port}'";
 
     private static ReachabilityTestDto ToDto(ReachabilityTest test) => new(
         test.Id, test.ServerId, test.Hostname, test.Port, test.Description);

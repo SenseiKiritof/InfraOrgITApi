@@ -56,7 +56,7 @@ public static class InventoryTools
             })
             .ToListAsync(ct);
 
-        await Ok(audit, user, "list_servers", new { q, limit, count = items.Count }, ct);
+        await McpToolAudit.OkAsync(audit, user, "list_servers", new { q, limit, count = items.Count }, ct);
         return JsonSerializer.Serialize(new { items }, JsonOptions);
     }
 
@@ -102,11 +102,11 @@ public static class InventoryTools
 
         if (item is null)
         {
-            await Record(audit, user, "get_server", "Error", new { id }, "not_found", ct);
+            await McpToolAudit.RecordAsync(audit, user, "get_server", "Error", new { id }, "not_found", ct);
             throw new McpException($"Server {id} non trovato.");
         }
 
-        await Ok(audit, user, "get_server", new { id }, ct);
+        await McpToolAudit.OkAsync(audit, user, "get_server", new { id }, ct);
         return JsonSerializer.Serialize(item, JsonOptions);
     }
 
@@ -143,7 +143,7 @@ public static class InventoryTools
             })
             .ToListAsync(ct);
 
-        await Ok(audit, user, "list_applications", new { q, limit, count = items.Count }, ct);
+        await McpToolAudit.OkAsync(audit, user, "list_applications", new { q, limit, count = items.Count }, ct);
         return JsonSerializer.Serialize(new { items }, JsonOptions);
     }
 
@@ -166,7 +166,7 @@ public static class InventoryTools
             })
             .ToListAsync(ct);
 
-        await Ok(audit, user, "list_projects", new { count = items.Count }, ct);
+        await McpToolAudit.OkAsync(audit, user, "list_projects", new { count = items.Count }, ct);
         return JsonSerializer.Serialize(new { items }, JsonOptions);
     }
 
@@ -209,39 +209,8 @@ public static class InventoryTools
             })
             .ToListAsync(ct);
 
-        await Ok(audit, user, "list_deployments", new { applicationId, serverId, count = items.Count }, ct);
+        await McpToolAudit.OkAsync(audit, user, "list_deployments", new { applicationId, serverId, count = items.Count }, ct);
         return JsonSerializer.Serialize(new { items }, JsonOptions);
     }
 
-    private static Task Ok(
-        IAuditService audit,
-        ClaimsPrincipal user,
-        string action,
-        object detail,
-        CancellationToken ct) =>
-        Record(audit, user, action, "Ok", detail, null, ct);
-
-    private static Task Record(
-        IAuditService audit,
-        ClaimsPrincipal user,
-        string action,
-        string outcome,
-        object detail,
-        string? errorCode,
-        CancellationToken ct)
-    {
-        var actorId = int.TryParse(
-            user.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
-            ? id
-            : (int?)null;
-        return audit.RecordAsync(new AuditEntry(
-            "McpToolCall",
-            action,
-            outcome,
-            ActorUserId: actorId,
-            ActorUsername: user.Identity?.Name,
-            ClientId: user.FindFirstValue("api_token_id"),
-            ErrorCode: errorCode,
-            Detail: detail), ct);
-    }
 }
