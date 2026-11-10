@@ -19,9 +19,11 @@ public static class McpGrantsEndpoints
     }
 
     private static async Task<IResult> ListAsync(
+        ClaimsPrincipal user,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
+        EnvironmentAccessService.RequireSystemAdmin(user);
         var items = await db.McpGrants.AsNoTracking()
             .OrderBy(x => x.Id)
             .Select(x => new McpGrantDto(
