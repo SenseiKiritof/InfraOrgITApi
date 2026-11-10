@@ -417,6 +417,126 @@ public sealed class McpApiTests : IAsyncLifetime
         Assert.True(noScope.GetProperty("isError").GetBoolean());
     }
 
+    [Fact]
+    public async Task Mcp_runs_a_configured_application_action()
+    {
+        var seeded = await SeedServerAsync();
+        var (deploymentId, actionId) = await SeedActionAsync(seeded.Id);
+        using var userSession = await SessionClientAsync("mcp.actions.user");
+        var created = await SendAsync(userSession, HttpMethod.Post,
+            "/api/api-tokens",
+            new { name = "actions", scopes = "mcp:read mcp:operate" });
+        var rawToken = (await ReadAsync(created)).GetProperty("token").GetString()!;
+        using var mcp = McpClientFor(rawToken);
+
+        int userId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            userId = await db.Users
+                .Where(x => x.Username == "mcp.actions.user")
+                .Select(x => x.Id)
+                .SingleAsync();
+            var role = await db.Roles.SingleAsync(x => x.Name == "ServerOperator");
+            var group = new Group
+            {
+                Name = "MCP action operators " + Guid.NewGuid().ToString("N")[..8]
+            };
+            db.Groups.Add(group);
+            await db.SaveChangesAsync();
+            db.GroupUsers.Add(new GroupUser
+            {
+                GroupsId = group.Id,
+                UsersId = userId
+            });
+            db.ProviderEnvironmentGroupRoles.Add(new ProviderEnvironmentGroupRole
+            {
+                ProviderEnvironmentId = seeded.ProviderEnvironmentId,
+                GroupId = group.Id,
+                RoleId = role.Id
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var admin = await SessionClientAsync("mcp.actions.admin", systemAdmin: true);
+        var grant = await SendAsync(admin, HttpMethod.Post, "/api/mcp/grants",
+            new { userId, action = "actions.run" });
+        Assert.Equal(HttpStatusCode.OK, grant.StatusCode);
+
+        var run = await CallTool(mcp, "run_application_action",
+            new
+            {
+                serverApplicationId = deploymentId,
+                actionId,
+                confirm = true,
+                idempotencyKey = "mcp-action-" + Guid.NewGuid().ToString("N")
+            });
+        Assert.False(
+            run.TryGetProperty("isError", out var isError) &&
+            isError.GetBoolean());
+        var payload = JsonDocument.Parse(
+            run.GetProperty("content").EnumerateArray().Single()
+                .GetProperty("text").GetString()!);
+        Assert.Equal(0, payload.RootElement.GetProperty("exitCode").GetInt32());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var audit = await db.AuditEvents
+                .Where(x => x.Action == "run_application_action")
+                .OrderByDescending(x => x.Id)
+                .FirstAsync();
+            Assert.Equal("Ok", audit.Outcome);
+            Assert.Equal(seeded.Id, audit.ServerId);
+        }
+    }
+
+    private async Task<(int DeploymentId, int ActionId)> SeedActionAsync(int serverId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+
+        var application = new Application
+        {
+            Name = "MCP Action App " + Guid.NewGuid().ToString("N")[..8],
+            Description = "",
+            BasePath = "/mcp-action",
+            ListeningOnPort = 8080
+        };
+        db.Applications.Add(application);
+        await db.SaveChangesAsync();
+
+        var version = new ApplicationVersion
+        {
+            ApplicationId = application.Id,
+            VersionNumber = "1.0.0"
+        };
+        db.ApplicationVersions.Add(version);
+        await db.SaveChangesAsync();
+
+        var deploy = new ServerApplication
+        {
+            ServerId = serverId,
+            ApplicationVersionId = version.Id,
+            ExposedPort = 8080
+        };
+        db.ServerApplications.Add(deploy);
+        await db.SaveChangesAsync();
+
+        var action = new ApplicationAction
+        {
+            ApplicationId = application.Id,
+            Label = "Ping",
+            Order = 0,
+            CustomScript = "echo ok",
+            ParameterValuesJson = "{}",
+            RequiresConfirmation = true
+        };
+        db.ApplicationActions.Add(action);
+        await db.SaveChangesAsync();
+        return (deploy.Id, action.Id);
+    }
+
     private static async Task<JsonElement> CallTool(
         HttpClient client, string name, object arguments)
     {
