@@ -13,11 +13,13 @@ using InfraOrgIt.Api.Features.Remote;
 using InfraOrgIt.Api.Features.ServerAccess;
 using InfraOrgIt.Api.Features.Session;
 using InfraOrgIt.Api.Features.Topology;
+using InfraOrgIt.Api.Features.Tunnels;
 using InfraOrgIt.Api.Features.Users;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Health;
 using InfraOrgIt.Api.Infrastructure.Files;
 using InfraOrgIt.Api.Infrastructure.Ssh;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
@@ -294,13 +296,21 @@ builder.Services.AddAuthorization(options =>
         policy.AddAuthenticationSchemes([.. schemes])
             .RequireAuthenticatedUser()
             .RequireAssertion(context =>
-            {
-                var scopes = context.User.FindAll("scope")
-                    .SelectMany(claim => claim.Value.Split(
-                        ' ', StringSplitOptions.RemoveEmptyEntries));
-                return scopes.Contains("mcp:read", StringComparer.Ordinal) ||
-                       scopes.Contains("mcp:operate", StringComparer.Ordinal);
-            });
+                HasScope(context.User, "mcp:read", "mcp:operate"));
+    });
+
+    options.AddPolicy("Tunnel", policy =>
+    {
+        var schemes = new List<string>
+        {
+            ApiTokenAuthenticationHandler.SchemeName
+        };
+        if (mcpOidcConfigured)
+            schemes.Add(JwtBearerDefaults.AuthenticationScheme);
+        policy.AddAuthenticationSchemes([.. schemes])
+            .RequireAuthenticatedUser()
+            .RequireAssertion(context =>
+                HasScope(context.User, "tunnels:operate"));
     });
 });
 builder.Services.AddProblemDetails();
@@ -436,8 +446,17 @@ MenusAdminEndpoints.Map(app);
 ProviderEnvironmentGroupRolesEndpoints.Map(app);
 ProxyEndpoints.Map(app);
 ApiTokensEndpoints.Map(app);
+TunnelEndpoints.Map(app);
 
 McpGrantsEndpoints.Map(app);
+
+static bool HasScope(ClaimsPrincipal user, params string[] allowed)
+{
+    var scopes = user.FindAll("scope")
+        .SelectMany(claim => claim.Value.Split(
+            ' ', StringSplitOptions.RemoveEmptyEntries));
+    return allowed.Any(scope => scopes.Contains(scope, StringComparer.Ordinal));
+}
 
 if (builder.Configuration.GetValue("Mcp:Enabled", true))
     app.MapMcp("/mcp")

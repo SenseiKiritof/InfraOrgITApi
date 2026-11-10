@@ -29,7 +29,8 @@ public sealed record ApiTokenCreated(
 public sealed class ApiTokenService(InfraOrgItDbContext db)
 {
     public const string Prefix = "itk_";
-    public static readonly string[] AllowedScopes = ["mcp:read", "mcp:operate"];
+    public static readonly string[] AllowedScopes =
+        ["mcp:read", "mcp:operate", "tunnels:operate"];
 
     public async Task<ApiTokenCreated> CreateAsync(
         int userId,

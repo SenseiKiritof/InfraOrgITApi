@@ -5082,6 +5082,51 @@
         ]
       }
     },
+    "/api/tunnels/targets": {
+      "get": {
+        "tags": [
+          "TunnelEndpoints"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/tunnels/events": {
+      "post": {
+        "tags": [
+          "TunnelEndpoints"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TunnelEventInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
     "/api/mcp/grants": {
       "get": {
         "tags": [
@@ -6554,6 +6599,80 @@
           }
         }
       },
+      "TunnelEventInput": {
+        "required": [
+          "kind",
+          "serverId"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "serverId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "serverApplicationId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "targetHost": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "localPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "errorCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "correlationId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "UserInput": {
         "required": [
           "username",
@@ -6721,6 +6840,9 @@
     },
     {
       "name": "ApiTokensEndpoints"
+    },
+    {
+      "name": "TunnelEndpoints"
     },
     {
       "name": "McpGrantsEndpoints"
