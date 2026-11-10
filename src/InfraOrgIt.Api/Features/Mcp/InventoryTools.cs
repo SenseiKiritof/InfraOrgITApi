@@ -462,6 +462,7 @@ public static class InventoryTools
     public static async Task<string> ListExecutions(
         InfraOrgItDbContext db,
         IAuditService audit,
+        EnvironmentAccessService access,
         ClaimsPrincipal user,
         CancellationToken ct,
         [Description("Optional server id")] int? serverId = null,
@@ -470,7 +471,7 @@ public static class InventoryTools
     {
         try
         {
-            EnvironmentAccessService.RequireSystemAdmin(user);
+            await access.RequireSystemAdminAsync(user, ct);
         }
         catch (ApiException)
         {

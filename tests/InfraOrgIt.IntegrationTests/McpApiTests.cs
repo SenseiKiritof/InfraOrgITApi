@@ -337,6 +337,21 @@ public sealed class McpApiTests : IAsyncLifetime
             Assert.Equal("forbidden", denied.ErrorCode);
             Assert.Equal(seeded.Id, denied.ServerId);
         }
+
+        using var adminSession = await SessionClientAsync(
+            "mcp.executions.admin", systemAdmin: true);
+        var adminCreated = await SendAsync(adminSession, HttpMethod.Post,
+            "/api/api-tokens",
+            new { name = "executions admin", scopes = "mcp:read" });
+        var adminToken = (await ReadAsync(adminCreated))
+            .GetProperty("token").GetString()!;
+        using var adminMcp = McpClientFor(adminToken);
+
+        var adminResult = await CallTool(adminMcp, "list_executions",
+            new { serverId = seeded.Id });
+        Assert.False(
+            adminResult.TryGetProperty("isError", out var isError) &&
+            isError.GetBoolean());
     }
 
     private static JsonElement ToolPayload(JsonElement result) =>
