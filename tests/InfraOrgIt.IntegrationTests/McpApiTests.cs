@@ -128,6 +128,29 @@ public sealed class McpApiTests : IAsyncLifetime
             Assert.NotNull(audit.ClientId);
         }
 
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var userId = await db.Users
+                .Where(x => x.Username == "mcp.user")
+                .Select(x => x.Id)
+                .SingleAsync();
+            const string noScopesToken = "itk_noscopes";
+            db.ApiTokens.Add(new ApiToken
+            {
+                UserId = userId,
+                Name = "no scopes",
+                TokenHash = ApiTokenService.Hash(noScopesToken),
+                Scopes = "",
+                CreatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var noScopes = McpClientFor("itk_noscopes");
+        var denied = await noScopes.PostAsJsonAsync("/mcp", InitializeBody(99));
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
         var tokenId = createdDto.GetProperty("id").GetInt32();
         var revoked = await SendAsync(session, HttpMethod.Delete,
             $"/api/api-tokens/{tokenId}");
