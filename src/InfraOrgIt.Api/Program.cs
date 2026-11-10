@@ -18,6 +18,7 @@ using InfraOrgIt.Api.Infrastructure.Health;
 using InfraOrgIt.Api.Infrastructure.Files;
 using InfraOrgIt.Api.Infrastructure.Ssh;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -246,17 +247,55 @@ builder.Services.AddOptions<FrontendOptions>()
     .Validate(o => Uri.TryCreate(o.BaseUrl, UriKind.Absolute, out _), "Frontend:BaseUrl non è un URI assoluto.")
     .ValidateOnStart();
 
-builder.Services
+var authentication = builder.Services
     .AddAuthentication(SessionAuthenticationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, SessionAuthenticationHandler>(
         SessionAuthenticationHandler.SchemeName, _ => { })
     .AddScheme<AuthenticationSchemeOptions, ApiTokenAuthenticationHandler>(
         ApiTokenAuthenticationHandler.SchemeName, _ => { });
+
+var mcpOidcAuthority = builder.Configuration["Mcp:Oidc:Authority"];
+var mcpOidcConfigured = !string.IsNullOrWhiteSpace(mcpOidcAuthority);
+if (mcpOidcConfigured)
+{
+    authentication.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+    {
+        options.Authority = mcpOidcAuthority;
+        var metadataAddress = builder.Configuration["Mcp:Oidc:MetadataAddress"];
+        if (!string.IsNullOrWhiteSpace(metadataAddress))
+            options.MetadataAddress = metadataAddress;
+        options.RequireHttpsMetadata = builder.Configuration.GetValue(
+            "Mcp:Oidc:RequireHttpsMetadata", true);
+        options.Audience = builder.Configuration["Mcp:Oidc:Audience"];
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters.NameClaimType = "preferred_username";
+        var issuer = builder.Configuration["Mcp:Oidc:Issuer"];
+        if (!string.IsNullOrWhiteSpace(issuer))
+            options.TokenValidationParameters.ValidIssuer = issuer;
+    });
+}
+
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("Mcp", policy => policy
-        .AddAuthenticationSchemes(ApiTokenAuthenticationHandler.SchemeName)
-        .RequireAuthenticatedUser());
+    options.AddPolicy("Mcp", policy =>
+    {
+        var schemes = new List<string>
+        {
+            ApiTokenAuthenticationHandler.SchemeName
+        };
+        if (mcpOidcConfigured)
+            schemes.Add(JwtBearerDefaults.AuthenticationScheme);
+        policy.AddAuthenticationSchemes([.. schemes])
+            .RequireAuthenticatedUser()
+            .RequireAssertion(context =>
+            {
+                var scopes = context.User.FindAll("scope")
+                    .SelectMany(claim => claim.Value.Split(
+                        ' ', StringSplitOptions.RemoveEmptyEntries));
+                return scopes.Contains("mcp:read", StringComparer.Ordinal) ||
+                       scopes.Contains("mcp:operate", StringComparer.Ordinal);
+            });
+    });
 });
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
@@ -334,6 +373,22 @@ app.MapGet("/", () => Results.Ok(new
 })).AllowAnonymous();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
+
+if (mcpOidcConfigured)
+{
+    var frontendBase = builder.Configuration["Frontend:BaseUrl"]?.TrimEnd('/') ?? "";
+    var resource = builder.Configuration["Mcp:PublicUrl"]?.TrimEnd('/') ?? $"{frontendBase}/mcp";
+    var authorizationServer = mcpOidcAuthority;
+    var metadata = () => Results.Ok(new
+    {
+        resource,
+        authorization_servers = new[] { authorizationServer },
+        scopes_supported = new[] { "mcp:read", "mcp:operate" },
+        bearer_methods_supported = new[] { "header" }
+    });
+    app.MapGet("/.well-known/oauth-protected-resource", metadata).AllowAnonymous();
+    app.MapGet("/mcp/.well-known/oauth-protected-resource", metadata).AllowAnonymous();
+}
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
