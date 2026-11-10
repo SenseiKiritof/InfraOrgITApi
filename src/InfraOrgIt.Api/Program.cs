@@ -163,7 +163,9 @@ builder.Services.AddScoped<ApiTokenService>();
 builder.Services
     .AddMcpServer()
     .WithHttpTransport(options => options.Stateless = true)
-    .WithToolsFromAssembly();
+    .WithToolsFromAssembly()
+    .WithResourcesFromAssembly()
+    .WithPromptsFromAssembly();
 builder.Services.AddSingleton<ConsoleSessionRegistry>();
 builder.Services.AddScoped<TopologyService>();
 builder.Services.AddScoped<DiagramService>();
