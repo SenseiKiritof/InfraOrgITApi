@@ -157,6 +157,7 @@ builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<ReachabilityRunner>();
+builder.Services.AddScoped<ApplicationActionRunner>();
 builder.Services.AddScoped<McpGrantService>();
 builder.Services.AddScoped<ApiTokenService>();
 builder.Services

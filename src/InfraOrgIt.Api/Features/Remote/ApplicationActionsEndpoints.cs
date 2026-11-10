@@ -129,82 +129,12 @@ public static class ApplicationActionsEndpoints
         int actionId,
         HttpContext http,
         ClaimsPrincipal user,
-        EnvironmentAccessService access,
-        ISshConnector ssh,
-        IOptions<ServerAccessOptions> options,
-        InfraOrgItDbContext db,
+        ApplicationActionRunner runner,
         CancellationToken ct)
     {
-        var deploy = await LoadDeployAsync(db, id, ct);
-        var server = deploy.Server!;
-        await access.RequireOperatorAsync(user, [server.ProviderEnvironmentId], ct);
-
-        var application = deploy.ApplicationVersion!.Application!;
-        var action = await db.ApplicationActions.AsNoTracking()
-                         .Include(x => x.CommandTemplate)
-                         .SingleOrDefaultAsync(
-                             x => x.Id == actionId && x.ApplicationId == application.Id, ct)
-                     ?? throw Guard.NotFound("Azione", actionId);
-
-        var script = action.CommandTemplate?.Script ?? action.CustomScript ?? "";
-        var custom = ParseParameterValues(action.ParameterValuesJson);
-        CommandRenderer.CheckValues(script, custom);
-
-        var builtIns = new Dictionary<string, string>
-        {
-            ["ServerName"] = server.Name,
-            ["Hostname"] = server.Hostname,
-            ["IpAddress"] = server.IpAddress,
-            ["ApplicationName"] = application.Name,
-            ["BasePath"] = application.BasePath,
-            ["Version"] = deploy.ApplicationVersion.VersionNumber,
-            ["ExposedPort"] = deploy.ExposedPort.ToString()
-        };
-        CommandRenderer.CheckValues(script, builtIns);
-
-        var values = new Dictionary<string, string>(custom);
-        foreach (var pair in builtIns)
-            values[pair.Key] = pair.Value;
-        var rendered = CommandRenderer.Render(script, values);
-
-        var idempotencyKey = http.Request.Headers["Idempotency-Key"].ToString();
-        if (idempotencyKey.Length > 100)
-            throw Guard.Unprocessable("Idempotency-Key supera 100 caratteri.");
-        if (!string.IsNullOrEmpty(idempotencyKey) &&
-            await db.CommandExecutions.AnyAsync(x => x.IdempotencyKey == idempotencyKey, ct))
-            throw Guard.Conflict("Idempotency-Key già usata.");
-
-        var username = user.Identity?.Name ?? "";
-        var startedAt = DateTime.UtcNow;
-        var label = $"{application.Name}: {action.Label}";
-        var execution = CommandAudit.Start(
-            db, username, server, "Action", label, script, startedAt,
-            string.IsNullOrEmpty(idempotencyKey) ? null : idempotencyKey);
-        db.CommandExecutions.Add(execution);
-        await db.SaveChangesAsync(ct);
-
-        try
-        {
-            await using var session = await ssh.ConnectAsync(server, ct);
-            await db.SaveChangesAsync(ct);
-
-            var result = await session.RunAsync(rendered, TimeSpan.FromMinutes(
-                options.Value.CommandTimeoutMinutes), ct);
-
-            CommandAudit.Complete(execution, result, options.Value, custom);
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new CommandResultDto(result.ExitCode, result.Output, result.TimedOut));
-        }
-        catch (Exception exception)
-        {
-            CommandAudit.Complete(
-                execution,
-                new SshCommandResult(null, exception.Message),
-                options.Value,
-                custom);
-            await db.SaveChangesAsync(CancellationToken.None);
-            throw;
-        }
+        var result = await runner.RunAsync(
+            user, id, actionId, http.Request.Headers["Idempotency-Key"].ToString(), ct);
+        return Results.Ok(result);
     }
 
     private static async Task<ApplicationAction> ValidateAsync(
@@ -277,17 +207,7 @@ public static class ApplicationActionsEndpoints
             .FirstOrDefaultAsync(x => x.Id == id, ct)
         ?? throw Guard.NotFound("Applicazione deployata", id);
 
-    private static Dictionary<string, string> ParseParameterValues(string json)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
+
 
     private static ApplicationActionConfigDto ToConfigDto(ApplicationAction action) => new(
         action.Id,
@@ -297,7 +217,7 @@ public static class ApplicationActionsEndpoints
         action.CommandTemplateId,
         action.CommandTemplate?.Name,
         action.CustomScript,
-        ParseParameterValues(action.ParameterValuesJson),
+        ApplicationActionRunner.ParseParameterValues(action.ParameterValuesJson),
         action.RequiresConfirmation);
 }
 
