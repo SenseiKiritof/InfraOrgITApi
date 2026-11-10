@@ -105,9 +105,15 @@ public sealed class McpApiTests : IAsyncLifetime
             .ToList();
         Assert.Contains("list_servers", toolNames);
         Assert.Contains("get_server", toolNames);
+        Assert.Contains("list_providers", toolNames);
         Assert.Contains("list_applications", toolNames);
+        Assert.Contains("get_application", toolNames);
         Assert.Contains("list_projects", toolNames);
+        Assert.Contains("get_project", toolNames);
         Assert.Contains("list_deployments", toolNames);
+        Assert.Contains("list_reachability_tests", toolNames);
+        Assert.Contains("get_topology", toolNames);
+        Assert.Contains("list_executions", toolNames);
 
         var resources = await McpAsync(mcp, new
         {
@@ -247,6 +253,96 @@ public sealed class McpApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Unauthorized, afterRevoke.StatusCode);
     }
 
+    [Fact]
+    public async Task Mcp_read_tools_return_providers_catalog_topology_and_deny_executions()
+    {
+        var seeded = await SeedServerAsync();
+        var catalog = await SeedCatalogAsync(seeded.Id);
+
+        using var session = await SessionClientAsync("mcp.read");
+        var created = await SendAsync(session, HttpMethod.Post, "/api/api-tokens",
+            new { name = "MCP read", scopes = "mcp:read" });
+        var rawToken = (await ReadAsync(created)).GetProperty("token").GetString()!;
+        using var mcp = McpClientFor(rawToken);
+
+        var providersResult = await CallTool(mcp, "list_providers",
+            new { q = "MCP Provider" });
+        var providers = ToolPayload(providersResult);
+        var provider = providers.GetProperty("items").EnumerateArray().Single();
+        Assert.Equal("MCP Provider", provider.GetProperty("name").GetString());
+        var providerEnvironment = provider.GetProperty("environments")
+            .EnumerateArray().Single();
+        Assert.Equal(seeded.ProviderEnvironmentId,
+            providerEnvironment.GetProperty("id").GetInt32());
+        Assert.Equal(seeded.EnvironmentDefinitionId,
+            providerEnvironment.GetProperty("environmentDefinitionId").GetInt32());
+        Assert.Equal("MCP Env", providerEnvironment.GetProperty("name").GetString());
+
+        var applicationResult = await CallTool(mcp, "get_application",
+            new { id = catalog.ApplicationId });
+        var application = ToolPayload(applicationResult);
+        Assert.Equal("MCP App", application.GetProperty("name").GetString());
+        Assert.Equal("1.0.0", application.GetProperty("versions")
+            .EnumerateArray().Single().GetProperty("versionNumber").GetString());
+
+        var projectResult = await CallTool(mcp, "get_project",
+            new { id = catalog.ProjectId });
+        var project = ToolPayload(projectResult);
+        Assert.Equal("MCP Project", project.GetProperty("name").GetString());
+        Assert.Equal("MCP App", project.GetProperty("applications")
+            .EnumerateArray().Single().GetProperty("name").GetString());
+
+        var testsResult = await CallTool(mcp, "list_reachability_tests",
+            new { serverId = seeded.Id });
+        var tests = ToolPayload(testsResult);
+        var test = tests.GetProperty("items").EnumerateArray().Single();
+        Assert.Equal("example.com", test.GetProperty("hostname").GetString());
+        Assert.Equal(443, test.GetProperty("port").GetInt32());
+        Assert.Equal(seeded.Name, test.GetProperty("serverName").GetString());
+
+        var topologyResult = await CallTool(mcp, "get_topology",
+            new { projectId = catalog.ProjectId });
+        var topology = ToolPayload(topologyResult);
+        var topologyServer = topology.GetProperty("providers").EnumerateArray()
+            .SelectMany(x => x.GetProperty("environments").EnumerateArray())
+            .SelectMany(x => x.GetProperty("servers").EnumerateArray())
+            .Single(x => x.GetProperty("id").GetInt32() == seeded.Id);
+        Assert.Equal(seeded.Name, topologyServer.GetProperty("name").GetString());
+
+        var executionsResult = await CallTool(mcp, "list_executions",
+            new { serverId = seeded.Id });
+        Assert.True(executionsResult.GetProperty("isError").GetBoolean());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            foreach (var action in new[]
+                     {
+                         "list_providers", "get_application", "get_project",
+                         "list_reachability_tests", "get_topology"
+                     })
+            {
+                var audit = await db.AuditEvents
+                    .Where(x => x.Action == action)
+                    .OrderByDescending(x => x.Id)
+                    .FirstAsync();
+                Assert.Equal("Ok", audit.Outcome);
+            }
+
+            var denied = await db.AuditEvents
+                .Where(x => x.Action == "list_executions")
+                .OrderByDescending(x => x.Id)
+                .FirstAsync();
+            Assert.Equal("Denied", denied.Outcome);
+            Assert.Equal("forbidden", denied.ErrorCode);
+            Assert.Equal(seeded.Id, denied.ServerId);
+        }
+    }
+
+    private static JsonElement ToolPayload(JsonElement result) =>
+        JsonDocument.Parse(result.GetProperty("content").EnumerateArray().Single()
+            .GetProperty("text").GetString()!).RootElement;
+
     private static object InitializeBody(int id) => new
     {
         jsonrpc = "2.0",
@@ -333,6 +429,44 @@ public sealed class McpApiTests : IAsyncLifetime
             server.Id, server.Name, providerEnvironment.Id, environment.Id);
     }
 
+    private async Task<SeededCatalog> SeedCatalogAsync(int serverId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+
+        var project = new Project { Name = "MCP Project", Description = "MCP project" };
+        db.Projects.Add(project);
+        var application = new Application
+        {
+            Name = "MCP App",
+            Description = "",
+            BasePath = "/mcp-app",
+            ListeningOnPort = 8080
+        };
+        db.Applications.Add(application);
+        await db.SaveChangesAsync();
+
+        var version = new ApplicationVersion
+        {
+            ApplicationId = application.Id,
+            VersionNumber = "1.0.0"
+        };
+        db.ApplicationVersions.Add(version);
+        await db.SaveChangesAsync();
+
+        db.ServerApplications.Add(new ServerApplication
+        {
+            ServerId = serverId,
+            ApplicationVersionId = version.Id,
+            ExposedPort = 8080,
+            ContainerName = "mcp-app"
+        });
+        application.Projects.Add(project);
+        await db.SaveChangesAsync();
+
+        return new SeededCatalog(application.Id, project.Id);
+    }
+
     private async Task<HttpClient> SessionClientAsync(
         string username, bool systemAdmin = false)
     {
@@ -396,6 +530,8 @@ public sealed class McpApiTests : IAsyncLifetime
         string Name,
         int ProviderEnvironmentId,
         int EnvironmentDefinitionId);
+
+    private sealed record SeededCatalog(int ApplicationId, int ProjectId);
 
     [Fact]
     public async Task Mcp_action_requires_scope_grant_and_rbac()
