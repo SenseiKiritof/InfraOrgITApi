@@ -4,6 +4,7 @@ using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Features.Admin;
+using InfraOrgIt.Api.Features.Audit;
 using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Features.Catalog;
 using InfraOrgIt.Api.Features.Inventory;
@@ -158,6 +159,11 @@ builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddOptions<AuditRetentionOptions>()
+    .Bind(builder.Configuration.GetSection(AuditRetentionOptions.SectionName))
+    .Validate(o => o.RetentionDays is >= 1 and <= 3650, "Audit:RetentionDays tra 1 e 3650.")
+    .ValidateOnStart();
+builder.Services.AddHostedService<AuditRetentionService>();
 builder.Services.AddScoped<ReachabilityRunner>();
 builder.Services.AddScoped<ApplicationActionRunner>();
 builder.Services.AddScoped<McpGrantService>();
@@ -437,6 +443,7 @@ CommandTemplateEndpoints.Map(app);
 ApplicationActionsEndpoints.Map(app);
 ReachabilityEndpoints.Map(app);
 CommandExecutionEndpoints.Map(app);
+AuditEventsEndpoints.Map(app);
 ConsoleEndpoints.Map(app);
 FileTransferEndpoints.Map(app);
 UsersEndpoints.Map(app);
