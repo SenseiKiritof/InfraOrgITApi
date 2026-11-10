@@ -109,6 +109,78 @@ public sealed class McpApiTests : IAsyncLifetime
         Assert.Contains("list_projects", toolNames);
         Assert.Contains("list_deployments", toolNames);
 
+        var resources = await McpAsync(mcp, new
+        {
+            jsonrpc = "2.0",
+            id = 20,
+            method = "resources/list"
+        });
+        var resourceUris = resources.GetProperty("result").GetProperty("resources")
+            .EnumerateArray()
+            .Select(x => x.GetProperty("uri").GetString())
+            .ToList();
+        Assert.Contains("infraorgit://inventory/summary", resourceUris);
+
+        var templates = await McpAsync(mcp, new
+        {
+            jsonrpc = "2.0",
+            id = 21,
+            method = "resources/templates/list"
+        });
+        var templateUris = templates.GetProperty("result")
+            .GetProperty("resourceTemplates")
+            .EnumerateArray()
+            .Select(x => x.GetProperty("uriTemplate").GetString())
+            .ToList();
+        Assert.Contains("infraorgit://servers/{id}", templateUris);
+        Assert.Contains("infraorgit://applications/{id}", templateUris);
+
+        var serverResource = await McpAsync(mcp, new
+        {
+            jsonrpc = "2.0",
+            id = 22,
+            method = "resources/read",
+            @params = new { uri = $"infraorgit://servers/{seeded.Id}" }
+        });
+        var resourceText = serverResource.GetProperty("result")
+            .GetProperty("contents").EnumerateArray().Single()
+            .GetProperty("text").GetString();
+        var resourcePayload = JsonDocument.Parse(resourceText!);
+        Assert.Equal(seeded.Name,
+            resourcePayload.RootElement.GetProperty("name").GetString());
+
+        var prompts = await McpAsync(mcp, new
+        {
+            jsonrpc = "2.0",
+            id = 23,
+            method = "prompts/list"
+        });
+        var promptNames = prompts.GetProperty("result").GetProperty("prompts")
+            .EnumerateArray()
+            .Select(x => x.GetProperty("name").GetString())
+            .ToList();
+        Assert.Contains("diagnose-server", promptNames);
+        Assert.Contains("application-impact", promptNames);
+
+        var prompt = await McpAsync(mcp, new
+        {
+            jsonrpc = "2.0",
+            id = 24,
+            method = "prompts/get",
+            @params = new
+            {
+                name = "diagnose-server",
+                arguments = new Dictionary<string, string>
+                {
+                    ["serverId"] = seeded.Id.ToString()
+                }
+            }
+        });
+        var promptText = prompt.GetProperty("result").GetProperty("messages")
+            .EnumerateArray().Single()
+            .GetProperty("content").GetProperty("text").GetString();
+        Assert.Contains(seeded.Id.ToString(), promptText);
+
         var call = await McpAsync(mcp, new
         {
             jsonrpc = "2.0",
@@ -136,6 +208,11 @@ public sealed class McpApiTests : IAsyncLifetime
             Assert.Equal("Ok", audit.Outcome);
             Assert.Equal("mcp.user", audit.ActorUsername);
             Assert.NotNull(audit.ClientId);
+
+            var resourceAudit = await db.AuditEvents
+                .SingleAsync(x => x.Action == "read_resource");
+            Assert.Equal("Ok", resourceAudit.Outcome);
+            Assert.Equal(seeded.Id, resourceAudit.ServerId);
         }
 
         using (var scope = _factory.Services.CreateScope())
