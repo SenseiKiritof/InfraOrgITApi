@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Security.Claims;
+using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
 using InfraOrgIt.Api.Infrastructure.Persistence;
@@ -56,6 +57,7 @@ public static class TunnelServiceEndpoints
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         var server = await db.Servers.AsNoTracking()
@@ -71,6 +73,10 @@ public static class TunnelServiceEndpoints
         Apply(entity, details);
         db.TunnelServices.Add(entity);
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "tunnel-service.create", "TunnelService", entity.Id,
+            serverId,
+            new { entity.Name, entity.Mode, entity.TargetHost, entity.TargetPort, entity.Enabled }), ct);
 
         return Results.Ok(await LoadAsync(db, entity.Id, ct));
     }
@@ -82,6 +88,7 @@ public static class TunnelServiceEndpoints
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         var entity = await db.TunnelServices
@@ -99,6 +106,10 @@ public static class TunnelServiceEndpoints
 
         Apply(entity, details);
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "tunnel-service.update", "TunnelService", id,
+            serverId,
+            new { entity.Name, entity.Mode, entity.TargetHost, entity.TargetPort, entity.Enabled }), ct);
         return Results.NoContent();
     }
 
@@ -108,6 +119,7 @@ public static class TunnelServiceEndpoints
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         var entity = await db.TunnelServices
@@ -122,6 +134,10 @@ public static class TunnelServiceEndpoints
 
         db.TunnelServices.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "tunnel-service.delete", "TunnelService", id,
+            serverId,
+            new { entity.Name, entity.Mode }), ct);
         return Results.NoContent();
     }
 

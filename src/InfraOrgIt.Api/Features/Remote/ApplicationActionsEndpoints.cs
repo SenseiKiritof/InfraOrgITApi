@@ -127,13 +127,15 @@ public static class ApplicationActionsEndpoints
     private static async Task<IResult> RunAsync(
         int id,
         int actionId,
+        ApplicationActionRunInput? input,
         HttpContext http,
         ClaimsPrincipal user,
         ApplicationActionRunner runner,
         CancellationToken ct)
     {
         var result = await runner.RunAsync(
-            user, id, actionId, http.Request.Headers["Idempotency-Key"].ToString(), ct);
+            user, id, actionId, http.Request.Headers["Idempotency-Key"].ToString(),
+            input?.Confirm ?? false, ct);
         return Results.Ok(result);
     }
 
@@ -228,6 +230,13 @@ public sealed record ApplicationActionInput(
     string? CustomScript,
     Dictionary<string, string>? ParameterValues,
     bool RequiresConfirmation);
+
+/// <summary>
+/// Body of the action run endpoint. <c>confirm</c> must be true when the
+/// action has <c>requiresConfirmation</c>; the API returns 422 otherwise
+/// (PT-13).
+/// </summary>
+public sealed record ApplicationActionRunInput(bool Confirm = false);
 
 public sealed record ApplicationActionConfigDto(
     int Id,

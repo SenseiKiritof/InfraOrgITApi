@@ -145,6 +145,8 @@ public sealed class RealSshTests : IAsyncLifetime
         });
 
         await AssignOperatorAsync(admin, providerEnvironment.Id, "ssh.admin");
+        // PT-07: the role assignment revoked the old session; sign in again.
+        await RefreshSessionAsync(admin, "ssh.admin", systemAdmin: true);
 
         var template = await ReadAsync(await SendAsync(admin, HttpMethod.Post,
             "/api/command-templates", new
@@ -248,6 +250,8 @@ public sealed class RealSshTests : IAsyncLifetime
             credentialId = credential.GetProperty("id").GetInt32()
         });
         await AssignServerAdminAsync(admin, providerEnvironment.Id, "sftp.admin");
+        // PT-07: the role assignment revoked the old session; sign in again.
+        await RefreshSessionAsync(admin, "sftp.admin", systemAdmin: true);
 
         await _ssh.ExecAsync(
             ["sh", "-c", "mkdir -p /config/sftp && chown 1000:1000 /config/sftp && echo ciao > /config/sftp/hello.txt"]);
@@ -257,6 +261,16 @@ public sealed class RealSshTests : IAsyncLifetime
         Assert.Contains(
             listing.GetProperty("items").EnumerateArray(),
             item => item.GetProperty("name").GetString() == "hello.txt");
+
+        // PT-09: the SFTP path loads the server untracked, so the first-use
+        // host key must still be persisted.
+        using (var verify = _factory.Services.CreateScope())
+        {
+            var verifyDb = verify.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var stored = await verifyDb.Servers.AsNoTracking()
+                .SingleAsync(x => x.Id == server.Id);
+            Assert.False(string.IsNullOrWhiteSpace(stored.HostKeyFingerprint));
+        }
 
         var download = await admin.GetAsync(
             $"/api/servers/{server.Id}/files/download?path=/config/sftp/hello.txt");
@@ -288,6 +302,23 @@ public sealed class RealSshTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
         var removed = await _ssh.ExecAsync(["test", "-e", "/config/sftp/uploaded.txt"]);
         Assert.NotEqual(0, removed.ExitCode);
+
+        // A changed host key is rejected on the file-transfer path before any
+        // credential or data is sent.
+        using (var tamper = _factory.Services.CreateScope())
+        {
+            var tamperDb = tamper.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var stored = await tamperDb.Servers.SingleAsync(x => x.Id == server.Id);
+            stored.HostKeyFingerprint = "SHA256:not-the-real-key";
+            await tamperDb.SaveChangesAsync();
+        }
+
+        var rejected = await admin.GetAsync(
+            $"/api/servers/{server.Id}/files?path=/config/sftp");
+        Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        using var problem = await JsonDocument.ParseAsync(
+            await rejected.Content.ReadAsStreamAsync());
+        Assert.Equal("host_key_mismatch", problem.RootElement.GetProperty("code").GetString());
     }
 
     private async Task AssignServerAdminAsync(
@@ -325,6 +356,20 @@ public sealed class RealSshTests : IAsyncLifetime
             $"/api/provider-environments/{environmentId}/group-roles",
             new { groupId = group.Id, roleId = role.Id });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    private async Task RefreshSessionAsync(
+        HttpClient client, string username, bool systemAdmin = false)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
+        var sessionId = sessions.Create(new SessionData(
+            username, "Test", "User", null,
+            DateTimeOffset.UtcNow.AddHours(1), null, "csrf",
+            systemAdmin ? ["SystemAdmin"] : []));
+        client.DefaultRequestHeaders.Remove("Cookie");
+        client.DefaultRequestHeaders.Add("Cookie",
+            $"{SessionCookie.Session(false)}={sessionId}");
     }
 
     private async Task<HttpClient> ClientForAsync(string username, bool systemAdmin = false)

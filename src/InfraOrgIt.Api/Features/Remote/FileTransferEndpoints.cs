@@ -1,6 +1,8 @@
 using System.Net.Mime;
 using Microsoft.Net.Http.Headers;
+using System.Diagnostics;
 using System.Security.Claims;
+using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
@@ -72,17 +74,24 @@ public static class FileTransferEndpoints
         InfraOrgItDbContext db,
         EnvironmentAccessService access,
         IFileTransferConnector connector,
+        IAuditService audit,
         CancellationToken ct)
     {
         var server = await LoadAuthorizedServerAsync(id, user, db, access, ct);
-        await using var session = await ConnectAsync(connector, server, ct);
-        var normalized = RemotePath.Normalize(path);
+        var started = Stopwatch.GetTimestamp();
         try
         {
-            return Results.Ok(new { path = normalized, items = await session.ListAsync(normalized, ct) });
+            await using var session = await ConnectAsync(connector, server, ct);
+            var normalized = RemotePath.Normalize(path);
+            var items = await session.ListAsync(normalized, ct);
+            await RecordAsync(audit, user, "file.list", server, started,
+                new { path = normalized }, ct);
+            return Results.Ok(new { path = normalized, items });
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            await RecordFailureAsync(audit, user, "file.list", server, started,
+                new { path = RemotePath.Normalize(path) }, exception);
             throw Failure(exception);
         }
     }
@@ -95,14 +104,16 @@ public static class FileTransferEndpoints
         InfraOrgItDbContext db,
         EnvironmentAccessService access,
         IFileTransferConnector connector,
+        IAuditService audit,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(path))
             throw Guard.Unprocessable("Indicare il file da scaricare.");
 
         var server = await LoadAuthorizedServerAsync(id, user, db, access, ct);
-        await using var session = await ConnectAsync(connector, server, ct);
         var normalized = RemotePath.Normalize(path);
+        var started = Stopwatch.GetTimestamp();
+        await using var session = await ConnectAsync(connector, server, ct);
         var name = RemotePath.Name(normalized);
         http.Response.ContentType = MediaTypeNames.Application.Octet;
         http.Response.Headers.ContentDisposition =
@@ -111,9 +122,13 @@ public static class FileTransferEndpoints
         try
         {
             await session.DownloadAsync(normalized, http.Response.Body, ct);
+            await RecordAsync(audit, user, "file.download", server, started,
+                new { path = normalized }, ct);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            await RecordFailureAsync(audit, user, "file.download", server, started,
+                new { path = normalized }, exception);
             if (!http.Response.HasStarted)
                 throw Failure(exception);
             throw;
@@ -128,6 +143,7 @@ public static class FileTransferEndpoints
         InfraOrgItDbContext db,
         EnvironmentAccessService access,
         IFileTransferConnector connector,
+        IAuditService audit,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -148,16 +164,21 @@ public static class FileTransferEndpoints
         if (string.IsNullOrWhiteSpace(name) || name is "." or "..")
             throw Guard.Unprocessable("Nome del file non valido.");
 
-        await using var session = await ConnectAsync(connector, server, ct);
         var target = RemotePath.Combine(RemotePath.Normalize(path), name);
+        var started = Stopwatch.GetTimestamp();
         try
         {
+            await using var session = await ConnectAsync(connector, server, ct);
             await using var stream = file.OpenReadStream();
             await session.UploadAsync(target, stream, ct);
+            await RecordAsync(audit, user, "file.upload", server, started,
+                new { path = target, size = file.Length }, ct);
             return Results.Ok(new { path = target });
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            await RecordFailureAsync(audit, user, "file.upload", server, started,
+                new { path = target, size = file.Length }, exception);
             throw Failure(exception);
         }
     }
@@ -169,18 +190,24 @@ public static class FileTransferEndpoints
         InfraOrgItDbContext db,
         EnvironmentAccessService access,
         IFileTransferConnector connector,
+        IAuditService audit,
         CancellationToken ct)
     {
         var server = await LoadAuthorizedServerAsync(id, user, db, access, ct);
-        await using var session = await ConnectAsync(connector, server, ct);
         var target = RemotePath.Normalize(input.Path);
+        var started = Stopwatch.GetTimestamp();
         try
         {
+            await using var session = await ConnectAsync(connector, server, ct);
             await session.CreateDirectoryAsync(target, ct);
+            await RecordAsync(audit, user, "file.mkdir", server, started,
+                new { path = target }, ct);
             return Results.Ok(new { path = target });
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            await RecordFailureAsync(audit, user, "file.mkdir", server, started,
+                new { path = target }, exception);
             throw Failure(exception);
         }
     }
@@ -192,6 +219,7 @@ public static class FileTransferEndpoints
         InfraOrgItDbContext db,
         EnvironmentAccessService access,
         IFileTransferConnector connector,
+        IAuditService audit,
         CancellationToken ct)
     {
         var name = Guard.Text(input.NewName, "NewName", 255);
@@ -199,18 +227,23 @@ public static class FileTransferEndpoints
             throw Guard.Unprocessable("Il nuovo nome non può contenere separatori di percorso.");
 
         var server = await LoadAuthorizedServerAsync(id, user, db, access, ct);
-        await using var session = await ConnectAsync(connector, server, ct);
         var source = RemotePath.Normalize(input.Path);
         var separator = source.LastIndexOf('/');
         var parent = separator <= 0 ? "/" : source[..separator];
         var target = RemotePath.Combine(parent, name);
+        var started = Stopwatch.GetTimestamp();
         try
         {
+            await using var session = await ConnectAsync(connector, server, ct);
             await session.RenameAsync(source, target, input.IsDirectory, ct);
+            await RecordAsync(audit, user, "file.rename", server, started,
+                new { from = source, to = target, isDirectory = input.IsDirectory }, ct);
             return Results.Ok(new { path = target });
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            await RecordFailureAsync(audit, user, "file.rename", server, started,
+                new { from = source, to = target, isDirectory = input.IsDirectory }, exception);
             throw Failure(exception);
         }
     }
@@ -223,6 +256,7 @@ public static class FileTransferEndpoints
         InfraOrgItDbContext db,
         EnvironmentAccessService access,
         IFileTransferConnector connector,
+        IAuditService audit,
         CancellationToken ct)
     {
         var normalized = RemotePath.Normalize(path);
@@ -230,16 +264,70 @@ public static class FileTransferEndpoints
             throw Guard.Unprocessable("Non è possibile eliminare la radice.");
 
         var server = await LoadAuthorizedServerAsync(id, user, db, access, ct);
-        await using var session = await ConnectAsync(connector, server, ct);
+        var started = Stopwatch.GetTimestamp();
         try
         {
+            await using var session = await ConnectAsync(connector, server, ct);
             await session.DeleteAsync(normalized, isDirectory ?? false, ct);
+            await RecordAsync(audit, user, "file.delete", server, started,
+                new { path = normalized, isDirectory = isDirectory ?? false }, ct);
             return Results.NoContent();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            await RecordFailureAsync(audit, user, "file.delete", server, started,
+                new { path = normalized, isDirectory = isDirectory ?? false }, exception);
             throw Failure(exception);
         }
+    }
+
+    private static Task RecordAsync(
+        IAuditService audit,
+        ClaimsPrincipal user,
+        string action,
+        Server server,
+        long started,
+        object detail,
+        CancellationToken ct) =>
+        audit.RecordAsync(TransferEntry(user, action, server, "Ok", started, detail), ct);
+
+    private static Task RecordFailureAsync(
+        IAuditService audit,
+        ClaimsPrincipal user,
+        string action,
+        Server server,
+        long started,
+        object detail,
+        Exception exception) =>
+        audit.RecordAsync(
+            TransferEntry(
+                user, action, server, "Error", started, detail,
+                exception is ApiException api ? api.Code : "file_transfer_failed"),
+            CancellationToken.None);
+
+    private static AuditEntry TransferEntry(
+        ClaimsPrincipal user,
+        string action,
+        Server server,
+        string outcome,
+        long started,
+        object detail,
+        string? errorCode = null)
+    {
+        var (userId, username, clientId) = AuditEntries.Actor(user);
+        return new AuditEntry(
+            "FileTransfer",
+            action,
+            outcome,
+            ActorUserId: userId,
+            ActorUsername: username,
+            ClientId: clientId,
+            TargetType: "Server",
+            TargetId: server.Id,
+            ServerId: server.Id,
+            ErrorCode: errorCode,
+            DurationMs: (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            Detail: detail);
     }
 
     private static async Task<Server> LoadAuthorizedServerAsync(

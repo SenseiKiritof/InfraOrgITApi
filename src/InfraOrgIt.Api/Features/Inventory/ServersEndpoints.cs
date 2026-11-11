@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Security.Claims;
+using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
@@ -79,6 +80,7 @@ public static class ServersEndpoints
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         await access.RequireAdminAsync(user, [input.ProviderEnvironmentId], ct);
@@ -107,6 +109,14 @@ public static class ServersEndpoints
             await access.RequireAdminAsync(user, jumpEnvironmentIds, ct);
         db.Servers.Add(entity);
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "server.create", "Server", entity.Id,
+            detail: new
+            {
+                entity.Name,
+                entity.ProviderEnvironmentId,
+                entity.JumpServerId
+            }), ct);
 
         return Results.Ok(await LoadAsync(db, entity.Id, ct));
     }
@@ -117,6 +127,7 @@ public static class ServersEndpoints
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         var entity = await db.Servers.SingleOrDefaultAsync(x => x.Id == id, ct)
@@ -148,6 +159,14 @@ public static class ServersEndpoints
         entity.ManagedBy = Guard.OptionalText(input.ManagedBy, "ManagedBy", 100);
 
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "server.update", "Server", entity.Id,
+            detail: new
+            {
+                entity.Name,
+                entity.ProviderEnvironmentId,
+                entity.JumpServerId
+            }), ct);
         return Results.NoContent();
     }
 
@@ -156,6 +175,7 @@ public static class ServersEndpoints
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         var entity = await db.Servers.SingleOrDefaultAsync(x => x.Id == id, ct)
@@ -173,6 +193,9 @@ public static class ServersEndpoints
 
         db.Servers.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "server.delete", "Server", id,
+            detail: new { entity.Name, entity.ProviderEnvironmentId }), ct);
         return Results.NoContent();
     }
 
@@ -182,6 +205,7 @@ public static class ServersEndpoints
         ClaimsPrincipal user,
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         var entity = await db.Servers.SingleOrDefaultAsync(x => x.Id == id, ct)
@@ -207,8 +231,12 @@ public static class ServersEndpoints
             await access.RequireAdminAsync(user, jumpEnvironmentIds, ct);
 
         await EnsureEnvironmentAsync(db, providerEnvironmentId, ct);
+        var previousEnvironmentId = entity.ProviderEnvironmentId;
         entity.ProviderEnvironmentId = providerEnvironmentId;
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "server.move", "Server", id,
+            detail: new { from = previousEnvironmentId, to = providerEnvironmentId }), ct);
         return Results.NoContent();
     }
 

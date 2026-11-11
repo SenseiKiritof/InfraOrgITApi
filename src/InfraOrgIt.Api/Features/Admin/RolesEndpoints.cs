@@ -26,9 +26,11 @@ public static class RolesEndpoints
     private static async Task<IResult> ListAsync(
         HttpContext http,
         string? lang,
+        ClaimsPrincipal user,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
+        EnvironmentAccessService.RequireSystemAdmin(user);
         var page = PageRequest.From(http);
         var scope = http.Request.Query["scopeEnum"].ToString();
         var query = db.Roles.AsNoTracking();
@@ -60,9 +62,11 @@ public static class RolesEndpoints
     private static async Task<IResult> GetAsync(
         int id,
         string? lang,
+        ClaimsPrincipal user,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
+        EnvironmentAccessService.RequireSystemAdmin(user);
         var dto = await db.Roles.AsNoTracking()
             .Where(x => x.Id == id)
             .Select(x => new RoleDto(

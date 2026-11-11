@@ -418,7 +418,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.ToTable(t =>
             {
                 t.HasCheckConstraint("CK_AuditEvents_Kind",
-                    "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError')");
+                    "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','FileTransfer','AdminChange')");
                 t.HasCheckConstraint("CK_AuditEvents_Outcome",
                     "`Outcome` IN ('Ok','Error','Denied')");
             });
