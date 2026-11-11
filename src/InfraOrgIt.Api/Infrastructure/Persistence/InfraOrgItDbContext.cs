@@ -45,6 +45,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
     public DbSet<McpGrant> McpGrants => Set<McpGrant>();
     public DbSet<TunnelSession> TunnelSessions => Set<TunnelSession>();
+    public DbSet<TunnelService> TunnelServices => Set<TunnelService>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -470,6 +471,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.SessionKey).HasMaxLength(100);
             e.Property(x => x.ActorUsername).HasMaxLength(100);
             e.Property(x => x.ClientId).HasMaxLength(100);
+            e.Property(x => x.Mode).HasMaxLength(10).HasDefaultValue("Local");
             e.Property(x => x.TargetHost).HasMaxLength(255);
             e.Property(x => x.Outcome).HasMaxLength(20);
             e.Property(x => x.ErrorCode).HasMaxLength(100);
@@ -479,9 +481,37 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.HasIndex(x => new { x.UserId, x.SessionKey }).IsUnique();
             e.HasIndex(x => new { x.Outcome, x.LastSeenAt });
             e.HasIndex(x => x.ServerId);
+            e.HasIndex(x => x.ServerApplicationId);
+            e.HasIndex(x => x.TunnelServiceId);
             e.HasIndex(x => x.ActorUsername);
-            e.ToTable(t => t.HasCheckConstraint("CK_TunnelSessions_Outcome",
-                "`Outcome` IN ('Active','Stopped','Error','Stale')"));
+            e.HasOne(x => x.TunnelService).WithMany()
+                .HasForeignKey(x => x.TunnelServiceId).OnDelete(DeleteBehavior.SetNull);
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_TunnelSessions_Outcome",
+                    "`Outcome` IN ('Active','Stopped','Error','Stale')");
+                t.HasCheckConstraint("CK_TunnelSessions_Mode",
+                    "`Mode` IN ('Local','Dynamic','Remote')");
+            });
+        });
+
+        modelBuilder.Entity<TunnelService>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Mode).HasMaxLength(10);
+            e.Property(x => x.TargetHost).HasMaxLength(255).HasDefaultValue("127.0.0.1");
+            e.Property(x => x.Kind).HasMaxLength(10).HasDefaultValue("Tcp");
+            e.Property(x => x.OpenPath).HasMaxLength(200);
+            e.HasIndex(x => new { x.ServerId, x.Name }).IsUnique();
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_TunnelServices_Mode",
+                    "`Mode` IN ('Local','Dynamic','Remote')");
+                t.HasCheckConstraint("CK_TunnelServices_Kind",
+                    "`Kind` IN ('Tcp','Http','Https')");
+            });
+            e.HasOne(x => x.Server).WithMany(x => x.TunnelServices)
+                .HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SessionRecord>(e =>

@@ -429,6 +429,7 @@ ProvidersEndpoints.Map(app);
 EnvironmentDefinitionsEndpoints.Map(app);
 ProviderEnvironmentsEndpoints.Map(app);
 ServersEndpoints.Map(app);
+TunnelServiceEndpoints.Map(app);
 ServerApplicationsEndpoints.Map(app);
 ApplicationsEndpoints.Map(app);
 ApplicationEnvironmentsEndpoints.Map(app);
