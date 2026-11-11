@@ -551,7 +551,7 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.ToTable("AuditEvents", t =>
                         {
-                            t.HasCheckConstraint("CK_AuditEvents_Kind", "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError')");
+                            t.HasCheckConstraint("CK_AuditEvents_Kind", "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','FileTransfer','AdminChange')");
 
                             t.HasCheckConstraint("CK_AuditEvents_Outcome", "`Outcome` IN ('Ok','Error','Denied')");
                         });

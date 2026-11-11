@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
+using InfraOrgIt.Api.Features.Admin;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -203,6 +205,7 @@ public static class ProviderEnvironmentsEndpoints
         int id,
         ProviderEnvironmentGroupRoleInput input,
         ClaimsPrincipal user,
+        ISessionStore sessions,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -234,6 +237,8 @@ public static class ProviderEnvironmentsEndpoints
         };
         db.ProviderEnvironmentGroupRoles.Add(entity);
         await db.SaveChangesAsync(ct);
+        await ProviderEnvironmentGroupRolesEndpoints.RemoveGroupSessionsAsync(
+            db, sessions, input.GroupId, ct);
 
         return Results.Ok(new ProviderEnvironmentGroupRoleDto(
             entity.Id, id, input.GroupId, groupName, input.RoleId, role.Name));
@@ -243,6 +248,7 @@ public static class ProviderEnvironmentsEndpoints
         int id,
         int groupRoleId,
         ClaimsPrincipal user,
+        ISessionStore sessions,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -251,8 +257,11 @@ public static class ProviderEnvironmentsEndpoints
                          .SingleOrDefaultAsync(x => x.Id == groupRoleId && x.ProviderEnvironmentId == id, ct)
                      ?? throw Guard.NotFound("Assegnazione", groupRoleId);
 
+        var groupId = entity.GroupId;
         db.ProviderEnvironmentGroupRoles.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await ProviderEnvironmentGroupRolesEndpoints.RemoveGroupSessionsAsync(
+            db, sessions, groupId, ct);
         return Results.NoContent();
     }
 

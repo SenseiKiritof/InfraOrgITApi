@@ -252,8 +252,15 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         await AddOperatorRoleAsync("mode.user", seeded.ProviderEnvironmentId);
         var token = await CreateTokenAsync("mode.user", "tunnels:operate");
         using var client = BearerClient(token.Token);
-        var serviceId = await SeedServiceAsync(seeded.ServerId, "socks-preset");
-        var otherServiceId = await SeedServiceAsync(seeded.OtherServerId, "other-preset");
+        var serviceId = await SeedServiceAsync(
+            seeded.ServerId, "socks-preset", "Dynamic", targetHost: "127.0.0.1",
+            targetPort: null, localPort: 1080);
+        var otherServiceId = await SeedServiceAsync(
+            seeded.OtherServerId, "other-preset", "Dynamic", targetHost: "127.0.0.1",
+            targetPort: null, localPort: 1080);
+        var remoteServiceId = await SeedServiceAsync(
+            seeded.ServerId, "remote-db", "Remote", targetHost: "10.50.0.20",
+            targetPort: 5432, remotePort: 15432);
 
         var dynamicSession = await client.PostAsJsonAsync("/api/tunnels/sessions",
             new
@@ -274,6 +281,7 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         Assert.Equal("", socks.TargetHost);
         Assert.Equal(serviceId, socks.TunnelServiceId);
 
+        // PT-14: Remote mode is reserved to ServerAdmin, as in the target list.
         var remoteSession = await client.PostAsJsonAsync("/api/tunnels/sessions",
             new
             {
@@ -283,9 +291,28 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
                 mode = "Remote",
                 targetHost = "10.50.0.20",
                 targetPort = 5432,
-                remotePort = 15432
+                remotePort = 15432,
+                tunnelServiceId = remoteServiceId
             });
-        Assert.Equal(HttpStatusCode.NoContent, remoteSession.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, remoteSession.StatusCode);
+
+        await SessionClientAsync("mode.admin");
+        await AddAdminRoleAsync("mode.admin", seeded.ProviderEnvironmentId);
+        var adminToken = await CreateTokenAsync("mode.admin", "tunnels:operate");
+        using var adminClient = BearerClient(adminToken.Token);
+        var adminRemote = await adminClient.PostAsJsonAsync("/api/tunnels/sessions",
+            new
+            {
+                sessionKey = "remote-1",
+                status = "active",
+                serverId = seeded.ServerId,
+                mode = "Remote",
+                targetHost = "10.50.0.20",
+                targetPort = 5432,
+                remotePort = 15432,
+                tunnelServiceId = remoteServiceId
+            });
+        Assert.Equal(HttpStatusCode.NoContent, adminRemote.StatusCode);
         var remote = await ReadSessionByKeyAsync("remote-1");
         Assert.Equal("Remote", remote.Mode);
         Assert.Null(remote.LocalPort);
@@ -360,11 +387,18 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         Assert.Equal(JsonValueKind.Null, remoteItem.GetProperty("localPort").ValueKind);
         Assert.Equal(5432, remoteItem.GetProperty("targetPort").GetInt32());
         Assert.Equal(15432, remoteItem.GetProperty("remotePort").GetInt32());
-        Assert.Equal(JsonValueKind.Null, remoteItem.GetProperty("serviceId").ValueKind);
-        Assert.Equal(JsonValueKind.Null, remoteItem.GetProperty("serviceName").ValueKind);
+        Assert.Equal(remoteServiceId, remoteItem.GetProperty("serviceId").GetInt32());
+        Assert.Equal("remote-db", remoteItem.GetProperty("serviceName").GetString());
     }
 
-    private async Task<int> SeedServiceAsync(int serverId, string name)
+    private async Task<int> SeedServiceAsync(
+        int serverId,
+        string name,
+        string mode,
+        string targetHost,
+        int? targetPort,
+        int? localPort = null,
+        int? remotePort = null)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
@@ -372,8 +406,12 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         {
             ServerId = serverId,
             Name = name,
-            Mode = "Dynamic",
-            LocalPort = 1080
+            Mode = mode,
+            TargetHost = targetHost,
+            TargetPort = targetPort,
+            LocalPort = localPort,
+            RemotePort = remotePort,
+            Enabled = true
         };
         db.TunnelServices.Add(service);
         await db.SaveChangesAsync();
@@ -598,12 +636,22 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         };
 
     private async Task AddOperatorRoleAsync(
-        string username, int providerEnvironmentId)
+        string username, int providerEnvironmentId) =>
+        await AddEnvironmentRoleAsync(
+            username, providerEnvironmentId, "ServerOperator");
+
+    private async Task AddAdminRoleAsync(
+        string username, int providerEnvironmentId) =>
+        await AddEnvironmentRoleAsync(
+            username, providerEnvironmentId, "ServerAdmin");
+
+    private async Task AddEnvironmentRoleAsync(
+        string username, int providerEnvironmentId, string roleName)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
         var user = await db.Users.SingleAsync(x => x.Username == username);
-        var role = await db.Roles.SingleAsync(x => x.Name == "ServerOperator");
+        var role = await db.Roles.SingleAsync(x => x.Name == roleName);
         var group = new Group { Name = "Session operators " + Guid.NewGuid().ToString("N")[..8] };
         db.Groups.Add(group);
         await db.SaveChangesAsync();

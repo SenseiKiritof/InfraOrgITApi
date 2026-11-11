@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
@@ -28,6 +29,42 @@ public interface IAuditService
     Task RecordAsync(AuditEntry entry, CancellationToken ct = default);
 }
 
+/// <summary>Builds audit entries with the identity of the calling principal.</summary>
+public static class AuditEntries
+{
+    public static AuditEntry Change(
+        ClaimsPrincipal user,
+        string action,
+        string targetType,
+        int targetId,
+        int? serverId = null,
+        object? detail = null)
+    {
+        var (userId, username, clientId) = Actor(user);
+        return new AuditEntry(
+            "AdminChange",
+            action,
+            "Ok",
+            ActorUserId: userId,
+            ActorUsername: username,
+            ClientId: clientId,
+            TargetType: targetType,
+            TargetId: targetId,
+            ServerId: serverId,
+            Detail: detail);
+    }
+
+    public static (int? UserId, string Username, string? ClientId) Actor(
+        ClaimsPrincipal user)
+    {
+        // Session principals put the username in NameIdentifier; bearer
+        // principals put the numeric user id there.
+        var identifier = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        int? userId = int.TryParse(identifier, out var id) ? id : null;
+        return (userId, user.Identity?.Name ?? "", user.FindFirstValue("api_token_id"));
+    }
+}
+
 /// <summary>
 /// Append-only audit writer shared by MCP tool calls and tunnel sessions.
 /// Callers pass already-redacted detail; the writer only caps its size.
@@ -36,7 +73,10 @@ public sealed class AuditService(InfraOrgItDbContext db) : IAuditService
 {
     private const int DetailLimit = 4096;
     private static readonly string[] Kinds =
-        ["McpToolCall", "TunnelStart", "TunnelStop", "TunnelError"];
+    [
+        "McpToolCall", "TunnelStart", "TunnelStop", "TunnelError",
+        "FileTransfer", "AdminChange"
+    ];
     private static readonly string[] Outcomes = ["Ok", "Error", "Denied"];
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);

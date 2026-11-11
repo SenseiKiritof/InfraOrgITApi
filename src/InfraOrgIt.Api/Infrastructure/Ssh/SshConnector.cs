@@ -218,6 +218,21 @@ public sealed class SshConnector(
         }
 
         server.HostKeyFingerprint ??= received;
+
+        // PT-09: callers such as file transfer and tunnel discovery load the
+        // server with AsNoTracking, so setting the property alone would lose
+        // the first-use key. Persist it explicitly and only when it was empty.
+        if (received is not null)
+        {
+            var stored = await db.Servers
+                .Where(x => x.Id == server.Id && x.HostKeyFingerprint == null)
+                .ExecuteUpdateAsync(
+                    update => update.SetProperty(x => x.HostKeyFingerprint, received), ct);
+            if (stored > 0)
+                logger.LogInformation(
+                    "Host key SSH memorizzata al primo uso per il server {ServerId}",
+                    server.Id);
+        }
     }
 
     private static string HostOf(Server server) =>

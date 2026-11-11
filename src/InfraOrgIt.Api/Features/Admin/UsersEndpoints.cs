@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
@@ -24,9 +25,11 @@ public static class UsersEndpoints
 
     private static async Task<IResult> ListAsync(
         HttpContext http,
+        ClaimsPrincipal user,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
+        EnvironmentAccessService.RequireSystemAdmin(user);
         var page = PageRequest.From(http);
         IQueryable<User> query = db.Users.AsNoTracking().Include(x => x.Groups).Include(x => x.Roles);
 
@@ -53,9 +56,11 @@ public static class UsersEndpoints
 
     private static async Task<IResult> GetAsync(
         int id,
+        ClaimsPrincipal principal,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
+        EnvironmentAccessService.RequireSystemAdmin(principal);
         var user = await db.Users.AsNoTracking()
                        .Include(x => x.Groups)
                        .Include(x => x.Roles)
@@ -95,6 +100,7 @@ public static class UsersEndpoints
         int id,
         UserInput input,
         ClaimsPrincipal principal,
+        ISessionStore sessions,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -103,6 +109,7 @@ public static class UsersEndpoints
                        .SingleOrDefaultAsync(x => x.Id == id, ct)
                    ?? throw Guard.NotFound("Utente", id);
 
+        var previousUsername = user.Username;
         var username = Guard.Text(input.Username, "Username", 100);
         await EnsureUniqueAsync(db, username, id, ct);
         var groups = await ResolveGroupsAsync(db, input.GroupIds, ct);
@@ -120,12 +127,20 @@ public static class UsersEndpoints
         user.Roles.Clear();
         user.Roles.AddRange(roles);
         await db.SaveChangesAsync(ct);
+
+        // PT-07: roles and groups are cached in the session payload. Any admin
+        // update can change them (or the username), so force a fresh login
+        // instead of keeping the old claims until the next refresh.
+        sessions.RemoveByUsername(previousUsername);
+        if (!string.Equals(previousUsername, user.Username, StringComparison.Ordinal))
+            sessions.RemoveByUsername(user.Username);
         return Results.NoContent();
     }
 
     private static async Task<IResult> DeleteAsync(
         int id,
         ClaimsPrincipal principal,
+        ISessionStore sessions,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -141,6 +156,7 @@ public static class UsersEndpoints
 
         db.Users.Remove(user);
         await db.SaveChangesAsync(ct);
+        sessions.RemoveByUsername(user.Username);
         return Results.NoContent();
     }
 

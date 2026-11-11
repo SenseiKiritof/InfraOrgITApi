@@ -274,15 +274,28 @@ public static class TunnelEndpoints
             throw Guard.Forbidden(
                 "Serve ServerOperator o ServerAdmin sull'ambiente del server.");
 
-        if (input.ServerApplicationId is int deploymentId &&
-            !await db.ServerApplications.AnyAsync(
-                x => x.Id == deploymentId && x.ServerId == input.ServerId, ct))
-            throw Guard.NotFound("Deployment", deploymentId);
+        TunnelService? service = null;
+        if (input.TunnelServiceId is int serviceId)
+        {
+            service = await db.TunnelServices.AsNoTracking()
+                          .SingleOrDefaultAsync(
+                              x => x.Id == serviceId && x.ServerId == input.ServerId, ct)
+                      ?? throw Guard.NotFound("Servizio tunnel", serviceId);
+        }
 
-        if (input.TunnelServiceId is int serviceId &&
-            !await db.TunnelServices.AnyAsync(
-                x => x.Id == serviceId && x.ServerId == input.ServerId, ct))
-            throw Guard.NotFound("Servizio tunnel", serviceId);
+        int? deploymentTargetPort = null;
+        if (input.ServerApplicationId is int applicationId)
+        {
+            deploymentTargetPort = await db.ServerApplications.AsNoTracking()
+                .Where(x => x.Id == applicationId && x.ServerId == input.ServerId)
+                .Select(x => (int?)(x.HostPort ?? x.ExposedPort))
+                .SingleOrDefaultAsync(ct)
+                ?? throw Guard.NotFound("Deployment", applicationId);
+        }
+
+        if (service is not null && deploymentTargetPort is not null)
+            throw Guard.Unprocessable(
+                "Indicare un deployment oppure un servizio tunnel, non entrambi.");
 
         var mode = Guard.Enum<TunnelMode>(
             string.IsNullOrWhiteSpace(input.Mode) ? nameof(TunnelMode.Local) : input.Mode,
@@ -308,6 +321,18 @@ public static class TunnelEndpoints
                 "Mode ammesso: Local, Dynamic, Remote.")
         };
         var (targetHost, targetPort, localPort, remotePort) = ports;
+
+        // PT-14: a Remote forward is only offered to ServerAdmin in the
+        // target list, so the write path must enforce the same rule.
+        if (mode == nameof(TunnelMode.Remote) &&
+            !environmentAccess.AdminEnvironmentIds.Contains(
+                server.ProviderEnvironmentId))
+            throw Guard.Forbidden(
+                "Il modo Remote richiede ServerAdmin sull'ambiente del server.");
+
+        EnsureTargetAllowed(
+            service, deploymentTargetPort, mode, targetHost, targetPort, remotePort);
+
         var errorCode = Guard.OptionalText(input.ErrorCode, "ErrorCode", 100);
         var clientId = Guard.OptionalText(
             user.FindFirstValue("api_token_id"), "ClientId", 100);
@@ -432,6 +457,72 @@ public static class TunnelEndpoints
             ? null
             : throw Guard.Unprocessable(
                 "Il campo TargetPort non è ammesso per il modo Dynamic.");
+
+    /// <summary>
+    /// PT-14: the session projection must describe a target the inventory
+    /// exposes, not an arbitrary host chosen by the client.
+    /// </summary>
+    private static void EnsureTargetAllowed(
+        TunnelService? service,
+        int? deploymentTargetPort,
+        string mode,
+        string targetHost,
+        int? targetPort,
+        int? remotePort)
+    {
+        if (service is null && deploymentTargetPort is null)
+            throw Guard.Unprocessable(
+                "Il target deve corrispondere a un deployment del server o a un servizio tunnel abilitato.");
+
+        if (deploymentTargetPort is int port)
+        {
+            if (mode != nameof(TunnelMode.Local))
+                throw Guard.Unprocessable(
+                    "Un deployment si apre solo con Mode Local.");
+            if (targetHost != "127.0.0.1" || targetPort != port)
+                throw Guard.Unprocessable(
+                    $"Il target non corrisponde al deployment: atteso 127.0.0.1:{port}.");
+            return;
+        }
+
+        var allowed = service!;
+        if (!allowed.Enabled)
+            throw Guard.Unprocessable(
+                $"Il servizio tunnel {allowed.Name} è disabilitato.");
+        if (!string.Equals(allowed.Mode, mode, StringComparison.OrdinalIgnoreCase))
+            throw Guard.Unprocessable(
+                $"Il servizio tunnel {allowed.Name} usa il modo {allowed.Mode}.");
+
+        switch (mode)
+        {
+            case nameof(TunnelMode.Dynamic):
+                if (targetHost.Length != 0 || targetPort is not null || remotePort is not null)
+                    throw Guard.Unprocessable(
+                        "Il modo Dynamic non ammette un target.");
+                break;
+
+            case nameof(TunnelMode.Remote):
+                RequireServiceTarget(allowed, targetHost, targetPort);
+                if (remotePort != allowed.RemotePort)
+                    throw Guard.Unprocessable(
+                        $"La RemotePort non corrisponde al servizio tunnel {allowed.Name}.");
+                break;
+
+            default:
+                RequireServiceTarget(allowed, targetHost, targetPort);
+                break;
+        }
+    }
+
+    private static void RequireServiceTarget(
+        TunnelService service, string targetHost, int? targetPort)
+    {
+        if (!string.Equals(service.TargetHost, targetHost, StringComparison.Ordinal) ||
+            service.TargetPort != targetPort)
+            throw Guard.Unprocessable(
+                $"Il target non corrisponde al servizio tunnel {service.Name}: " +
+                $"atteso {service.TargetHost}:{service.TargetPort}.");
+    }
 
     private static async Task<int> ResolveUserIdAsync(
         ClaimsPrincipal user,

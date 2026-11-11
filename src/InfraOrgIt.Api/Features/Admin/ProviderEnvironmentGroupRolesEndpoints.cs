@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
@@ -22,9 +23,11 @@ public static class ProviderEnvironmentGroupRolesEndpoints
 
     private static async Task<IResult> ListAsync(
         HttpContext http,
+        ClaimsPrincipal user,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
+        EnvironmentAccessService.RequireSystemAdmin(user);
         var page = PageRequest.From(http);
         var environmentId = PageRequest.IntQuery(http, "providerEnvironmentId");
         var groupId = PageRequest.IntQuery(http, "groupId");
@@ -83,9 +86,11 @@ public static class ProviderEnvironmentGroupRolesEndpoints
 
     private static async Task<IResult> GetAsync(
         int id,
+        ClaimsPrincipal user,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
+        EnvironmentAccessService.RequireSystemAdmin(user);
         var dto = await db.ProviderEnvironmentGroupRoles.AsNoTracking()
             .Where(x => x.Id == id)
             .Select(x => new AdminGroupRoleDto(
@@ -107,6 +112,7 @@ public static class ProviderEnvironmentGroupRolesEndpoints
     private static async Task<IResult> CreateAsync(
         AdminGroupRoleInput input,
         ClaimsPrincipal user,
+        ISessionStore sessions,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -122,6 +128,7 @@ public static class ProviderEnvironmentGroupRolesEndpoints
         };
         db.ProviderEnvironmentGroupRoles.Add(entity);
         await db.SaveChangesAsync(ct);
+        await RemoveGroupSessionsAsync(db, sessions, input.GroupId, ct);
         return Results.Ok(await LoadAsync(db, entity.Id, ct));
     }
 
@@ -129,6 +136,7 @@ public static class ProviderEnvironmentGroupRolesEndpoints
         int id,
         AdminGroupRoleInput input,
         ClaimsPrincipal user,
+        ISessionStore sessions,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -137,6 +145,7 @@ public static class ProviderEnvironmentGroupRolesEndpoints
                          .SingleOrDefaultAsync(x => x.Id == id, ct)
                      ?? throw Guard.NotFound("Assegnazione", id);
 
+        var previousGroupId = entity.GroupId;
         await ResolveAsync(db, input, ct);
         await EnsureUniqueAsync(db, input, id, ct);
 
@@ -144,12 +153,16 @@ public static class ProviderEnvironmentGroupRolesEndpoints
         entity.GroupId = input.GroupId;
         entity.RoleId = input.RoleId;
         await db.SaveChangesAsync(ct);
+        await RemoveGroupSessionsAsync(db, sessions, previousGroupId, ct);
+        if (input.GroupId != previousGroupId)
+            await RemoveGroupSessionsAsync(db, sessions, input.GroupId, ct);
         return Results.NoContent();
     }
 
     private static async Task<IResult> DeleteAsync(
         int id,
         ClaimsPrincipal user,
+        ISessionStore sessions,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
@@ -158,9 +171,29 @@ public static class ProviderEnvironmentGroupRolesEndpoints
                          .SingleOrDefaultAsync(x => x.Id == id, ct)
                      ?? throw Guard.NotFound("Assegnazione", id);
 
+        var groupId = entity.GroupId;
         db.ProviderEnvironmentGroupRoles.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await RemoveGroupSessionsAsync(db, sessions, groupId, ct);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// PT-07: the environment role is cached in the session payload, so every
+    /// member of the group must log in again after the assignment changes.
+    /// </summary>
+    internal static async Task RemoveGroupSessionsAsync(
+        InfraOrgItDbContext db,
+        ISessionStore sessions,
+        int groupId,
+        CancellationToken ct)
+    {
+        var usernames = await db.GroupUsers.AsNoTracking()
+            .Where(x => x.GroupsId == groupId)
+            .Select(x => x.User.Username)
+            .ToListAsync(ct);
+        foreach (var username in usernames)
+            sessions.RemoveByUsername(username);
     }
 
     private static async Task ResolveAsync(
