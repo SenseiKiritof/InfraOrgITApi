@@ -12,12 +12,17 @@ public sealed class TunnelSession
     public string? ClientId { get; set; }
     public int ServerId { get; set; }
     public int? ServerApplicationId { get; set; }
-    public int LocalPort { get; set; }
+    public int? TunnelServiceId { get; set; }
+    public string Mode { get; set; } = "Local";
+    public int? LocalPort { get; set; }
     public string TargetHost { get; set; } = "";
-    public int TargetPort { get; set; }
+    public int? TargetPort { get; set; }
+    public int? RemotePort { get; set; }
     public DateTime StartedAt { get; set; }
     public DateTime LastSeenAt { get; set; }
     public DateTime? EndedAt { get; set; }
     public string Outcome { get; set; } = "";
     public string? ErrorCode { get; set; }
+
+    public TunnelService? TunnelService { get; set; }
 }

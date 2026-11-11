@@ -244,6 +244,150 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
     }
 
+    [Fact]
+    public async Task Session_supports_dynamic_and_remote_modes()
+    {
+        var seeded = await SeedAsync();
+        await SessionClientAsync("mode.user");
+        await AddOperatorRoleAsync("mode.user", seeded.ProviderEnvironmentId);
+        var token = await CreateTokenAsync("mode.user", "tunnels:operate");
+        using var client = BearerClient(token.Token);
+        var serviceId = await SeedServiceAsync(seeded.ServerId, "socks-preset");
+        var otherServiceId = await SeedServiceAsync(seeded.OtherServerId, "other-preset");
+
+        var dynamicSession = await client.PostAsJsonAsync("/api/tunnels/sessions",
+            new
+            {
+                sessionKey = "socks-1",
+                status = "active",
+                serverId = seeded.ServerId,
+                mode = "dynamic",
+                localPort = 1080,
+                tunnelServiceId = serviceId
+            });
+        Assert.Equal(HttpStatusCode.NoContent, dynamicSession.StatusCode);
+        var socks = await ReadSessionByKeyAsync("socks-1");
+        Assert.Equal("Dynamic", socks.Mode);
+        Assert.Equal(1080, socks.LocalPort);
+        Assert.Null(socks.TargetPort);
+        Assert.Null(socks.RemotePort);
+        Assert.Equal("", socks.TargetHost);
+        Assert.Equal(serviceId, socks.TunnelServiceId);
+
+        var remoteSession = await client.PostAsJsonAsync("/api/tunnels/sessions",
+            new
+            {
+                sessionKey = "remote-1",
+                status = "active",
+                serverId = seeded.ServerId,
+                mode = "Remote",
+                targetHost = "10.50.0.20",
+                targetPort = 5432,
+                remotePort = 15432
+            });
+        Assert.Equal(HttpStatusCode.NoContent, remoteSession.StatusCode);
+        var remote = await ReadSessionByKeyAsync("remote-1");
+        Assert.Equal("Remote", remote.Mode);
+        Assert.Null(remote.LocalPort);
+        Assert.Equal(5432, remote.TargetPort);
+        Assert.Equal(15432, remote.RemotePort);
+
+        var localWithoutPort = await client.PostAsJsonAsync("/api/tunnels/sessions",
+            new
+            {
+                sessionKey = "local-1",
+                status = "active",
+                serverId = seeded.ServerId,
+                targetHost = "127.0.0.1"
+            });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, localWithoutPort.StatusCode);
+
+        var dynamicWithTarget = await client.PostAsJsonAsync("/api/tunnels/sessions",
+            new
+            {
+                sessionKey = "socks-2",
+                status = "active",
+                serverId = seeded.ServerId,
+                mode = "Dynamic",
+                targetPort = 5432,
+                localPort = 1081
+            });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, dynamicWithTarget.StatusCode);
+
+        var remoteWithLocal = await client.PostAsJsonAsync("/api/tunnels/sessions",
+            new
+            {
+                sessionKey = "remote-2",
+                status = "active",
+                serverId = seeded.ServerId,
+                mode = "Remote",
+                targetHost = "10.50.0.20",
+                targetPort = 5432,
+                remotePort = 15432,
+                localPort = 15433
+            });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, remoteWithLocal.StatusCode);
+
+        var wrongService = await client.PostAsJsonAsync("/api/tunnels/sessions",
+            new
+            {
+                sessionKey = "socks-bad",
+                status = "active",
+                serverId = seeded.ServerId,
+                mode = "Dynamic",
+                localPort = 1082,
+                tunnelServiceId = otherServiceId
+            });
+        Assert.Equal(HttpStatusCode.NotFound, wrongService.StatusCode);
+
+        using var operatorSession = await SessionClientAsync("mode.user");
+        var items = (await ReadAsync(await SendAsync(operatorSession, HttpMethod.Get,
+                "/api/tunnels/sessions")))
+            .GetProperty("items").EnumerateArray().ToList();
+
+        var socksItem = items.Single(x =>
+            x.GetProperty("sessionKey").GetString() == "socks-1");
+        Assert.Equal("Dynamic", socksItem.GetProperty("mode").GetString());
+        Assert.Equal(1080, socksItem.GetProperty("localPort").GetInt32());
+        Assert.Equal(JsonValueKind.Null, socksItem.GetProperty("targetPort").ValueKind);
+        Assert.Equal(JsonValueKind.Null, socksItem.GetProperty("remotePort").ValueKind);
+        Assert.Equal(serviceId, socksItem.GetProperty("serviceId").GetInt32());
+        Assert.Equal("socks-preset", socksItem.GetProperty("serviceName").GetString());
+
+        var remoteItem = items.Single(x =>
+            x.GetProperty("sessionKey").GetString() == "remote-1");
+        Assert.Equal("Remote", remoteItem.GetProperty("mode").GetString());
+        Assert.Equal(JsonValueKind.Null, remoteItem.GetProperty("localPort").ValueKind);
+        Assert.Equal(5432, remoteItem.GetProperty("targetPort").GetInt32());
+        Assert.Equal(15432, remoteItem.GetProperty("remotePort").GetInt32());
+        Assert.Equal(JsonValueKind.Null, remoteItem.GetProperty("serviceId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, remoteItem.GetProperty("serviceName").ValueKind);
+    }
+
+    private async Task<int> SeedServiceAsync(int serverId, string name)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        var service = new TunnelService
+        {
+            ServerId = serverId,
+            Name = name,
+            Mode = "Dynamic",
+            LocalPort = 1080
+        };
+        db.TunnelServices.Add(service);
+        await db.SaveChangesAsync();
+        return service.Id;
+    }
+
+    private async Task<TunnelSession> ReadSessionByKeyAsync(string sessionKey)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        return await db.TunnelSessions.AsNoTracking()
+            .SingleAsync(x => x.SessionKey == sessionKey);
+    }
+
     private async Task<TunnelSession> ReadSessionAsync(int tokenId)
     {
         using var scope = _factory.Services.CreateScope();

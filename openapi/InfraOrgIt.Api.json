@@ -1157,6 +1157,215 @@
         ]
       }
     },
+    "/api/servers/{serverId}/tunnel-services": {
+      "get": {
+        "tags": [
+          "TunnelServiceEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TunnelServiceDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "TunnelServiceEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TunnelServiceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TunnelServiceDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/servers/{serverId}/tunnel-services/{id}": {
+      "put": {
+        "tags": [
+          "TunnelServiceEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TunnelServiceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "TunnelServiceEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/servers/{serverId}/tunnel-services/discover": {
+      "post": {
+        "tags": [
+          "TunnelServiceEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TunnelDiscoveryDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
     "/api/server-applications": {
       "get": {
         "tags": [
@@ -5106,7 +5315,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TunnelTargetListDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -6666,6 +6882,96 @@
           }
         }
       },
+      "TunnelDiscoveryDto": {
+        "required": [
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TunnelDiscoveryItemDto"
+            }
+          }
+        }
+      },
+      "TunnelDiscoveryItemDto": {
+        "required": [
+          "port",
+          "address"
+        ],
+        "type": "object",
+        "properties": {
+          "port": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "address": {
+            "type": "string"
+          }
+        }
+      },
+      "TunnelEndpointDto": {
+        "required": [
+          "serverApplicationId",
+          "applicationId",
+          "application",
+          "version",
+          "targetHost",
+          "targetPort",
+          "suggestedLocalPort"
+        ],
+        "type": "object",
+        "properties": {
+          "serverApplicationId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "applicationId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "application": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "targetHost": {
+            "type": "string"
+          },
+          "targetPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "suggestedLocalPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "TunnelEventInput": {
         "required": [
           "kind",
@@ -6740,6 +7046,190 @@
           }
         }
       },
+      "TunnelJumpDto": {
+        "required": [
+          "host",
+          "port",
+          "username"
+        ],
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "TunnelServiceDto": {
+        "required": [
+          "id",
+          "serverId",
+          "name",
+          "mode",
+          "targetHost",
+          "targetPort",
+          "localPort",
+          "remotePort",
+          "kind",
+          "openPath",
+          "autoStart",
+          "enabled"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "serverId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "targetHost": {
+            "type": "string"
+          },
+          "targetPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "localPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "remotePort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "openPath": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "autoStart": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TunnelServiceInput": {
+        "required": [
+          "name",
+          "mode"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetHost": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "localPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "remotePort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "kind": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "openPath": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "autoStart": {
+            "type": "boolean",
+            "default": false
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
       "TunnelSessionDto": {
         "required": [
           "id",
@@ -6749,9 +7239,13 @@
           "serverId",
           "serverName",
           "application",
+          "serviceId",
+          "serviceName",
+          "mode",
           "localPort",
           "targetHost",
           "targetPort",
+          "remotePort",
           "startedAt",
           "lastSeenAt",
           "status"
@@ -6795,9 +7289,28 @@
               "string"
             ]
           },
+          "serviceId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "serviceName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          },
           "localPort": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
+              "null",
               "integer",
               "string"
             ],
@@ -6809,6 +7322,16 @@
           "targetPort": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "remotePort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
               "integer",
               "string"
             ],
@@ -6831,10 +7354,7 @@
         "required": [
           "sessionKey",
           "status",
-          "serverId",
-          "targetHost",
-          "targetPort",
-          "localPort"
+          "serverId"
         ],
         "type": "object",
         "properties": {
@@ -6867,6 +7387,7 @@
           "targetPort": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
+              "null",
               "integer",
               "string"
             ],
@@ -6875,6 +7396,7 @@
           "localPort": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
+              "null",
               "integer",
               "string"
             ],
@@ -6894,6 +7416,30 @@
               "null",
               "string"
             ]
+          },
+          "mode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "remotePort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "tunnelServiceId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -6907,6 +7453,93 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TunnelSessionDto"
+            }
+          }
+        }
+      },
+      "TunnelTargetDto": {
+        "required": [
+          "serverId",
+          "serverName",
+          "environmentLabel",
+          "sshHost",
+          "sshPort",
+          "username",
+          "jump",
+          "jumps",
+          "targets",
+          "services"
+        ],
+        "type": "object",
+        "properties": {
+          "serverId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "serverName": {
+            "type": "string"
+          },
+          "environmentLabel": {
+            "type": "string"
+          },
+          "sshHost": {
+            "type": "string"
+          },
+          "sshPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "username": {
+            "type": "string"
+          },
+          "jump": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TunnelJumpDto"
+              }
+            ]
+          },
+          "jumps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TunnelJumpDto"
+            }
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TunnelEndpointDto"
+            }
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TunnelServiceDto"
+            }
+          }
+        }
+      },
+      "TunnelTargetListDto": {
+        "required": [
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TunnelTargetDto"
             }
           }
         }
@@ -7015,6 +7648,9 @@
     },
     {
       "name": "ServersEndpoints"
+    },
+    {
+      "name": "TunnelServiceEndpoints"
     },
     {
       "name": "ServerApplicationsEndpoints"
