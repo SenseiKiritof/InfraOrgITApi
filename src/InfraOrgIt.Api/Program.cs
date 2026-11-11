@@ -165,6 +165,22 @@ builder.Services.AddOptions<AuditRetentionOptions>()
     .Validate(o => o.RetentionDays is >= 1 and <= 3650, "Audit:RetentionDays tra 1 e 3650.")
     .ValidateOnStart();
 builder.Services.AddHostedService<AuditRetentionService>();
+builder.Services.AddOptions<AuditAnchorOptions>()
+    .Bind(builder.Configuration.GetSection(AuditAnchorOptions.SectionName))
+    .Validate(o => o.IntervalMinutes is >= 1 and <= 1440,
+        "Audit:Anchor:IntervalMinutes tra 1 e 1440.")
+    .Validate(o => !o.Enabled || IsHttpsUrl(o.WebhookUrl),
+        "Audit:Anchor:WebhookUrl deve essere un URL HTTPS assoluto quando l'ancoraggio è attivo.")
+    .Validate(o => !o.Enabled || !string.IsNullOrWhiteSpace(o.HmacKey),
+        "Audit:Anchor:HmacKey mancante quando l'ancoraggio è attivo.")
+    .Validate(o => !o.Enabled || !string.IsNullOrWhiteSpace(o.InstanceId),
+        "Audit:Anchor:InstanceId mancante quando l'ancoraggio è attivo.")
+    .ValidateOnStart();
+builder.Services.AddScoped<IAuditAnchorSource, AuditAnchorSource>();
+builder.Services.AddScoped<AuditAnchorRunner>();
+builder.Services.AddHttpClient<AuditAnchorPublisher>(
+    client => client.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddHostedService<AuditAnchorService>();
 builder.Services.AddScoped<ReachabilityRunner>();
 builder.Services.AddScoped<ApplicationActionRunner>();
 builder.Services.AddScoped<McpGrantService>();
@@ -259,6 +275,8 @@ builder.Services.AddOptions<ServerAccessOptions>()
 builder.Services.AddSingleton<CredentialCipher>();
 builder.Services.AddScoped<ServerCredentialResolver>();
 builder.Services.AddScoped<ISshConnector, SshConnector>();
+builder.Services.AddOptions<FileTransferOptions>()
+    .Bind(builder.Configuration.GetSection(FileTransferOptions.SectionName));
 builder.Services.AddScoped<IFileTransferConnector, FileTransferConnector>();
 builder.Services.AddOptions<FrontendOptions>()
     .Bind(builder.Configuration.GetSection("Frontend"))
@@ -566,4 +584,8 @@ public partial class Program
             return false;
         }
     }
+
+    private static bool IsHttpsUrl(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+        uri.Scheme == Uri.UriSchemeHttps;
 }

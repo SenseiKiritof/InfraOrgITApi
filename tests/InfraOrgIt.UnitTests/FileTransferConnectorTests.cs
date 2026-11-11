@@ -1,5 +1,10 @@
 using FluentFTP;
+using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.Infrastructure.Files;
+using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace InfraOrgIt.UnitTests;
 
@@ -23,5 +28,23 @@ public sealed class FileTransferConnectorTests
         Assert.Equal(FtpEncryptionMode.None, config.EncryptionMode);
         Assert.False(config.DataConnectionEncryption);
         Assert.False(config.ValidateAnyCertificate);
+    }
+
+    [Fact]
+    public async Task Plain_ftp_is_rejected_when_the_switch_is_off()
+    {
+        var connector = new FileTransferConnector(
+            null!,
+            null!,
+            Options.Create(new FileTransferOptions { AllowPlainFtp = false }),
+            NullLogger<FileTransferConnector>.Instance);
+
+        var exception = await Assert.ThrowsAsync<ApiException>(() =>
+            connector.ConnectAsync(
+                new Server { Name = "legacy", FileTransferProtocol = "Ftp" },
+                CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status422UnprocessableEntity, exception.StatusCode);
+        Assert.Equal("plain_ftp_disabled", exception.Code);
     }
 }
