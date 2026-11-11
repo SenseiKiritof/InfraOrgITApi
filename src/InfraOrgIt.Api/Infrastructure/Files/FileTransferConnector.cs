@@ -5,7 +5,7 @@ using InfraOrgIt.Api.Infrastructure.Ssh;
 
 namespace InfraOrgIt.Api.Infrastructure.Files;
 
-/// <summary>Sceglie il protocollo configurato sul server: SFTP (via catena SSH) o FTP.</summary>
+/// <summary>Sceglie il protocollo configurato sul server: SFTP (via catena SSH), FTP o FTPS.</summary>
 public sealed class FileTransferConnector(
     ISshConnector ssh,
     ServerCredentialResolver credentials,
@@ -23,19 +23,23 @@ public sealed class FileTransferConnector(
                              $"Il server {server.Name} non ha una credenziale per il trasferimento file.");
 
         var port = server.FileTransferPort ??
-                   (server.FileTransferProtocol == "Ftp" ? 21 : 22);
+                   (server.FileTransferProtocol == "Sftp" ? 22 : 21);
 
         switch (server.FileTransferProtocol)
         {
             case "Sftp":
                 return await ssh.OpenSftpAsync(server, credential, port, ct);
             case "Ftp":
-                return new FtpFileSession(await ConnectFtpAsync(server, credential, port, ct));
+                return new FtpFileSession(
+                    await ConnectFtpAsync(server, credential, port, false, ct));
+            case "Ftps":
+                return new FtpFileSession(
+                    await ConnectFtpAsync(server, credential, port, true, ct));
             case null or "":
                 throw new ApiException(
                     StatusCodes.Status422UnprocessableEntity,
                     "file_transfer_not_configured",
-                    $"Il server {server.Name} non ha un accesso SFTP o FTP configurato.");
+                    $"Il server {server.Name} non ha un accesso SFTP, FTP o FTPS configurato.");
             default:
                 throw new ApiException(
                     StatusCodes.Status422UnprocessableEntity,
@@ -44,30 +48,42 @@ public sealed class FileTransferConnector(
         }
     }
 
+    /// <summary>
+    /// Explicit TLS (AUTH TLS) with certificate validation kept on. Plain FTP
+    /// stays cleartext for legacy servers.
+    /// </summary>
+    internal static FtpConfig CreateFtpConfig(bool explicitTls) => new()
+    {
+        EncryptionMode = explicitTls ? FtpEncryptionMode.Explicit : FtpEncryptionMode.None,
+        DataConnectionEncryption = explicitTls,
+        // Never accept an invalid certificate silently.
+        ValidateAnyCertificate = false,
+        ConnectTimeout = 10_000,
+        DataConnectionConnectTimeout = 10_000,
+        DataConnectionReadTimeout = 30_000
+    };
+
     private async Task<AsyncFtpClient> ConnectFtpAsync(
         Server server,
         ServerCredential credential,
         int port,
+        bool explicitTls,
         CancellationToken ct)
     {
         if (credential.AuthType != "Password")
             throw new ApiException(
                 StatusCodes.Status422UnprocessableEntity,
                 "ftp_requires_password",
-                "Il protocollo FTP richiede una credenziale con password.");
+                "Il protocollo FTP/FTPS richiede una credenziale con password.");
 
         var (username, secret, _) = credentials.Resolve(credential);
-        var config = new FtpConfig
-        {
-            ConnectTimeout = 10_000,
-            DataConnectionConnectTimeout = 10_000,
-            DataConnectionReadTimeout = 30_000
-        };
-
         var host = string.IsNullOrWhiteSpace(server.IpAddress)
             ? server.Hostname
             : server.IpAddress;
-        var client = new AsyncFtpClient(host, username, secret, port, config);
+        var client = new AsyncFtpClient(
+            host, username, secret, port, CreateFtpConfig(explicitTls));
+        client.ValidateCertificate += (_, args) =>
+            args.Accept = args.PolicyErrors == System.Net.Security.SslPolicyErrors.None;
         try
         {
             await client.Connect(ct);
@@ -78,13 +94,14 @@ public sealed class FileTransferConnector(
             client.Dispose();
             logger.LogWarning(
                 exception,
-                "Connessione FTP fallita per il server {ServerId} ({Credential})",
+                "Connessione {Protocol} fallita per il server {ServerId} ({Credential})",
+                explicitTls ? "FTPS" : "FTP",
                 server.Id,
                 credential.Name);
             throw new ApiException(
                 StatusCodes.Status502BadGateway,
-                "ftp_unreachable",
-                $"Connessione FTP a {server.Name} fallita: {exception.Message}");
+                explicitTls ? "ftps_unreachable" : "ftp_unreachable",
+                $"Connessione {(explicitTls ? "FTPS" : "FTP")} a {server.Name} fallita: {exception.Message}");
         }
     }
 

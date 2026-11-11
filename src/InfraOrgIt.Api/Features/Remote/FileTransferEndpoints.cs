@@ -53,7 +53,7 @@ public static class FileTransferEndpoints
 
         var protocol = Guard.Enum<FileTransferProtocol>(input.Protocol, "Protocol");
         var port = input.Port is null or 0
-            ? protocol == nameof(FileTransferProtocol.Ftp) ? 21 : 22
+            ? DefaultPort(protocol)
             : Guard.Port(input.Port.Value, "Port");
 
         if (input.CredentialId is not null &&
@@ -368,10 +368,14 @@ public static class FileTransferEndpoints
             "file_transfer_failed",
             $"Operazione sul file non riuscita: {exception.Message}");
 
+    internal static int DefaultPort(string protocol) =>
+        protocol == nameof(FileTransferProtocol.Sftp) ? 22 : 21;
+
     public enum FileTransferProtocol
     {
         Sftp,
-        Ftp
+        Ftp,
+        Ftps
     }
 
     public sealed record FileTransferInput(

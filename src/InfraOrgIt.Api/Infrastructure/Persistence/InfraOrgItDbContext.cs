@@ -147,7 +147,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.HasIndex(x => x.FileTransferCredentialId);
             e.HasIndex(x => x.JumpServerId);
             e.ToTable(t => t.HasCheckConstraint("CK_Servers_FileTransferProtocol",
-                "`FileTransferProtocol` IS NULL OR `FileTransferProtocol` IN ('Sftp','Ftp')"));
+                "`FileTransferProtocol` IS NULL OR `FileTransferProtocol` IN ('Sftp','Ftp','Ftps')"));
             e.HasOne(x => x.ProviderEnvironment).WithMany(x => x.Servers)
                 .HasForeignKey(x => x.ProviderEnvironmentId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Credential).WithMany(x => x.Servers)
@@ -412,6 +412,8 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.ErrorCode).HasMaxLength(100);
             e.Property(x => x.CorrelationId).HasMaxLength(100);
             e.Property(x => x.DetailJson).HasColumnType("longtext");
+            e.Property(x => x.PrevHash).HasMaxLength(64);
+            e.Property(x => x.Hash).HasMaxLength(64);
             e.HasIndex(x => x.OccurredAt);
             e.HasIndex(x => new { x.Kind, x.OccurredAt });
             e.HasIndex(x => new { x.ActorUsername, x.OccurredAt });
@@ -421,6 +423,8 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
                     "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','FileTransfer','AdminChange')");
                 t.HasCheckConstraint("CK_AuditEvents_Outcome",
                     "`Outcome` IN ('Ok','Error','Denied')");
+                t.HasCheckConstraint("CK_AuditEvents_Hash",
+                    "`Hash` IS NULL OR CHAR_LENGTH(`Hash`) = 64");
             });
         });
 
