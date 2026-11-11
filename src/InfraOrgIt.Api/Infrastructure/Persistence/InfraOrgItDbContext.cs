@@ -44,6 +44,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
     public DbSet<McpGrant> McpGrants => Set<McpGrant>();
+    public DbSet<McpApproval> McpApprovals => Set<McpApproval>();
     public DbSet<TunnelSession> TunnelSessions => Set<TunnelSession>();
     public DbSet<TunnelService> TunnelServices => Set<TunnelService>();
 
@@ -458,6 +459,30 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
                 .HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.EnvironmentDefinition).WithMany()
                 .HasForeignKey(x => x.EnvironmentDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<McpApproval>(e =>
+        {
+            e.Property(x => x.Action).HasMaxLength(50);
+            e.Property(x => x.ParametersJson).HasMaxLength(2048);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.HasIndex(x => new { x.UserId, x.Status, x.ExpiresAt });
+            e.HasIndex(x => new { x.Status, x.ExpiresAt });
+            e.ToTable(t => t.HasCheckConstraint("CK_McpApprovals_Status",
+                "`Status` IN ('Pending','Approved','Denied','Used','Expired')"));
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.DecidedByUser).WithMany()
+                .HasForeignKey(x => x.DecidedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Server).WithMany()
+                .HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ServerApplication).WithMany()
+                .HasForeignKey(x => x.ServerApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ApplicationAction).WithMany()
+                .HasForeignKey(x => x.ApplicationActionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
