@@ -2,6 +2,7 @@ using FluentFTP;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 using InfraOrgIt.Api.Infrastructure.Ssh;
+using Microsoft.Extensions.Options;
 
 namespace InfraOrgIt.Api.Infrastructure.Files;
 
@@ -9,12 +10,16 @@ namespace InfraOrgIt.Api.Infrastructure.Files;
 public sealed class FileTransferConnector(
     ISshConnector ssh,
     ServerCredentialResolver credentials,
+    IOptions<FileTransferOptions> options,
     ILogger<FileTransferConnector> logger) : IFileTransferConnector
 {
     public async Task<IFileTransferSession> ConnectAsync(
         Server server,
         CancellationToken ct)
     {
+        FileTransferPolicy.EnsureProtocolAllowed(
+            server.FileTransferProtocol, options.Value.AllowPlainFtp);
+
         var credential = server.FileTransferCredential
                          ?? server.Credential
                          ?? throw new ApiException(

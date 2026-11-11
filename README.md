@@ -115,6 +115,47 @@ approval, because a model-supplied boolean is not a human confirmation.
   `confirm=true` now returns `approval_required` and needs the second call
   with `approvalId`.
 
+## Audit anchoring (PT-10)
+
+The `AuditEvents` hash chain is tamper-evident only inside this database. When
+`Audit:Anchor:Enabled` is true, a hosted service reads the newest hashed row
+every `Audit:Anchor:IntervalMinutes` (default 5) and POSTs:
+
+```json
+{
+  "instanceId": "api-1",
+  "lastId": 123,
+  "chainHead": "…",
+  "occurredAt": "2026-11-12T10:00:00Z",
+  "checked": "2026-11-12T10:05:00Z"
+}
+```
+
+- `Audit:Anchor:WebhookUrl` must be an absolute HTTPS URL; HTTP is rejected.
+- The body is signed with HMAC-SHA256 using `Audit:Anchor:HmacKey` and sent as
+  `X-InfraOrgIT-Signature: sha256=<hex>`. Verify the signature over the raw
+  request body before parsing it.
+- `Audit:Anchor:InstanceId` identifies the API instance in the sink.
+- No audit detail or secret is exported. An empty chain is skipped; a webhook
+  failure is logged and retried at the next interval without stopping the API.
+- Keep `HmacKey` in a secret manager or the encrypted
+  `appsettings.<Environment>.Secure.json`, never in `appsettings.json`.
+
+Point the webhook at an **append-only SIEM or WORM sink** (for example an
+object-locked bucket with no overwrite/delete during the retention period).
+That external copy is what makes a later rewrite or deletion of the local
+chain detectable. The API alone still cannot guarantee WORM, and retention
+still removes old local rows.
+
+## Plain FTP switch (PT-16)
+
+`FileTransfer:AllowPlainFtp` defaults to `true` for development. Plain FTP is
+cleartext: username, password, commands and file content cross the network
+unencrypted. Deploy sets `FileTransfer__AllowPlainFtp=false`; saving `Ftp` and
+connecting with an already-saved `Ftp` server then both fail with 422
+`plain_ftp_disabled`. `Sftp` and `Ftps` are unaffected. Prefer SFTP, or FTPS
+when the target only offers FTP.
+
 ## HTTP security
 
 - Headers on API and SPA: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, CSP and HSTS when the request arrives over HTTPS.

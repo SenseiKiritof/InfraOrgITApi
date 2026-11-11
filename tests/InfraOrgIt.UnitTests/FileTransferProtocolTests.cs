@@ -1,6 +1,7 @@
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
 using InfraOrgIt.Api.Features.Remote;
+using InfraOrgIt.Api.Infrastructure.Files;
 using Microsoft.AspNetCore.Http;
 
 namespace InfraOrgIt.UnitTests;
@@ -36,5 +37,27 @@ public sealed class FileTransferProtocolTests
         FileTransferEndpoints.FileTransferProtocol protocol, int expected)
     {
         Assert.Equal(expected, FileTransferEndpoints.DefaultPort(protocol.ToString()));
+    }
+
+    [Fact]
+    public void Plain_ftp_is_rejected_by_the_shared_policy()
+    {
+        FileTransferPolicy.EnsureProtocolAllowed(
+            FileTransferPolicy.PlainFtpProtocol, allowPlainFtp: true);
+
+        var exception = Assert.Throws<ApiException>(() =>
+            FileTransferPolicy.EnsureProtocolAllowed(
+                FileTransferPolicy.PlainFtpProtocol, allowPlainFtp: false));
+        Assert.Equal(StatusCodes.Status422UnprocessableEntity, exception.StatusCode);
+        Assert.Equal("plain_ftp_disabled", exception.Code);
+    }
+
+    [Theory]
+    [InlineData("Sftp")]
+    [InlineData("Ftps")]
+    public void Other_protocols_are_not_blocked_by_the_plain_ftp_switch(
+        string protocol)
+    {
+        FileTransferPolicy.EnsureProtocolAllowed(protocol, allowPlainFtp: false);
     }
 }

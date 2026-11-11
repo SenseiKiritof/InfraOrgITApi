@@ -11,6 +11,7 @@ using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace InfraOrgIt.Api.Features.Remote;
 
@@ -36,6 +37,7 @@ public static class FileTransferEndpoints
         FileTransferInput input,
         ClaimsPrincipal user,
         InfraOrgItDbContext db,
+        IOptions<FileTransferOptions> fileTransfer,
         CancellationToken ct)
     {
         EnvironmentAccessService.RequireSystemAdmin(user);
@@ -52,6 +54,8 @@ public static class FileTransferEndpoints
         }
 
         var protocol = Guard.Enum<FileTransferProtocol>(input.Protocol, "Protocol");
+        FileTransferPolicy.EnsureProtocolAllowed(
+            protocol.ToString(), fileTransfer.Value.AllowPlainFtp);
         var port = input.Port is null or 0
             ? DefaultPort(protocol)
             : Guard.Port(input.Port.Value, "Port");
