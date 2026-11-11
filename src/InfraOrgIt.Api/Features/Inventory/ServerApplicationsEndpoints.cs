@@ -82,7 +82,7 @@ public static class ServerApplicationsEndpoints
 
         await access.RequireAdminAsync(user, [server.ProviderEnvironmentId], ct);
         await EnsureVersionAsync(db, input.ApplicationVersionId, ct);
-        await EnsureProxyRouteAsync(db, input.ProxyRouteId, ct);
+        await EnsureProxyRouteAsync(db, input.ProxyRouteId, user, access, ct);
 
         var details = ValidateDeployment(
             input.Runtime,
@@ -127,7 +127,7 @@ public static class ServerApplicationsEndpoints
         await access.RequireAdminAsync(
             user, [originalServer.ProviderEnvironmentId, targetServer.ProviderEnvironmentId], ct);
         await EnsureVersionAsync(db, input.ApplicationVersionId, ct);
-        await EnsureProxyRouteAsync(db, input.ProxyRouteId, ct);
+        await EnsureProxyRouteAsync(db, input.ProxyRouteId, user, access, ct);
 
         var details = ValidateDeployment(
             input.Runtime,
@@ -171,12 +171,36 @@ public static class ServerApplicationsEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>
+    /// PT-06: the route belongs to a proxy connection, so attaching a deployment
+    /// to it requires <c>ServerAdmin</c> on the source and target environments.
+    /// </summary>
     private static async Task EnsureProxyRouteAsync(
-        InfraOrgItDbContext db, int? proxyRouteId, CancellationToken ct)
+        InfraOrgItDbContext db,
+        int? proxyRouteId,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        CancellationToken ct)
     {
-        if (proxyRouteId is not null &&
-            !await db.ProxyRoutes.AnyAsync(x => x.Id == proxyRouteId, ct))
-            throw Guard.NotFound("Route proxy", proxyRouteId.Value);
+        if (proxyRouteId is null)
+            return;
+
+        var environments = await db.ProxyRoutes.AsNoTracking()
+            .Where(x => x.Id == proxyRouteId.Value)
+            .Select(x => new
+            {
+                Source = x.ProxyConnection!.SourceServer!.ProviderEnvironmentId,
+                Target = x.ProxyConnection!.TargetServer!.ProviderEnvironmentId
+            })
+            .SingleOrDefaultAsync(ct)
+            ?? throw Guard.NotFound("Route proxy", proxyRouteId.Value);
+
+        await access.RequireAdminAsync(
+            user,
+            environments.Source == environments.Target
+                ? [environments.Source]
+                : [environments.Source, environments.Target],
+            ct);
     }
 
     internal static DeploymentDetails ValidateDeployment(
