@@ -9,7 +9,7 @@ public sealed record RemoteFileEntry(
     long Size,
     DateTime? ModifiedUtc);
 
-/// <summary>Session opened on a server: SFTP over SSH or plain FTP.</summary>
+/// <summary>Session opened on a server: SFTP over SSH, plain FTP or FTPS.</summary>
 public interface IFileTransferSession : IAsyncDisposable
 {
     Task<IReadOnlyList<RemoteFileEntry>> ListAsync(string path, CancellationToken ct);

@@ -508,6 +508,10 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)");
 
+                    b.Property<string>("Hash")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(30)
@@ -523,6 +527,10 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("varchar(20)");
+
+                    b.Property<string>("PrevHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
 
                     b.Property<int?>("ServerId")
                         .HasColumnType("int");
@@ -551,6 +559,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.ToTable("AuditEvents", t =>
                         {
+                            t.HasCheckConstraint("CK_AuditEvents_Hash", "`Hash` IS NULL OR CHAR_LENGTH(`Hash`) = 64");
+
                             t.HasCheckConstraint("CK_AuditEvents_Kind", "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','FileTransfer','AdminChange')");
 
                             t.HasCheckConstraint("CK_AuditEvents_Outcome", "`Outcome` IN ('Ok','Error','Denied')");
@@ -1779,7 +1789,7 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.ToTable("Servers", t =>
                         {
-                            t.HasCheckConstraint("CK_Servers_FileTransferProtocol", "`FileTransferProtocol` IS NULL OR `FileTransferProtocol` IN ('Sftp','Ftp')");
+                            t.HasCheckConstraint("CK_Servers_FileTransferProtocol", "`FileTransferProtocol` IS NULL OR `FileTransferProtocol` IN ('Sftp','Ftp','Ftps')");
                         });
                 });
 

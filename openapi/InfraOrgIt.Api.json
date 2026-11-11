@@ -359,6 +359,30 @@
         ]
       }
     },
+    "/api/audit-events/verify": {
+      "get": {
+        "tags": [
+          "InfraOrgIt.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerifyResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
     "/api/socket/servers/{id}/console": {
       "get": {
         "tags": [
@@ -5867,6 +5891,43 @@
             "format": "int32"
           },
           "versionNumber": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "AuditVerifyResult": {
+        "required": [
+          "valid",
+          "checked",
+          "firstBrokenId",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "checked": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "firstBrokenId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "message": {
             "type": [
               "null",
               "string"
