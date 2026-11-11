@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Security.Claims;
+using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
@@ -67,6 +68,7 @@ public static class ApplicationsEndpoints
         ApplicationInput input,
         ClaimsPrincipal user,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         EnvironmentAccessService.RequireSystemAdmin(user);
@@ -83,6 +85,9 @@ public static class ApplicationsEndpoints
         await EnsureUniqueAsync(db, entity.Name, null, ct);
         db.Applications.Add(entity);
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "application.create", "Application", entity.Id,
+            detail: new { entity.Name, entity.Type }), ct);
 
         return Results.Ok(await LoadAsync(db, entity.Id, ct));
     }
@@ -92,6 +97,7 @@ public static class ApplicationsEndpoints
         ApplicationInput input,
         ClaimsPrincipal user,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         EnvironmentAccessService.RequireSystemAdmin(user);
@@ -107,6 +113,9 @@ public static class ApplicationsEndpoints
         entity.ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort");
         entity.Type = ApplicationType(input.Type);
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "application.update", "Application", id,
+            detail: new { entity.Name, entity.Type }), ct);
         return Results.NoContent();
     }
 
@@ -114,6 +123,7 @@ public static class ApplicationsEndpoints
         int id,
         ClaimsPrincipal user,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         EnvironmentAccessService.RequireSystemAdmin(user);
@@ -126,6 +136,9 @@ public static class ApplicationsEndpoints
 
         db.Applications.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "application.delete", "Application", id,
+            detail: new { entity.Name }), ct);
         return Results.NoContent();
     }
 

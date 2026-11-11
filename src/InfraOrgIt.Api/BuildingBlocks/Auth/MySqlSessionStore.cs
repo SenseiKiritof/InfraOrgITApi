@@ -104,6 +104,9 @@ public sealed class MySqlSessionStore(
     public void Remove(string id) =>
         db.Sessions.Where(x => x.Id == Hash(id)).ExecuteDelete();
 
+    public void RemoveByUsername(string username) =>
+        db.Sessions.Where(x => x.Username == username).ExecuteDelete();
+
     private string Protect(SessionData data) =>
         _protector.Protect(JsonSerializer.Serialize(data, Json));
 

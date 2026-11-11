@@ -412,8 +412,10 @@ public sealed class InventoryApiTests : IAsyncLifetime
         });
         Assert.Equal(HttpStatusCode.Forbidden, systemAdminAttempt.StatusCode);
 
-        await AssignEnvironmentRoleAsync(systemAdmin, environmentId, "server.envadmin", "ServerAdmin");
-        await AssignEnvironmentRoleAsync(systemAdmin, environmentId, "server.operator", "ServerOperator");
+        await AssignEnvironmentRoleAsync(
+            systemAdmin, environmentId, "server.envadmin", "ServerAdmin", envAdmin);
+        await AssignEnvironmentRoleAsync(
+            systemAdmin, environmentId, "server.operator", "ServerOperator", operatorUser);
 
         var operatorAttempt = await SendAsync(operatorUser, HttpMethod.Post, "/api/servers", new
         {
@@ -626,7 +628,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var seeded = await SeedEnvironmentAsync(suffix);
         var catalog = await SeedCatalogAsync(seeded.ServerId, suffix);
         await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
-            "action.operator", "ServerOperator");
+            "action.operator", "ServerOperator", operatorUser);
 
         var credential = await ReadAsync(await SendAsync(admin, HttpMethod.Post,
             "/api/server-credentials", new
@@ -664,7 +666,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var idempotencyKey = "run-" + suffix;
         var run = await SendAsync(operatorUser, HttpMethod.Post,
             $"/api/server-applications/{catalog.DeployId}/actions/{actionId}/run",
-            body: null, idempotencyKey: idempotencyKey);
+            body: new { confirm = true }, idempotencyKey: idempotencyKey);
         Assert.Equal(HttpStatusCode.OK, run.StatusCode);
         var runBody = await ReadAsync(run);
         Assert.Equal(0, runBody.GetProperty("exitCode").GetInt32());
@@ -684,7 +686,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var calls = _ssh.Scripts.Count;
         var duplicate = await SendAsync(operatorUser, HttpMethod.Post,
             $"/api/server-applications/{catalog.DeployId}/actions/{actionId}/run",
-            body: null, idempotencyKey: idempotencyKey);
+            body: new { confirm = true }, idempotencyKey: idempotencyKey);
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
         Assert.Equal(calls, _ssh.Scripts.Count);
 
@@ -759,7 +761,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var seeded = await SeedEnvironmentAsync(suffix);
         await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
-            "reach.operator", "ServerOperator");
+            "reach.operator", "ServerOperator", operatorUser);
 
         var test = await SendAsync(admin, HttpMethod.Post, "/api/reachability-tests", new
         {
@@ -804,7 +806,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var seeded = await SeedEnvironmentAsync(suffix);
         await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
-            "jump.admin", "ServerAdmin");
+            "jump.admin", "ServerAdmin", admin);
 
         var first = await ReadAsync(await SendAsync(admin, HttpMethod.Post, "/api/servers", new
         {
@@ -883,7 +885,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var third = await SeedEnvironmentAsync("jump-c-" + suffix);
         var sameEnvJump = await AddServerAsync(first.ProviderEnvironmentId, "jump-same-" + suffix);
         await AssignEnvironmentRoleAsync(
-            system, first.ProviderEnvironmentId, "jump.cross.admin", "ServerAdmin");
+            system, first.ProviderEnvironmentId, "jump.cross.admin", "ServerAdmin", admin);
 
         object Body(int environmentId, string name, string ip, int? jumpServerId) => new
         {
@@ -911,7 +913,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, systemCreate.StatusCode);
 
         await AssignEnvironmentRoleAsync(
-            system, second.ProviderEnvironmentId, "jump.cross.admin", "ServerAdmin");
+            system, second.ProviderEnvironmentId, "jump.cross.admin", "ServerAdmin", admin);
 
         var allowed = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{targetId}",
             Body(first.ProviderEnvironmentId, "jump-target-" + suffix, "10.30.0.1", second.ServerId));
@@ -919,22 +921,23 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         // Keeping the same jump host does not add a new environment requirement.
         await AssignEnvironmentRoleAsync(
-            system, first.ProviderEnvironmentId, "jump.cross.unchanged", "ServerAdmin");
+            system, first.ProviderEnvironmentId, "jump.cross.unchanged", "ServerAdmin",
+            unchangedUser);
         var unchanged = await SendAsync(unchangedUser, HttpMethod.Put, $"/api/servers/{targetId}",
             Body(first.ProviderEnvironmentId, "jump-target-" + suffix, "10.30.0.1", second.ServerId));
         Assert.Equal(HttpStatusCode.NoContent, unchanged.StatusCode);
 
         // Moving the server makes the unchanged jump chain cross A -> C: B is required too.
         await AssignEnvironmentRoleAsync(
-            system, first.ProviderEnvironmentId, "jump.cross.move", "ServerAdmin");
+            system, first.ProviderEnvironmentId, "jump.cross.move", "ServerAdmin", mover);
         await AssignEnvironmentRoleAsync(
-            system, third.ProviderEnvironmentId, "jump.cross.move", "ServerAdmin");
+            system, third.ProviderEnvironmentId, "jump.cross.move", "ServerAdmin", mover);
         var deniedMove = await SendAsync(mover, HttpMethod.Put,
             $"/api/servers/{targetId}/provider-environment/{third.ProviderEnvironmentId}");
         Assert.Equal(HttpStatusCode.Forbidden, deniedMove.StatusCode);
 
         await AssignEnvironmentRoleAsync(
-            system, second.ProviderEnvironmentId, "jump.cross.move", "ServerAdmin");
+            system, second.ProviderEnvironmentId, "jump.cross.move", "ServerAdmin", mover);
         var allowedMove = await SendAsync(mover, HttpMethod.Put,
             $"/api/servers/{targetId}/provider-environment/{third.ProviderEnvironmentId}");
         Assert.Equal(HttpStatusCode.NoContent, allowedMove.StatusCode);
@@ -952,7 +955,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var seeded = await SeedEnvironmentAsync(suffix);
         await AssignEnvironmentRoleAsync(
-            system, seeded.ProviderEnvironmentId, "files.admin", "ServerAdmin");
+            system, seeded.ProviderEnvironmentId, "files.admin", "ServerAdmin", admin);
 
         var denied = await SendAsync(
             admin,
@@ -999,7 +1002,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var seeded = await SeedEnvironmentAsync(suffix);
         await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
-            "console.resume", "ServerAdmin");
+            "console.resume", "ServerAdmin", admin);
 
         var cookie = admin.DefaultRequestHeaders.GetValues("Cookie").Single();
 
@@ -1056,7 +1059,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         using var viewer = await ClientForAsync("admin.viewer");
         var suffix = Guid.NewGuid().ToString("N")[..8];
 
-        Assert.Equal(HttpStatusCode.OK, (await viewer.GetAsync("/api/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync("/api/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await viewer.GetAsync("/api/servers")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden,
             (await SendAsync(viewer, HttpMethod.Post, "/api/groups", new { name = "No " + suffix })).StatusCode);
 
@@ -1196,7 +1200,9 @@ public sealed class InventoryApiTests : IAsyncLifetime
             parentId = (int?)null,
             roleIds = new[] { operatorRoleId }
         }));
-        var viewerMenus = await ReadAsync(await viewer.GetAsync("/api/menus"));
+        // PT-07: changing the user's groups revoked the old session.
+        using var viewerAfterUpdate = await ClientForAsync("admin.viewer");
+        var viewerMenus = await ReadAsync(await viewerAfterUpdate.GetAsync("/api/menus"));
         Assert.Contains(viewerMenus.EnumerateArray(),
             item => item.GetProperty("name").GetString() == "Menu operator " + suffix);
         Assert.Equal(HttpStatusCode.NoContent,
@@ -1389,7 +1395,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
 
         await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
-            "topo.delete.env", "ServerAdmin");
+            "topo.delete.env", "ServerAdmin", envAdmin);
 
         var deleted = await SendAsync(envAdmin, HttpMethod.Delete,
             $"/api/topology/nodes/Server/{seeded.ServerId}");
@@ -1418,7 +1424,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, deniedSystem.StatusCode);
 
         await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
-            "diagram.env", "ServerAdmin");
+            "diagram.env", "ServerAdmin", envAdmin);
 
         var created = await SendAsync(envAdmin, HttpMethod.Post, "/api/diagrams", new
         {
@@ -1468,7 +1474,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         });
         Assert.Equal(HttpStatusCode.Forbidden, systemAttempt.StatusCode);
 
-        await AssignEnvironmentRoleAsync(admin, first.ProviderEnvironmentId, "proxy.env", "ServerAdmin");
+        await AssignEnvironmentRoleAsync(
+            admin, first.ProviderEnvironmentId, "proxy.env", "ServerAdmin", envAdmin);
         var partial = await SendAsync(envAdmin, HttpMethod.Post, "/api/proxy-connections", new
         {
             sourceServerId = first.ServerId,
@@ -1477,7 +1484,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         });
         Assert.Equal(HttpStatusCode.Forbidden, partial.StatusCode);
 
-        await AssignEnvironmentRoleAsync(admin, second.ProviderEnvironmentId, "proxy.env", "ServerAdmin");
+        await AssignEnvironmentRoleAsync(
+            admin, second.ProviderEnvironmentId, "proxy.env", "ServerAdmin", envAdmin);
         var created = await SendAsync(envAdmin, HttpMethod.Post, "/api/proxy-connections", new
         {
             sourceServerId = first.ServerId,
@@ -1545,7 +1553,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var crossEnvRoute = await SeedRouteAsync(routeEnv.ServerId, secondRouteServer);
 
         await AssignEnvironmentRoleAsync(
-            system, deploymentEnv.ProviderEnvironmentId, "route.deploy", "ServerAdmin");
+            system, deploymentEnv.ProviderEnvironmentId, "route.deploy", "ServerAdmin",
+            deployAdmin);
 
         // Route in the deployment environment: one ServerAdmin is enough.
         var same = await SendAsync(deployAdmin, HttpMethod.Post, "/api/server-applications", new
@@ -1609,7 +1618,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, systemAttempt.StatusCode);
 
         await AssignEnvironmentRoleAsync(
-            system, routeEnv.ProviderEnvironmentId, "route.deploy", "ServerAdmin");
+            system, routeEnv.ProviderEnvironmentId, "route.deploy", "ServerAdmin",
+            deployAdmin);
         var allowed = await SendAsync(deployAdmin, HttpMethod.Put,
             $"/api/server-applications/{deploymentId}", new
             {
@@ -1633,7 +1643,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var seeded = await SeedEnvironmentAsync("details-" + suffix);
         await AssignEnvironmentRoleAsync(
-            systemAdmin, seeded.ProviderEnvironmentId, "details.admin", "ServerAdmin");
+            systemAdmin, seeded.ProviderEnvironmentId, "details.admin", "ServerAdmin",
+            admin);
         var body = new Dictionary<string, object?>
         {
             ["providerEnvironmentId"] = seeded.ProviderEnvironmentId,
@@ -1691,7 +1702,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var seeded = await SeedEnvironmentAsync("deploy-" + suffix);
         await AssignEnvironmentRoleAsync(
-            systemAdmin, seeded.ProviderEnvironmentId, "deploy.details", "ServerAdmin");
+            systemAdmin, seeded.ProviderEnvironmentId, "deploy.details", "ServerAdmin",
+            admin);
         var catalog = await SeedCatalogAsync(seeded.ServerId, suffix);
 
         var created = await SendAsync(admin, HttpMethod.Post, $"/api/servers/{seeded.ServerId}/applications", new
@@ -2205,7 +2217,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     private async Task AssignEnvironmentRoleAsync(
-        HttpClient admin, int environmentId, string username, string role)
+        HttpClient admin, int environmentId, string username, string role,
+        HttpClient? targetClient = null)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
@@ -2223,6 +2236,26 @@ public sealed class InventoryApiTests : IAsyncLifetime
             $"/api/provider-environments/{environmentId}/group-roles",
             new { groupId = group.Id, roleId = dbRole.Id });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // PT-07: the grant revoked the target user's old session.
+        if (targetClient is not null)
+            await RefreshSessionAsync(targetClient, username);
+    }
+
+    private async Task RefreshSessionAsync(HttpClient client, string username)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        var roles = await db.Users.Where(x => x.Username == username)
+            .SelectMany(x => x.Roles.Select(role => role.Name))
+            .ToListAsync();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
+        var sessionId = sessions.Create(new SessionData(
+            username, "Test", "User", null,
+            DateTimeOffset.UtcNow.AddHours(1), null, "csrf", roles));
+        client.DefaultRequestHeaders.Remove("Cookie");
+        client.DefaultRequestHeaders.Add("Cookie",
+            $"{SessionCookie.Session(false)}={sessionId}");
     }
 
     private async Task<HttpClient> ClientForAsync(string username, bool systemAdmin = false)

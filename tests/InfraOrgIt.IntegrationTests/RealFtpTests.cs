@@ -117,6 +117,8 @@ public sealed class RealFtpTests : IAsyncLifetime
             credentialId = credential.GetProperty("id").GetInt32()
         });
         await AssignServerAdminAsync(admin, providerEnvironment.Id, "ftp.admin");
+        // PT-07: the role assignment revoked the old session; sign in again.
+        await RefreshSessionAsync(admin, "ftp.admin", systemAdmin: true);
 
         using var form = new MultipartFormDataContent();
         form.Add(new StringContent("contenuto ftp"), "file", "uploaded.txt");
@@ -188,6 +190,20 @@ public sealed class RealFtpTests : IAsyncLifetime
             $"/api/provider-environments/{environmentId}/group-roles",
             new { groupId = group.Id, roleId = role.Id });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    private async Task RefreshSessionAsync(
+        HttpClient client, string username, bool systemAdmin = false)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
+        var sessionId = sessions.Create(new SessionData(
+            username, "Test", "User", null,
+            DateTimeOffset.UtcNow.AddHours(1), null, "csrf",
+            systemAdmin ? ["SystemAdmin"] : []));
+        client.DefaultRequestHeaders.Remove("Cookie");
+        client.DefaultRequestHeaders.Add("Cookie",
+            $"{SessionCookie.Session(false)}={sessionId}");
     }
 
     private async Task<HttpClient> ClientForAsync(string username, bool systemAdmin = false)

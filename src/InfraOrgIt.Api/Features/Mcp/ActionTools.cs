@@ -94,7 +94,7 @@ public static class ActionTools
         }
 
         var result = await runner.RunAsync(
-            user, serverApplicationId, actionId, idempotencyKey, ct);
+            user, serverApplicationId, actionId, idempotencyKey, confirm: true, ct);
         await McpToolAudit.RecordAsync(
             audit, user, "run_application_action", "Ok",
             new { serverApplicationId, actionId, result.ExitCode },

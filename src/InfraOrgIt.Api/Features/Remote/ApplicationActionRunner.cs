@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
+using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
 using InfraOrgIt.Api.Infrastructure.Persistence;
@@ -27,6 +28,7 @@ public sealed class ApplicationActionRunner(
         int deploymentId,
         int actionId,
         string? idempotencyKey,
+        bool confirm,
         CancellationToken ct)
     {
         var deploy = await LoadDeployAsync(db, deploymentId, ct);
@@ -41,6 +43,15 @@ public sealed class ApplicationActionRunner(
                              x => x.Id == actionId &&
                                   x.ApplicationId == application.Id, ct)
                      ?? throw Guard.NotFound("Azione", actionId);
+
+        // PT-13: RequiresConfirmation is a server-side guard, not only a UI
+        // flag. A scripted client must send confirm=true for destructive
+        // actions; nothing is executed before this check.
+        if (action.RequiresConfirmation && !confirm)
+            throw new ApiException(
+                StatusCodes.Status422UnprocessableEntity,
+                "confirmation_required",
+                $"L'azione {action.Label} richiede una conferma esplicita.");
 
         var script = action.CommandTemplate?.Script ?? action.CustomScript ?? "";
         var custom = ParseParameterValues(action.ParameterValuesJson);

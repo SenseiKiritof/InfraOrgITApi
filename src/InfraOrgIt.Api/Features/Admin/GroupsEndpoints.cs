@@ -22,9 +22,11 @@ public static class GroupsEndpoints
 
     private static async Task<IResult> ListAsync(
         HttpContext http,
+        ClaimsPrincipal user,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
+        EnvironmentAccessService.RequireSystemAdmin(user);
         var page = PageRequest.From(http);
         var query = db.Groups.AsNoTracking();
 
@@ -45,9 +47,11 @@ public static class GroupsEndpoints
 
     private static async Task<IResult> GetAsync(
         int id,
+        ClaimsPrincipal user,
         InfraOrgItDbContext db,
         CancellationToken ct)
     {
+        EnvironmentAccessService.RequireSystemAdmin(user);
         var dto = await db.Groups.AsNoTracking()
             .Where(x => x.Id == id)
             .Select(x => new GroupDto(
