@@ -254,6 +254,47 @@ public sealed class McpApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Unauthenticated_mcp_request_advertises_protected_resource_metadata()
+    {
+        var unauthorized = await _factory.CreateClient()
+            .PostAsJsonAsync("/mcp", InitializeBody(1));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+        var challenge = Assert.Single(unauthorized.Headers.WwwAuthenticate);
+        Assert.Equal("Bearer", challenge.Scheme);
+        Assert.Equal(
+            "resource_metadata=\"http://localhost:3000/.well-known/oauth-protected-resource\"",
+            challenge.Parameter);
+
+        const string token = "itk_metadata";
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var user = new User
+            {
+                Username = "mcp.metadata",
+                Name = "Test",
+                Surname = "User"
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            db.ApiTokens.Add(new ApiToken
+            {
+                UserId = user.Id,
+                Name = "metadata",
+                TokenHash = ApiTokenService.Hash(token),
+                Scopes = "mcp:read",
+                CreatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var mcp = McpClientFor(token);
+        var initialize = await McpAsync(mcp, InitializeBody(2));
+        Assert.True(initialize.TryGetProperty("result", out _));
+    }
+
+    [Fact]
     public async Task Mcp_read_tools_return_providers_catalog_topology_and_deny_executions()
     {
         var seeded = await SeedServerAsync();

@@ -343,6 +343,39 @@ if (app.Environment.IsDevelopment())
 
 app.UseForwardedHeaders();
 
+// RFC 9728: point bearer clients at the protected-resource metadata document.
+// The public origin comes from Mcp:PublicUrl when configured, otherwise the SPA origin.
+if (!Uri.TryCreate(builder.Configuration["Mcp:PublicUrl"], UriKind.Absolute, out var metadataOrigin) &&
+    !Uri.TryCreate(builder.Configuration["Frontend:BaseUrl"], UriKind.Absolute, out metadataOrigin))
+    throw new InvalidOperationException(
+        "Mcp:PublicUrl o Frontend:BaseUrl deve essere un URI assoluto.");
+
+var protectedResourceMetadataUrl =
+    $"{metadataOrigin!.GetLeftPart(UriPartial.Authority)}/.well-known/oauth-protected-resource";
+var mcpChallenge =
+    $"Bearer resource_metadata=\"{protectedResourceMetadataUrl.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
+
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/mcp"))
+    {
+        context.Response.OnStarting(() =>
+        {
+            if (context.Response.StatusCode == StatusCodes.Status401Unauthorized)
+            {
+                // Replace the bare challenge emitted by the authentication schemes
+                // so the response advertises exactly one metadata pointer.
+                context.Response.Headers.Remove("WWW-Authenticate");
+                context.Response.Headers["WWW-Authenticate"] = mcpChallenge;
+            }
+
+            return Task.CompletedTask;
+        });
+    }
+
+    await next(context);
+});
+
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
