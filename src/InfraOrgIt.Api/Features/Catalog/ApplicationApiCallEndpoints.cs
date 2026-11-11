@@ -77,6 +77,13 @@ public static class ApplicationApiCallEndpoints
         foreach (var key in keys.Where(x => x.Location == "Query"))
             url = ApiCallUrl.AddQuery(url, key.Name, cipher.Decrypt(key.EncryptedValue, key.KeyVersion));
 
+        // PT-02: the outbound URL carries the decrypted query keys, the saved history must not.
+        var queryKeyNames = keys.Where(x => x.Location == "Query")
+            .Select(x => x.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var storedUrl = ApiCallUrl.Redact(url, queryKeyNames);
+        var storedQuery = ApiCallUrl.RedactQuery(input.Query, queryKeyNames);
+
         using var request = new HttpRequestMessage(new HttpMethod(api.RequestTypeEnum), url);
         foreach (var key in keys.Where(x => x.Location == "Header"))
             request.Headers.TryAddWithoutValidation(
@@ -103,8 +110,8 @@ public static class ApplicationApiCallEndpoints
             if (input.Save)
             {
                 callId = await SaveAsync(
-                    db, user, api.RequestTypeEnum, id, input, body, url, status, contentType,
-                    reason, durationMs, text, sizeBytes, truncated, binary);
+                    db, user, api.RequestTypeEnum, id, input, body, storedUrl, storedQuery,
+                    status, contentType, reason, durationMs, text, sizeBytes, truncated, binary);
             }
 
             return Results.Ok(new ApplicationApiCallResult(
@@ -124,8 +131,8 @@ public static class ApplicationApiCallEndpoints
             if (input.Save)
             {
                 await SaveAsync(
-                    db, user, api.RequestTypeEnum, id, input, body, url, null, null,
-                    $"Chiamata non riuscita: {exception.Message}", durationMs,
+                    db, user, api.RequestTypeEnum, id, input, body, storedUrl, storedQuery,
+                    null, null, $"Chiamata non riuscita: {exception.Message}", durationMs,
                     null, 0, false, false);
             }
 
@@ -144,7 +151,8 @@ public static class ApplicationApiCallEndpoints
         int apiId,
         ApplicationApiCallInput input,
         string? requestBody,
-        Uri url,
+        string url,
+        Dictionary<string, string>? query,
         int? status,
         string? contentType,
         string? reason,
@@ -156,7 +164,7 @@ public static class ApplicationApiCallEndpoints
     {
         var username = user.Identity?.Name ?? "";
         var storedBody = body is { Length: > MaxStoredChars } ? body[..MaxStoredChars] : body;
-        var target = url.ToString();
+        var target = url;
 
         var call = new ApplicationApiCall
         {
@@ -166,7 +174,7 @@ public static class ApplicationApiCallEndpoints
             Method = method,
             // ponytail: the column is varchar(1000); longer URLs are cut to fit it.
             Url = target.Length > MaxStoredUrlLength ? target[..MaxStoredUrlLength] : target,
-            QueryJson = input.Query is { Count: > 0 } ? JsonSerializer.Serialize(input.Query) : null,
+            QueryJson = query is { Count: > 0 } ? JsonSerializer.Serialize(query) : null,
             RequestBody = requestBody,
             Status = status,
             ContentType = contentType,
@@ -295,6 +303,49 @@ public static class ApiCallUrl
     {
         var pair = $"{Uri.EscapeDataString(name)}={Uri.EscapeDataString(value)}";
         return string.IsNullOrEmpty(current) ? pair : $"{current}&{pair}";
+    }
+
+    /// <summary>
+    /// Saved history URL: the configured query key values become <c>***</c>.
+    /// Every other parameter is kept as sent, so the call is still diagnosable.
+    /// </summary>
+    public static string Redact(Uri url, IEnumerable<string> secretNames)
+    {
+        var names = secretNames
+            .Where(x => !string.IsNullOrEmpty(x))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (names.Count == 0 || string.IsNullOrEmpty(url.Query))
+            return url.AbsoluteUri;
+
+        var pairs = url.Query[1..]
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(pair => RedactPair(pair, names));
+
+        return $"{url.GetLeftPart(UriPartial.Path)}?{string.Join('&', pairs)}";
+    }
+
+    /// <summary>Sanitized copy of the caller query, used for the stored history.</summary>
+    public static Dictionary<string, string>? RedactQuery(
+        IReadOnlyDictionary<string, string>? query,
+        IEnumerable<string> secretNames)
+    {
+        if (query is not { Count: > 0 })
+            return null;
+
+        var names = secretNames
+            .Where(x => !string.IsNullOrEmpty(x))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return query.ToDictionary(
+            x => x.Key,
+            x => names.Contains(x.Key) ? "***" : x.Value);
+    }
+
+    private static string RedactPair(string pair, IReadOnlySet<string> secretNames)
+    {
+        var separator = pair.IndexOf('=');
+        var rawName = separator < 0 ? pair : pair[..separator];
+        var name = Uri.UnescapeDataString(rawName.Replace('+', ' '));
+        return secretNames.Contains(name) ? $"{rawName}=***" : pair;
     }
 
     private static readonly Dictionary<string, string> Empty = [];
