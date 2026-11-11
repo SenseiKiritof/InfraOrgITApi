@@ -760,7 +760,23 @@ public sealed class McpApiTests : IAsyncLifetime
 
         var approved = await SendAsync(userSession, HttpMethod.Post,
             $"/api/mcp/approvals/{approvalId}/approve");
-        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        var approvedDto = await ReadAsync(approved);
+        Assert.Equal("Approved", approvedDto.GetProperty("status").GetString());
+        Assert.StartsWith("MCP Action App",
+            approvedDto.GetProperty("serverApplicationName").GetString());
+        Assert.Equal("Ping",
+            approvedDto.GetProperty("applicationActionLabel").GetString());
+        Assert.Equal("mcp-server",
+            approvedDto.GetProperty("serverName").GetString());
+
+        var approvalList = await ReadAsync(
+            await userSession.GetAsync("/api/mcp/approvals"));
+        var approvalRow = approvalList.EnumerateArray()
+            .Single(x => x.GetProperty("id").GetInt32() == approvalId);
+        Assert.StartsWith("MCP Action App",
+            approvalRow.GetProperty("serverApplicationName").GetString());
+        Assert.Equal("Ping",
+            approvalRow.GetProperty("applicationActionLabel").GetString());
 
         var run = await CallTool(mcp, "run_application_action",
             new

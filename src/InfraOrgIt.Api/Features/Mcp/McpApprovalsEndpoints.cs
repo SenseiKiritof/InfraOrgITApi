@@ -19,9 +19,12 @@ public static class McpApprovalsEndpoints
         var group = app.MapGroup("/api/mcp/approvals")
             .RequireAuthorization("Session");
 
-        group.MapGet("", ListAsync);
-        group.MapPost("/{id:int}/approve", ApproveAsync);
-        group.MapPost("/{id:int}/deny", DenyAsync);
+        group.MapGet("", ListAsync)
+            .Produces<List<McpApprovalDto>>();
+        group.MapPost("/{id:int}/approve", ApproveAsync)
+            .Produces<McpApprovalDto>();
+        group.MapPost("/{id:int}/deny", DenyAsync)
+            .Produces<McpApprovalDto>();
     }
 
     private static async Task<IResult> ListAsync(
@@ -61,7 +64,13 @@ public static class McpApprovalsEndpoints
                 x.ExpiresAt,
                 x.DecidedAt,
                 x.DecidedByUser != null ? x.DecidedByUser.Username : null,
-                x.UsedAt))
+                x.UsedAt,
+                x.ServerApplication != null
+                    ? x.ServerApplication.ApplicationVersion!.Application!.Name
+                    : null,
+                x.ApplicationAction != null
+                    ? x.ApplicationAction.Label
+                    : null))
             .ToListAsync(ct);
         return Results.Ok(items);
     }
@@ -153,7 +162,13 @@ public static class McpApprovalsEndpoints
                 x.ExpiresAt,
                 x.DecidedAt,
                 x.DecidedByUser != null ? x.DecidedByUser.Username : null,
-                x.UsedAt))
+                x.UsedAt,
+                x.ServerApplication != null
+                    ? x.ServerApplication.ApplicationVersion!.Application!.Name
+                    : null,
+                x.ApplicationAction != null
+                    ? x.ApplicationAction.Label
+                    : null))
             .SingleAsync(ct);
         await audit.RecordAsync(AuditEntries.Change(
             user,
@@ -187,4 +202,6 @@ public sealed record McpApprovalDto(
     DateTime ExpiresAt,
     DateTime? DecidedAt,
     string? DecidedByUsername,
-    DateTime? UsedAt);
+    DateTime? UsedAt,
+    string? ServerApplicationName,
+    string? ApplicationActionLabel);
