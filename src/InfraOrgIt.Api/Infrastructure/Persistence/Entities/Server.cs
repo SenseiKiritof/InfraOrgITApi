@@ -32,4 +32,5 @@ public sealed class Server : EntityBase
     public Server? JumpServer { get; set; }
     public List<ServerApplication> ServerApplications { get; set; } = [];
     public List<ReachabilityTest> ReachabilityTests { get; set; } = [];
+    public List<TunnelService> TunnelServices { get; set; } = [];
 }

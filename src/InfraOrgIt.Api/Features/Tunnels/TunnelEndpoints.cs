@@ -24,7 +24,9 @@ public static class TunnelEndpoints
         var group = app.MapGroup("/api/tunnels")
             .RequireRateLimiting("tunnels");
 
-        group.MapGet("/targets", ListTargetsAsync).RequireAuthorization("Tunnel");
+        group.MapGet("/targets", ListTargetsAsync)
+            .Produces<TunnelTargetListDto>()
+            .RequireAuthorization("Tunnel");
         group.MapPost("/events", RecordEventAsync).RequireAuthorization("Tunnel");
         group.MapPost("/sessions", UpsertSessionAsync)
             .RequireAuthorization("Tunnel")
@@ -46,7 +48,7 @@ public static class TunnelEndpoints
         var rows = await db.Servers.AsNoTracking()
             .Where(x => operatorIds.Contains(x.ProviderEnvironmentId))
             .Where(x => x.Credential != null)
-            .Where(x => x.ServerApplications.Any())
+            .Where(x => x.ServerApplications.Any() || x.TunnelServices.Any(s => s.Enabled))
             .OrderBy(x => x.Name)
             .Select(x => new
             {
@@ -55,20 +57,11 @@ public static class TunnelEndpoints
                 x.IpAddress,
                 x.Hostname,
                 x.SshPort,
+                x.ProviderEnvironmentId,
+                Username = x.Credential!.Username,
+                x.JumpServerId,
                 EnvironmentLabel = x.ProviderEnvironment!.Provider!.Name + " / " +
                                    x.ProviderEnvironment!.EnvironmentDefinition!.Name,
-                Username = x.Credential!.Username,
-                JumpHost = x.JumpServer == null
-                    ? null
-                    : (string.IsNullOrWhiteSpace(x.JumpServer.IpAddress)
-                        ? x.JumpServer.Hostname
-                        : x.JumpServer.IpAddress),
-                JumpPort = x.JumpServer == null ? (int?)null : x.JumpServer.SshPort,
-                JumpUsername = x.JumpServer == null
-                    ? null
-                    : (x.JumpServer.Credential != null
-                        ? x.JumpServer.Credential.Username
-                        : x.Credential!.Username),
                 Targets = x.ServerApplications
                     .OrderBy(sa => sa.Id)
                     .Select(sa => new
@@ -83,31 +76,98 @@ public static class TunnelEndpoints
             })
             .ToListAsync(ct);
 
-        var items = rows.Select(x => new TunnelTargetDto(
-            x.Id,
-            x.Name,
-            x.EnvironmentLabel,
-            string.IsNullOrWhiteSpace(x.IpAddress) ? x.Hostname : x.IpAddress,
-            x.SshPort,
-            x.Username,
-            x.JumpHost is null
-                ? null
-                : new TunnelJumpDto(
-                    x.JumpHost,
-                    x.JumpPort ?? 22,
-                    x.JumpUsername ?? x.Username),
-            x.Targets.Select(t => new TunnelEndpointDto(
-                t.ServerApplicationId,
-                t.ApplicationId,
-                t.Application,
-                t.Version,
-                "127.0.0.1",
-                t.TargetPort,
-                t.TargetPort >= 1024 ? t.TargetPort : null)).ToList()))
-            .ToList();
+        var serverIds = rows.Select(x => x.Id).ToArray();
+        var services = await db.TunnelServices.AsNoTracking()
+            .Where(x => x.Enabled && serverIds.Contains(x.ServerId))
+            .OrderBy(x => x.Name)
+            .Select(x => new TunnelServiceDto(
+                x.Id,
+                x.ServerId,
+                x.Name,
+                x.Mode,
+                x.TargetHost,
+                x.TargetPort,
+                x.LocalPort,
+                x.RemotePort,
+                x.Kind,
+                x.OpenPath,
+                x.AutoStart,
+                x.Enabled))
+            .ToListAsync(ct);
 
-        return Results.Ok(new { items });
+        // Jump chain: the rows only carry the nearest hop id, so resolve the
+        // remaining links in one query and walk them nearest-first, cap 3.
+        var jumpLinks = await db.Servers.AsNoTracking()
+            .Select(x => new JumpLink(
+                x.Id,
+                x.JumpServerId,
+                string.IsNullOrWhiteSpace(x.IpAddress) ? x.Hostname : x.IpAddress,
+                x.SshPort,
+                x.Credential != null ? x.Credential.Username : null))
+            .ToDictionaryAsync(x => x.Id, ct);
+
+        var items = rows.Select(x =>
+        {
+            var jumps = JumpChain(x.JumpServerId, jumpLinks, x.Username);
+            var visibleServices = services
+                .Where(s => s.ServerId == x.Id)
+                .Where(s => s.Mode != nameof(TunnelMode.Remote) ||
+                            environmentAccess.AdminEnvironmentIds.Contains(
+                                x.ProviderEnvironmentId))
+                .ToList();
+
+            return new TunnelTargetDto(
+                x.Id,
+                x.Name,
+                x.EnvironmentLabel,
+                string.IsNullOrWhiteSpace(x.IpAddress) ? x.Hostname : x.IpAddress,
+                x.SshPort,
+                x.Username,
+                jumps.FirstOrDefault(),
+                jumps,
+                x.Targets.Select(t => new TunnelEndpointDto(
+                    t.ServerApplicationId,
+                    t.ApplicationId,
+                    t.Application,
+                    t.Version,
+                    "127.0.0.1",
+                    t.TargetPort,
+                    t.TargetPort >= 1024 ? t.TargetPort : null)).ToList(),
+                visibleServices);
+        }).ToList();
+
+        return Results.Ok(new TunnelTargetListDto(items));
     }
+
+    private static IReadOnlyList<TunnelJumpDto> JumpChain(
+        int? jumpServerId,
+        IReadOnlyDictionary<int, JumpLink> links,
+        string fallbackUsername)
+    {
+        var jumps = new List<TunnelJumpDto>();
+        var seen = new HashSet<int>();
+        var current = jumpServerId;
+
+        while (current is int id && jumps.Count < 3 && seen.Add(id))
+        {
+            if (!links.TryGetValue(id, out var link))
+                break;
+            jumps.Add(new TunnelJumpDto(
+                link.Host,
+                link.Port,
+                link.Username ?? fallbackUsername));
+            current = link.JumpServerId;
+        }
+
+        return jumps;
+    }
+
+    private sealed record JumpLink(
+        int Id,
+        int? JumpServerId,
+        string Host,
+        int Port,
+        string? Username);
 
     private static async Task<IResult> RecordEventAsync(
         TunnelEventInput input,
@@ -219,9 +279,35 @@ public static class TunnelEndpoints
                 x => x.Id == deploymentId && x.ServerId == input.ServerId, ct))
             throw Guard.NotFound("Deployment", deploymentId);
 
-        var targetHost = Guard.Text(input.TargetHost, "TargetHost", 255);
-        var targetPort = Guard.Port(input.TargetPort, "TargetPort");
-        var localPort = Guard.Port(input.LocalPort, "LocalPort");
+        if (input.TunnelServiceId is int serviceId &&
+            !await db.TunnelServices.AnyAsync(
+                x => x.Id == serviceId && x.ServerId == input.ServerId, ct))
+            throw Guard.NotFound("Servizio tunnel", serviceId);
+
+        var mode = Guard.Enum<TunnelMode>(
+            string.IsNullOrWhiteSpace(input.Mode) ? nameof(TunnelMode.Local) : input.Mode,
+            "Mode");
+        (string Host, int? Target, int? Local, int? Remote) ports = mode switch
+        {
+            nameof(TunnelMode.Local) => (
+                Guard.Text(input.TargetHost, "TargetHost", 255),
+                RequirePort(input.TargetPort, "TargetPort"),
+                RequirePort(input.LocalPort, "LocalPort"),
+                RejectRemotePort(input.RemotePort)),
+            nameof(TunnelMode.Dynamic) => (
+                Guard.OptionalText(input.TargetHost, "TargetHost", 255) ?? "",
+                RejectTargetPort(input.TargetPort),
+                RequirePort(input.LocalPort, "LocalPort"),
+                RejectRemotePort(input.RemotePort)),
+            nameof(TunnelMode.Remote) => (
+                Guard.Text(input.TargetHost, "TargetHost", 255),
+                RequirePort(input.TargetPort, "TargetPort"),
+                RejectLocalPort(input.LocalPort),
+                RequirePort(input.RemotePort, "RemotePort")),
+            _ => throw Guard.Unprocessable(
+                "Mode ammesso: Local, Dynamic, Remote.")
+        };
+        var (targetHost, targetPort, localPort, remotePort) = ports;
         var errorCode = Guard.OptionalText(input.ErrorCode, "ErrorCode", 100);
         var clientId = Guard.OptionalText(
             user.FindFirstValue("api_token_id"), "ClientId", 100);
@@ -252,9 +338,12 @@ public static class TunnelEndpoints
         session.ClientId = clientId;
         session.ServerId = server.Id;
         session.ServerApplicationId = input.ServerApplicationId;
+        session.TunnelServiceId = input.TunnelServiceId;
+        session.Mode = mode;
         session.LocalPort = localPort;
         session.TargetHost = targetHost;
         session.TargetPort = targetPort;
+        session.RemotePort = remotePort;
         session.LastSeenAt = now;
         session.Outcome = status;
         session.EndedAt = status == "Active" ? null : now;
@@ -301,9 +390,18 @@ public static class TunnelEndpoints
                         .Where(sa => sa.Id == x.ServerApplicationId)
                         .Select(sa => sa.ApplicationVersion!.Application!.Name)
                         .FirstOrDefault(),
+                x.TunnelServiceId,
+                x.TunnelServiceId == null
+                    ? null
+                    : db.TunnelServices
+                        .Where(ts => ts.Id == x.TunnelServiceId)
+                        .Select(ts => ts.Name)
+                        .FirstOrDefault(),
+                x.Mode,
                 x.LocalPort,
                 x.TargetHost,
                 x.TargetPort,
+                x.RemotePort,
                 x.StartedAt,
                 x.LastSeenAt,
                 x.Outcome))
@@ -311,6 +409,29 @@ public static class TunnelEndpoints
 
         return Results.Ok(new TunnelSessionListDto(items));
     }
+
+    private static int RequirePort(int? value, string field) =>
+        Guard.Port(
+            value ?? throw Guard.Unprocessable($"Il campo {field} è obbligatorio."),
+            field);
+
+    private static int? RejectLocalPort(int? value) =>
+        value is null
+            ? null
+            : throw Guard.Unprocessable(
+                "Il campo LocalPort non è ammesso per il modo Remote.");
+
+    private static int? RejectRemotePort(int? value) =>
+        value is null
+            ? null
+            : throw Guard.Unprocessable(
+                "Il campo RemotePort è ammesso solo per il modo Remote.");
+
+    private static int? RejectTargetPort(int? value) =>
+        value is null
+            ? null
+            : throw Guard.Unprocessable(
+                "Il campo TargetPort non è ammesso per il modo Dynamic.");
 
     private static async Task<int> ResolveUserIdAsync(
         ClaimsPrincipal user,
@@ -339,7 +460,12 @@ public sealed record TunnelTargetDto(
     int SshPort,
     string Username,
     TunnelJumpDto? Jump,
-    IReadOnlyList<TunnelEndpointDto> Targets);
+    IReadOnlyList<TunnelJumpDto> Jumps,
+    IReadOnlyList<TunnelEndpointDto> Targets,
+    IReadOnlyList<TunnelServiceDto> Services);
+
+public sealed record TunnelTargetListDto(
+    IReadOnlyList<TunnelTargetDto> Items);
 
 public sealed record TunnelJumpDto(
     string Host,
@@ -370,11 +496,14 @@ public sealed record TunnelSessionInput(
     string? SessionKey,
     string? Status,
     int ServerId,
-    string? TargetHost,
-    int TargetPort,
-    int LocalPort,
+    string? TargetHost = null,
+    int? TargetPort = null,
+    int? LocalPort = null,
     int? ServerApplicationId = null,
-    string? ErrorCode = null);
+    string? ErrorCode = null,
+    string? Mode = null,
+    int? RemotePort = null,
+    int? TunnelServiceId = null);
 
 public sealed record TunnelSessionDto(
     int Id,
@@ -384,9 +513,13 @@ public sealed record TunnelSessionDto(
     int ServerId,
     string ServerName,
     string? Application,
-    int LocalPort,
+    int? ServiceId,
+    string? ServiceName,
+    string Mode,
+    int? LocalPort,
     string TargetHost,
-    int TargetPort,
+    int? TargetPort,
+    int? RemotePort,
     DateTime StartedAt,
     DateTime LastSeenAt,
     string Status);

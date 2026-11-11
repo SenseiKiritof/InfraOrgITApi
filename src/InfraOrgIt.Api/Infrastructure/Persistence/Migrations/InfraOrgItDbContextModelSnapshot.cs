@@ -1983,6 +1983,81 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("Translations");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.TunnelService", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<bool>("AutoStart")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)")
+                        .HasDefaultValue("Tcp");
+
+                    b.Property<int?>("LocalPort")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("OpenPath")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<int?>("RemotePort")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ServerId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TargetHost")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasDefaultValue("127.0.0.1");
+
+                    b.Property<int?>("TargetPort")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServerId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("TunnelServices", t =>
+                        {
+                            t.HasCheckConstraint("CK_TunnelServices_Kind", "`Kind` IN ('Tcp','Http','Https')");
+
+                            t.HasCheckConstraint("CK_TunnelServices_Mode", "`Mode` IN ('Local','Dynamic','Remote')");
+                        });
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.TunnelSession", b =>
                 {
                     b.Property<int>("Id")
@@ -2008,13 +2083,23 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<int>("LocalPort")
+                    b.Property<int?>("LocalPort")
                         .HasColumnType("int");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)")
+                        .HasDefaultValue("Local");
 
                     b.Property<string>("Outcome")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("varchar(20)");
+
+                    b.Property<int?>("RemotePort")
+                        .HasColumnType("int");
 
                     b.Property<int?>("ServerApplicationId")
                         .HasColumnType("int");
@@ -2035,7 +2120,10 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("varchar(255)");
 
-                    b.Property<int>("TargetPort")
+                    b.Property<int?>("TargetPort")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TunnelServiceId")
                         .HasColumnType("int");
 
                     b.Property<int>("UserId")
@@ -2045,7 +2133,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ActorUsername");
 
+                    b.HasIndex("ServerApplicationId");
+
                     b.HasIndex("ServerId");
+
+                    b.HasIndex("TunnelServiceId");
 
                     b.HasIndex("Outcome", "LastSeenAt");
 
@@ -2054,6 +2146,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.ToTable("TunnelSessions", t =>
                         {
+                            t.HasCheckConstraint("CK_TunnelSessions_Mode", "`Mode` IN ('Local','Dynamic','Remote')");
+
                             t.HasCheckConstraint("CK_TunnelSessions_Outcome", "`Outcome` IN ('Active','Stopped','Error','Stale')");
                         });
                 });
@@ -2515,6 +2609,27 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("Server");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.TunnelService", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", "Server")
+                        .WithMany("TunnelServices")
+                        .HasForeignKey("ServerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Server");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.TunnelSession", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.TunnelService", "TunnelService")
+                        .WithMany()
+                        .HasForeignKey("TunnelServiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("TunnelService");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Application", b =>
                 {
                     b.Navigation("ApiKeys");
@@ -2577,6 +2692,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("ReachabilityTests");
 
                     b.Navigation("ServerApplications");
+
+                    b.Navigation("TunnelServices");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerCredential", b =>
