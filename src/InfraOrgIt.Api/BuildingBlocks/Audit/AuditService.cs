@@ -3,6 +3,7 @@ using System.Text.Json;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
+using Microsoft.EntityFrameworkCore;
 
 namespace InfraOrgIt.Api.BuildingBlocks.Audit;
 
@@ -68,6 +69,7 @@ public static class AuditEntries
 /// <summary>
 /// Append-only audit writer shared by MCP tool calls and tunnel sessions.
 /// Callers pass already-redacted detail; the writer only caps its size.
+/// Every new row extends a SHA-256 hash chain (see <see cref="AuditChain"/>).
 /// </summary>
 public sealed class AuditService(InfraOrgItDbContext db) : IAuditService
 {
@@ -80,6 +82,11 @@ public sealed class AuditService(InfraOrgItDbContext db) : IAuditService
     private static readonly string[] Outcomes = ["Ok", "Error", "Denied"];
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
+
+    // One API process serializes the chain. Multi-instance deployments need a
+    // database lock or a single-writer queue; otherwise two processes can read
+    // the same predecessor and fork the chain.
+    private static readonly SemaphoreSlim ChainLock = new(1, 1);
 
     public async Task RecordAsync(AuditEntry entry, CancellationToken ct = default)
     {
@@ -94,9 +101,9 @@ public sealed class AuditService(InfraOrgItDbContext db) : IAuditService
         if (detail is { Length: > DetailLimit })
             detail = detail[..DetailLimit];
 
-        db.AuditEvents.Add(new AuditEvent
+        var row = new AuditEvent
         {
-            OccurredAt = DateTime.UtcNow,
+            OccurredAt = AuditChain.NormalizeTimestamp(DateTime.UtcNow),
             Kind = entry.Kind,
             ActorUserId = entry.ActorUserId,
             ActorUsername = entry.ActorUsername ?? "",
@@ -113,7 +120,24 @@ public sealed class AuditService(InfraOrgItDbContext db) : IAuditService
             DurationMs = entry.DurationMs,
             CorrelationId = entry.CorrelationId,
             DetailJson = detail
-        });
-        await db.SaveChangesAsync(ct);
+        };
+
+        await ChainLock.WaitAsync(ct);
+        try
+        {
+            row.PrevHash = await db.AuditEvents.AsNoTracking()
+                                .Where(x => x.Hash != null)
+                                .OrderByDescending(x => x.Id)
+                                .Select(x => x.Hash)
+                                .FirstOrDefaultAsync(ct)
+                            ?? AuditChain.Genesis;
+            row.Hash = AuditChain.Compute(row, row.PrevHash);
+            db.AuditEvents.Add(row);
+            await db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            ChainLock.Release();
+        }
     }
 }

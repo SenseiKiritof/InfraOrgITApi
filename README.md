@@ -91,6 +91,13 @@ Keys for every `KeyVersion` present in the table must be provided; secrets only 
 - Rate limits: login 120/min per IP, callback 30/min per IP, remote actions 30/min per user, reachability 10/min per user, console 5/min per user.
 - Authenticated mutations require `Origin` among `Frontend:AllowedOrigins` (or `Frontend:BaseUrl`); missing or different Origin = 403 `origin_failed`.
 
+## File transfer and audit integrity
+
+- File transfer protocols: `Sftp` (preferred), `Ftps` (explicit TLS on control and data connections, certificate validation on) and `Ftp` (cleartext, legacy exception).
+- Every new `AuditEvents` row carries `PrevHash`/`Hash`: SHA-256 over the canonical audit fields plus the previous hash. Writes are serialized in one API process with a static semaphore; a multi-instance deployment needs a database lock or a single-writer queue.
+- `GET /api/audit-events/verify` (SystemAdmin) recomputes the chain and returns `valid`, `checked`, `firstBrokenId` and `message`. Legacy rows with a null hash are skipped.
+- The hash chain is tamper-evident, not WORM: a database writer can rewrite a suffix by recomputing hashes, and retention deletes older rows. Verification starts at the oldest remaining hashed row, so a deleted prefix or suffix is not detected by the chain alone; export to a SIEM/WORM store for stronger guarantees.
+
 ## Observability
 
 - Outside Development logs are JSON on console, with scopes and `X-Correlation-ID` (client header or `TraceIdentifier`); the correlation id also appears in the response.

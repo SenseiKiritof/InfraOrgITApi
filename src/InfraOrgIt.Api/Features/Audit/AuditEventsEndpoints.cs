@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
 using InfraOrgIt.Api.Infrastructure.Persistence;
@@ -64,8 +65,81 @@ public static class AuditEventsEndpoints
             return Results.Ok(new PagedResult<AuditEventDto>(
                 items, total, page.Page, page.PageSize));
         }).RequireAuthorization();
+
+        app.MapGet("/api/audit-events/verify", VerifyAsync)
+            .Produces<AuditVerifyResult>()
+            // Keep the generated OpenAPI tag stable with the existing operation.
+            .WithTags("InfraOrgIt.Api")
+            .RequireAuthorization();
+    }
+
+    /// <summary>
+    /// Recomputes the hash chain from the oldest remaining hashed row. Legacy
+    /// rows with a null hash are skipped. The first hashed row is accepted as
+    /// the chain start because retention may have deleted earlier rows.
+    /// </summary>
+    private static async Task<IResult> VerifyAsync(
+        ClaimsPrincipal user,
+        InfraOrgItDbContext db,
+        CancellationToken ct)
+    {
+        EnvironmentAccessService.RequireSystemAdmin(user);
+
+        var checkedRows = 0;
+        var legacyRows = 0;
+        var firstHashedRow = true;
+        string? previousHash = null;
+
+        var rows = db.AuditEvents.AsNoTracking()
+            .OrderBy(x => x.Id)
+            .AsAsyncEnumerable();
+
+        await foreach (var row in rows.WithCancellation(ct))
+        {
+            checkedRows++;
+            if (row.Hash is null)
+            {
+                legacyRows++;
+                continue;
+            }
+
+            if (row.PrevHash is null)
+                return Results.Ok(new AuditVerifyResult(
+                    false, checkedRows, row.Id,
+                    $"PrevHash mancante alla riga {row.Id}."));
+
+            if (!firstHashedRow && row.PrevHash != previousHash)
+                return Results.Ok(new AuditVerifyResult(
+                    false, checkedRows, row.Id,
+                    $"Catena interrotta alla riga {row.Id}."));
+
+            if (!string.Equals(
+                    AuditChain.Compute(row, row.PrevHash),
+                    row.Hash,
+                    StringComparison.Ordinal))
+                return Results.Ok(new AuditVerifyResult(
+                    false, checkedRows, row.Id,
+                    $"Hash non valido alla riga {row.Id}."));
+
+            previousHash = row.Hash;
+            firstHashedRow = false;
+        }
+
+        return Results.Ok(new AuditVerifyResult(
+            true,
+            checkedRows,
+            null,
+            legacyRows > 0
+                ? $"Righe legacy senza hash ignorate: {legacyRows}."
+                : checkedRows == 0 ? "Nessuna riga di audit." : null));
     }
 }
+
+public sealed record AuditVerifyResult(
+    bool Valid,
+    int Checked,
+    int? FirstBrokenId,
+    string? Message);
 
 public sealed record AuditEventDto(
     int Id,

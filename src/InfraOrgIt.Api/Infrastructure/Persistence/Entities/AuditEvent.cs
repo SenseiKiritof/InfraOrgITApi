@@ -2,6 +2,7 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 
 // Append-only audit row shared by MCP tool calls and tunnel sessions.
 // Actor and target ids are snapshots: history survives user/server deletion.
+// Hash/PrevHash extend the SHA-256 chain; legacy rows have both null.
 public sealed class AuditEvent
 {
     public int Id { get; set; }
@@ -22,4 +23,6 @@ public sealed class AuditEvent
     public int DurationMs { get; set; }
     public string? CorrelationId { get; set; }
     public string? DetailJson { get; set; }
+    public string? PrevHash { get; set; }
+    public string? Hash { get; set; }
 }

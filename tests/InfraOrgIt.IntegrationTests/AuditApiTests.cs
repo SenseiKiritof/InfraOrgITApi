@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.Features.Audit;
 using InfraOrgIt.Api.Infrastructure.Persistence;
@@ -143,6 +144,89 @@ public sealed class AuditApiTests : IAsyncLifetime
             var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
             Assert.False(await db.AuditEvents.AnyAsync(x => x.Id == oldId));
             Assert.True(await db.AuditEvents.AnyAsync(x => x.Id == recentId));
+        }
+    }
+
+    [Fact]
+    public async Task Audit_chain_verifies_and_detects_tampering()
+    {
+        using var outsider = await SessionClientAsync("chain.outsider");
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await outsider.GetAsync("/api/audit-events/verify")).StatusCode);
+
+        int legacyId;
+        int tamperedId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var legacy = new AuditEvent
+            {
+                OccurredAt = new DateTime(2020, 1, 1, 10, 0, 0, DateTimeKind.Utc),
+                Kind = "McpToolCall",
+                ActorUsername = "legacy",
+                Action = "legacy.action",
+                Outcome = "Ok"
+            };
+            db.AuditEvents.Add(legacy);
+            await db.SaveChangesAsync();
+            legacyId = legacy.Id;
+
+            var audit = scope.ServiceProvider.GetRequiredService<IAuditService>();
+            for (var i = 0; i < 3; i++)
+                await audit.RecordAsync(new AuditEntry(
+                    "McpToolCall", $"chain.action.{i}", "Ok",
+                    ActorUsername: "chain"));
+
+            var hashed = await db.AuditEvents.AsNoTracking()
+                .Where(x => x.Hash != null)
+                .OrderBy(x => x.Id)
+                .ToListAsync();
+            Assert.Equal(3, hashed.Count);
+            Assert.Equal(AuditChain.Genesis, hashed[0].PrevHash);
+            Assert.Equal(hashed[0].Hash, hashed[1].PrevHash);
+            Assert.Equal(hashed[1].Hash, hashed[2].PrevHash);
+            Assert.All(hashed, row =>
+            {
+                Assert.NotNull(row.PrevHash);
+                Assert.NotNull(row.Hash);
+                Assert.Equal(64, row.Hash!.Length);
+            });
+            tamperedId = hashed[1].Id;
+        }
+
+        using var admin = await SessionClientAsync("chain.admin", systemAdmin: true);
+        var verified = await admin.GetFromJsonAsync<JsonElement>(
+            "/api/audit-events/verify");
+        Assert.True(verified.GetProperty("valid").GetBoolean());
+        Assert.Equal(4, verified.GetProperty("checked").GetInt32());
+        Assert.Equal(JsonValueKind.Null,
+            verified.GetProperty("firstBrokenId").ValueKind);
+        Assert.Equal("Righe legacy senza hash ignorate: 1.",
+            verified.GetProperty("message").GetString());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            await db.AuditEvents
+                .Where(x => x.Id == tamperedId)
+                .ExecuteUpdateAsync(setters =>
+                    setters.SetProperty(x => x.Action, "chain.action.tampered"));
+        }
+
+        var tampered = await admin.GetFromJsonAsync<JsonElement>(
+            "/api/audit-events/verify");
+        Assert.False(tampered.GetProperty("valid").GetBoolean());
+        Assert.Equal(3, tampered.GetProperty("checked").GetInt32());
+        Assert.Equal(tamperedId,
+            tampered.GetProperty("firstBrokenId").GetInt32());
+        Assert.Contains($"riga {tamperedId}",
+            tampered.GetProperty("message").GetString());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            Assert.True(await db.AuditEvents.AnyAsync(x => x.Id == legacyId));
         }
     }
 

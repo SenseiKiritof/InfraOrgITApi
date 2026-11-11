@@ -968,8 +968,20 @@ public sealed class InventoryApiTests : IAsyncLifetime
             system,
             HttpMethod.Put,
             $"/api/servers/{seeded.ServerId}/file-transfer",
-            new { protocol = "Ftps", port = 21 });
+            new { protocol = "Smtp", port = 21 });
         Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
+
+        var ftps = await SendAsync(
+            system,
+            HttpMethod.Put,
+            $"/api/servers/{seeded.ServerId}/file-transfer",
+            new { protocol = "Ftps" });
+        Assert.Equal(HttpStatusCode.NoContent, ftps.StatusCode);
+
+        var ftpsServer = await system.GetFromJsonAsync<JsonElement>(
+            $"/api/servers/{seeded.ServerId}");
+        Assert.Equal("Ftps", ftpsServer.GetProperty("fileTransferProtocol").GetString());
+        Assert.Equal(21, ftpsServer.GetProperty("fileTransferPort").GetInt32());
 
         var saved = await SendAsync(
             system,
