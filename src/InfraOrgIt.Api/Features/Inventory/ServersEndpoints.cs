@@ -101,7 +101,10 @@ public static class ServersEndpoints
         };
 
         await EnsureEnvironmentAsync(db, entity.ProviderEnvironmentId, ct);
-        await EnsureJumpServerAsync(db, input.JumpServerId, null, ct);
+        var jumpEnvironmentIds = await EnsureJumpServerAsync(db, input.JumpServerId, null, ct);
+        // PT-04: the jump host comes from another environment, so its admin must agree too.
+        if (jumpEnvironmentIds.Count > 0)
+            await access.RequireAdminAsync(user, jumpEnvironmentIds, ct);
         db.Servers.Add(entity);
         await db.SaveChangesAsync(ct);
 
@@ -119,9 +122,16 @@ public static class ServersEndpoints
         var entity = await db.Servers.SingleOrDefaultAsync(x => x.Id == id, ct)
                      ?? throw Guard.NotFound("Server", id);
 
+        var environmentChanged = entity.ProviderEnvironmentId != input.ProviderEnvironmentId;
+        var jumpServerChanged = entity.JumpServerId != input.JumpServerId;
+
         await EnsureCanWriteAsync(entity, input, user, access, ct);
         await EnsureEnvironmentAsync(db, input.ProviderEnvironmentId, ct);
-        await EnsureJumpServerAsync(db, input.JumpServerId, entity.Id, ct);
+        var jumpEnvironmentIds = await EnsureJumpServerAsync(db, input.JumpServerId, entity.Id, ct);
+        // PT-04: changing the jump host or the server environment crosses an environment boundary.
+        // A jump host kept as-is does not add a new requirement.
+        if ((jumpServerChanged || environmentChanged) && jumpEnvironmentIds.Count > 0)
+            await access.RequireAdminAsync(user, jumpEnvironmentIds, ct);
 
         entity.ProviderEnvironmentId = input.ProviderEnvironmentId;
         entity.Name = Guard.Text(input.Name, "Name", 200);
@@ -189,6 +199,12 @@ public static class ServersEndpoints
             await access.RequireAdminAsync(
                 user, [entity.ProviderEnvironmentId, providerEnvironmentId], ct);
         }
+
+        // PT-04: moving the server does not change the jump host, but it can make
+        // the existing jump chain cross an environment boundary.
+        var jumpEnvironmentIds = await EnsureJumpServerAsync(db, entity.JumpServerId, entity.Id, ct);
+        if (jumpEnvironmentIds.Count > 0)
+            await access.RequireAdminAsync(user, jumpEnvironmentIds, ct);
 
         await EnsureEnvironmentAsync(db, providerEnvironmentId, ct);
         entity.ProviderEnvironmentId = providerEnvironmentId;
@@ -271,7 +287,11 @@ public static class ServersEndpoints
             user, [entity.ProviderEnvironmentId, input.ProviderEnvironmentId], ct);
     }
 
-    private static async Task EnsureJumpServerAsync(
+    /// <summary>
+    /// Validates the proxy chain and returns the provider environments it touches,
+    /// so callers can require <c>ServerAdmin</c> on all of them (PT-04).
+    /// </summary>
+    private static async Task<List<int>> EnsureJumpServerAsync(
         InfraOrgItDbContext db,
         int? jumpServerId,
         int? selfId,
@@ -279,6 +299,7 @@ public static class ServersEndpoints
     {
         var current = jumpServerId;
         var seen = new HashSet<int>();
+        var environmentIds = new List<int>();
 
         while (current is int id)
         {
@@ -288,12 +309,17 @@ public static class ServersEndpoints
 
             var next = await db.Servers
                 .Where(x => x.Id == id)
-                .Select(x => new { x.JumpServerId })
+                .Select(x => new { x.JumpServerId, x.ProviderEnvironmentId })
                 .SingleOrDefaultAsync(ct)
                 ?? throw Guard.NotFound("Server proxy", id);
 
+            if (!environmentIds.Contains(next.ProviderEnvironmentId))
+                environmentIds.Add(next.ProviderEnvironmentId);
+
             current = next.JumpServerId;
         }
+
+        return environmentIds;
     }
 
     private static async Task EnsureEnvironmentAsync(

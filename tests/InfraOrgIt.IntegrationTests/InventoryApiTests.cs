@@ -35,6 +35,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
     private WebApplicationFactory<Program> _factory = null!;
     private readonly FakeSsh _ssh = new();
     private readonly FakeFileTransfer _files = new();
+    private readonly RecordingHttpHandler _outbound = new();
 
     public async Task InitializeAsync()
     {
@@ -60,6 +61,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
                 services.AddSingleton<ISshConnector>(_ssh);
                 services.RemoveAll<IFileTransferConnector>();
                 services.AddSingleton<IFileTransferConnector>(_files);
+                services.AddHttpClient("application-api")
+                    .ConfigurePrimaryHttpMessageHandler(() => _outbound);
             });
         });
 
@@ -139,6 +142,88 @@ public sealed class InventoryApiTests : IAsyncLifetime
             .Select(x => x.GetProperty("name").GetString())
             .ToList();
         Assert.Contains("Ambienti", italianNames);
+    }
+
+    [Fact]
+    public async Task Api_call_history_never_stores_query_api_keys()
+    {
+        using var admin = await ClientForAsync("call.secret", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync("call-" + suffix);
+        var catalog = await SeedCatalogAsync(seeded.ServerId, suffix);
+        const string secret = "s3cr3t-value";
+
+        var environment = await SendAsync(admin, HttpMethod.Put,
+            $"/api/applications/{catalog.ApplicationId}/environments/{seeded.EnvironmentId}",
+            new { hostname = "http://call-" + suffix + ".local", ignoreSslErrors = false });
+        Assert.Equal(HttpStatusCode.NoContent, environment.StatusCode);
+
+        var api = await ReadAsync(await SendAsync(admin, HttpMethod.Post,
+            $"/api/application-versions/{catalog.VersionId}/apis",
+            new { url = "/health?existing=1", requestType = "GET", description = "Health" }));
+        var apiId = api.GetProperty("id").GetInt32();
+
+        var key = await SendAsync(admin, HttpMethod.Post,
+            $"/api/applications/{catalog.ApplicationId}/api-keys",
+            new
+            {
+                name = "token",
+                location = "Query",
+                value = secret,
+                environmentId = seeded.EnvironmentId
+            });
+        Assert.Equal(HttpStatusCode.OK, key.StatusCode);
+
+        var success = await ReadAsync(await SendAsync(admin, HttpMethod.Post,
+            $"/api/application-version-apis/{apiId}/call",
+            new
+            {
+                environmentId = seeded.EnvironmentId,
+                query = new { verbose = "1", token = secret },
+                save = true
+            }));
+        var callId = success.GetProperty("callId").GetInt32();
+
+        // The outbound request keeps the real secret; the history does not.
+        Assert.Contains($"token={secret}", _outbound.LastUri!.Query);
+        var stored = await ReadAsync(await admin.GetAsync($"/api/api-calls/{callId}"));
+        var storedUrl = stored.GetProperty("url").GetString()!;
+        Assert.Contains("existing=1", storedUrl);
+        Assert.Contains("verbose=1", storedUrl);
+        Assert.Contains("token=***", storedUrl);
+        Assert.DoesNotContain(secret, storedUrl);
+        var storedQuery = stored.GetProperty("queryJson").GetString();
+        Assert.DoesNotContain(secret, storedQuery);
+        Assert.Contains("***", storedQuery);
+
+        // The failure path persists the redacted URL too.
+        _outbound.Fail = true;
+        var failure = await SendAsync(admin, HttpMethod.Post,
+            $"/api/application-version-apis/{apiId}/call",
+            new { environmentId = seeded.EnvironmentId, save = true });
+        Assert.Equal(HttpStatusCode.BadGateway, failure.StatusCode);
+
+        var list = await ReadAsync(await admin.GetAsync(
+            $"/api/api-calls?applicationId={catalog.ApplicationId}"));
+        var items = list.GetProperty("items");
+        Assert.Equal(2, items.GetArrayLength());
+        Assert.All(items.EnumerateArray(), item =>
+            Assert.DoesNotContain(secret, item.GetProperty("url").GetString()));
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var rows = await db.ApplicationApiCalls.AsNoTracking()
+                .Where(x => x.ApplicationVersionApiId == apiId)
+                .Select(x => new { x.Url, x.QueryJson })
+                .ToListAsync();
+            Assert.Equal(2, rows.Count);
+            Assert.All(rows, row =>
+            {
+                Assert.DoesNotContain(secret, row.Url);
+                Assert.DoesNotContain(secret, row.QueryJson ?? "");
+            });
+        }
     }
 
     [Fact]
@@ -785,6 +870,81 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Jump_host_requires_admin_on_both_environments()
+    {
+        using var system = await ClientForAsync("jump.cross.system", systemAdmin: true);
+        using var admin = await ClientForAsync("jump.cross.admin");
+        using var unchangedUser = await ClientForAsync("jump.cross.unchanged");
+        using var mover = await ClientForAsync("jump.cross.move");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        var first = await SeedEnvironmentAsync("jump-a-" + suffix);
+        var second = await SeedEnvironmentAsync("jump-b-" + suffix);
+        var third = await SeedEnvironmentAsync("jump-c-" + suffix);
+        var sameEnvJump = await AddServerAsync(first.ProviderEnvironmentId, "jump-same-" + suffix);
+        await AssignEnvironmentRoleAsync(
+            system, first.ProviderEnvironmentId, "jump.cross.admin", "ServerAdmin");
+
+        object Body(int environmentId, string name, string ip, int? jumpServerId) => new
+        {
+            providerEnvironmentId = environmentId,
+            name,
+            ipAddress = ip,
+            hostname = name + ".local",
+            sshPort = 22,
+            jumpServerId
+        };
+
+        // Same environment: one ServerAdmin is enough.
+        var created = await SendAsync(admin, HttpMethod.Post, "/api/servers",
+            Body(first.ProviderEnvironmentId, "jump-target-" + suffix, "10.30.0.1", sameEnvJump));
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var targetId = (await ReadAsync(created)).GetProperty("id").GetInt32();
+
+        // Jump host in another environment: denied until its admin role is added.
+        var crossUpdate = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{targetId}",
+            Body(first.ProviderEnvironmentId, "jump-target-" + suffix, "10.30.0.1", second.ServerId));
+        Assert.Equal(HttpStatusCode.Forbidden, crossUpdate.StatusCode);
+
+        var systemCreate = await SendAsync(system, HttpMethod.Post, "/api/servers",
+            Body(first.ProviderEnvironmentId, "jump-system-" + suffix, "10.30.0.2", second.ServerId));
+        Assert.Equal(HttpStatusCode.Forbidden, systemCreate.StatusCode);
+
+        await AssignEnvironmentRoleAsync(
+            system, second.ProviderEnvironmentId, "jump.cross.admin", "ServerAdmin");
+
+        var allowed = await SendAsync(admin, HttpMethod.Put, $"/api/servers/{targetId}",
+            Body(first.ProviderEnvironmentId, "jump-target-" + suffix, "10.30.0.1", second.ServerId));
+        Assert.Equal(HttpStatusCode.NoContent, allowed.StatusCode);
+
+        // Keeping the same jump host does not add a new environment requirement.
+        await AssignEnvironmentRoleAsync(
+            system, first.ProviderEnvironmentId, "jump.cross.unchanged", "ServerAdmin");
+        var unchanged = await SendAsync(unchangedUser, HttpMethod.Put, $"/api/servers/{targetId}",
+            Body(first.ProviderEnvironmentId, "jump-target-" + suffix, "10.30.0.1", second.ServerId));
+        Assert.Equal(HttpStatusCode.NoContent, unchanged.StatusCode);
+
+        // Moving the server makes the unchanged jump chain cross A -> C: B is required too.
+        await AssignEnvironmentRoleAsync(
+            system, first.ProviderEnvironmentId, "jump.cross.move", "ServerAdmin");
+        await AssignEnvironmentRoleAsync(
+            system, third.ProviderEnvironmentId, "jump.cross.move", "ServerAdmin");
+        var deniedMove = await SendAsync(mover, HttpMethod.Put,
+            $"/api/servers/{targetId}/provider-environment/{third.ProviderEnvironmentId}");
+        Assert.Equal(HttpStatusCode.Forbidden, deniedMove.StatusCode);
+
+        await AssignEnvironmentRoleAsync(
+            system, second.ProviderEnvironmentId, "jump.cross.move", "ServerAdmin");
+        var allowedMove = await SendAsync(mover, HttpMethod.Put,
+            $"/api/servers/{targetId}/provider-environment/{third.ProviderEnvironmentId}");
+        Assert.Equal(HttpStatusCode.NoContent, allowedMove.StatusCode);
+
+        var moved = await ReadAsync(await system.GetAsync($"/api/servers/{targetId}"));
+        Assert.Equal(third.ProviderEnvironmentId, moved.GetProperty("providerEnvironmentId").GetInt32());
+        Assert.Equal(second.ServerId, moved.GetProperty("jumpServerId").GetInt32());
+    }
+
+    [Fact]
     public async Task File_transfer_configuration_and_listing_respect_roles()
     {
         using var system = await ClientForAsync("files.system", systemAdmin: true);
@@ -1368,6 +1528,104 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
 
     [Fact]
+    public async Task Deployment_proxy_route_requires_admin_on_route_environments()
+    {
+        using var system = await ClientForAsync("route.system", systemAdmin: true);
+        using var deployAdmin = await ClientForAsync("route.deploy");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        var deploymentEnv = await SeedEnvironmentAsync("route-dep-" + suffix);
+        var routeEnv = await SeedEnvironmentAsync("route-proxy-" + suffix);
+        var secondDeploymentServer = await AddServerAsync(
+            deploymentEnv.ProviderEnvironmentId, "route-dep-2-" + suffix);
+        var secondRouteServer = await AddServerAsync(
+            routeEnv.ProviderEnvironmentId, "route-proxy-2-" + suffix);
+        var catalog = await SeedCatalogAsync(deploymentEnv.ServerId, suffix);
+        var sameEnvRoute = await SeedRouteAsync(deploymentEnv.ServerId, secondDeploymentServer);
+        var crossEnvRoute = await SeedRouteAsync(routeEnv.ServerId, secondRouteServer);
+
+        await AssignEnvironmentRoleAsync(
+            system, deploymentEnv.ProviderEnvironmentId, "route.deploy", "ServerAdmin");
+
+        // Route in the deployment environment: one ServerAdmin is enough.
+        var same = await SendAsync(deployAdmin, HttpMethod.Post, "/api/server-applications", new
+        {
+            serverId = deploymentEnv.ServerId,
+            applicationVersionId = catalog.VersionId,
+            exposedPort = 3001,
+            proxyRouteId = sameEnvRoute
+        });
+        Assert.Equal(HttpStatusCode.OK, same.StatusCode);
+
+        // Route owned by another environment: denied on create.
+        var cross = await SendAsync(deployAdmin, HttpMethod.Post, "/api/server-applications", new
+        {
+            serverId = deploymentEnv.ServerId,
+            applicationVersionId = catalog.VersionId,
+            exposedPort = 3002,
+            proxyRouteId = crossEnvRoute
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, cross.StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            Assert.Equal(2, await db.ServerApplications.CountAsync(
+                x => x.ApplicationVersionId == catalog.VersionId));
+        }
+
+        var existing = await ReadAsync(await SendAsync(
+            deployAdmin, HttpMethod.Post, "/api/server-applications", new
+            {
+                serverId = deploymentEnv.ServerId,
+                applicationVersionId = catalog.VersionId,
+                exposedPort = 3003
+            }));
+        var deploymentId = existing.GetProperty("id").GetInt32();
+
+        // Denied on update as well, and nothing is persisted.
+        var crossUpdate = await SendAsync(deployAdmin, HttpMethod.Put,
+            $"/api/server-applications/{deploymentId}", new
+            {
+                serverId = deploymentEnv.ServerId,
+                applicationVersionId = catalog.VersionId,
+                exposedPort = 3003,
+                proxyRouteId = crossEnvRoute
+            });
+        Assert.Equal(HttpStatusCode.Forbidden, crossUpdate.StatusCode);
+
+        var afterDenied = await ReadAsync(
+            await deployAdmin.GetAsync($"/api/server-applications/{deploymentId}"));
+        Assert.Equal(JsonValueKind.Null, afterDenied.GetProperty("proxyRouteId").ValueKind);
+
+        // SystemAdmin is not an environment role (D7=B).
+        var systemAttempt = await SendAsync(system, HttpMethod.Post, "/api/server-applications", new
+        {
+            serverId = deploymentEnv.ServerId,
+            applicationVersionId = catalog.VersionId,
+            exposedPort = 3004,
+            proxyRouteId = sameEnvRoute
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, systemAttempt.StatusCode);
+
+        await AssignEnvironmentRoleAsync(
+            system, routeEnv.ProviderEnvironmentId, "route.deploy", "ServerAdmin");
+        var allowed = await SendAsync(deployAdmin, HttpMethod.Put,
+            $"/api/server-applications/{deploymentId}", new
+            {
+                serverId = deploymentEnv.ServerId,
+                applicationVersionId = catalog.VersionId,
+                exposedPort = 3003,
+                proxyRouteId = crossEnvRoute
+            });
+        Assert.Equal(HttpStatusCode.NoContent, allowed.StatusCode);
+
+        var updated = await ReadAsync(
+            await deployAdmin.GetAsync($"/api/server-applications/{deploymentId}"));
+        Assert.Equal(crossEnvRoute, updated.GetProperty("proxyRouteId").GetInt32());
+    }
+
+    [Fact]
     public async Task Server_inventory_details_round_trip_and_validation()
     {
         using var systemAdmin = await ClientForAsync("details.system", systemAdmin: true);
@@ -1681,11 +1939,55 @@ public sealed class InventoryApiTests : IAsyncLifetime
         return connection.Id;
     }
 
+    private async Task<int> SeedRouteAsync(int sourceServerId, int targetServerId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+
+        var connection = new ProxyConnection
+        {
+            SourceServerId = sourceServerId,
+            TargetServerId = targetServerId,
+            Direction = "Outgoing"
+        };
+        db.ProxyConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var route = new ProxyRoute
+        {
+            ProxyConnectionId = connection.Id,
+            Route = "/route-" + Guid.NewGuid().ToString("N")[..8]
+        };
+        db.ProxyRoutes.Add(route);
+        await db.SaveChangesAsync();
+        return route.Id;
+    }
+
     private sealed record SeededEnvironment(
         int ProviderId,
         int EnvironmentId,
         int ProviderEnvironmentId,
         int ServerId);
+
+    private sealed class RecordingHttpHandler : HttpMessageHandler
+    {
+        public Uri? LastUri { get; private set; }
+        public bool Fail { get; set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastUri = request.RequestUri;
+            if (Fail)
+                throw new HttpRequestException("connessione rifiutata");
+
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"ok\":true}", Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }
+    }
 
     private async Task<WebSocket> ConnectConsoleAsync(
         string cookie, int serverId, string? resume)
