@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
   packages: write
+  # Keyless signing and provenance attestations; the steps are gated to
+  # non-PR events, where GitHub issues the OIDC token.
+  id-token: write
+  attestations: write
 
 jobs:
   image:
@@ -50,7 +54,8 @@ jobs:
             type=sha
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
@@ -58,3 +63,48 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ startsWith(github.ref, 'refs/tags/') && format('APP_VERSION={0}', github.ref_name) || '' }}
+
+      - name: Resolve the published image
+        if: github.event_name != 'pull_request'
+        id: published
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          # metadata-action lowercases the image name, so take it from the tags.
+          ref=${TAGS%%$'\n'*}
+          image=${ref%:*}
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          # The build-push-action digest is the multi-arch index digest; the
+          # SBOM scans the amd64 manifest nested in that index.
+          platform_digest=$(docker buildx imagetools inspect "$image@$DIGEST" --raw \
+            | jq -r '[.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64")][0].digest // empty')
+          echo "platform-digest=${platform_digest:-$DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate the SBOM
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.published.outputs.image }}@${{ steps.published.outputs.platform-digest }}
+          format: spdx-json
+          artifact-name: sbom-api.spdx.json
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          upload-release-assets: false
+
+      - name: Attest the build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.published.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - uses: sigstore/cosign-installer@v3
+        if: github.event_name != 'pull_request'
+
+      - name: Sign the published image
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${{ steps.published.outputs.image }}@$DIGEST"
