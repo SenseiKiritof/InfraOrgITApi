@@ -168,6 +168,7 @@ builder.Services.AddHostedService<AuditRetentionService>();
 builder.Services.AddScoped<ReachabilityRunner>();
 builder.Services.AddScoped<ApplicationActionRunner>();
 builder.Services.AddScoped<McpGrantService>();
+builder.Services.AddScoped<McpApprovalService>();
 builder.Services.AddScoped<ApiTokenService>();
 builder.Services
     .AddMcpServer()
@@ -294,6 +295,12 @@ if (mcpOidcConfigured)
 
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy("Session", policy =>
+    {
+        policy.AddAuthenticationSchemes(SessionAuthenticationHandler.SchemeName)
+            .RequireAuthenticatedUser();
+    });
+
     options.AddPolicy("Mcp", policy =>
     {
         var schemes = new List<string>
@@ -493,6 +500,7 @@ ApiTokensEndpoints.Map(app);
 TunnelEndpoints.Map(app);
 
 McpGrantsEndpoints.Map(app);
+McpApprovalsEndpoints.Map(app);
 
 static bool HasScope(ClaimsPrincipal user, params string[] allowed)
 {

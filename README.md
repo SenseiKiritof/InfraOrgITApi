@@ -84,6 +84,37 @@ Keys for every `KeyVersion` present in the table must be provided; secrets only 
 - Mutations: `X-CSRF-Token` header + allowed `Origin`; `SameSite=Lax`.
 - No token is returned to the browser or readable from JavaScript.
 
+## MCP human approval (PT-18)
+
+`confirm=true` alone does not execute an MCP action: it only creates a Pending
+approval, because a model-supplied boolean is not a human confirmation.
+
+- `run_reachability_tests` and `run_application_action` keep the `mcp:operate`
+  scope, the MCP grant and the environment `ServerOperator`/`ServerAdmin`
+  checks, then return
+  `{ "status": "approval_required", "approvalId": 1, "expiresAt": "...", "message": "..." }`
+  without executing anything.
+- Only the owner decides from a cookie session:
+  `GET /api/mcp/approvals[?status=Pending]`,
+  `POST /api/mcp/approvals/{id}/approve`,
+  `POST /api/mcp/approvals/{id}/deny`. The group uses the `Session` policy, so
+  an MCP bearer token cannot approve, and the mutations require CSRF + Origin.
+- To execute, call the tool again with `approvalId`. The approval must be
+  Approved and unexpired, and must match the user, tool, server, deployment,
+  application action and parameters (including the idempotency key). It is
+  consumed atomically and can be used once.
+- Approvals expire after 10 minutes; Pending and Approved rows past their
+  expiry are marked `Expired` when read. A failed execution still consumes the
+  approval: request a new one.
+- `get_mcp_approval` returns status/expiry/target for the caller without
+  executing; clients poll it instead of retrying the action.
+- Approval creation and decisions are audited as `AdminChange`
+  (`mcp_approval_request`, `mcp_approval_approve`, `mcp_approval_deny`);
+  rejected tool calls stay in `McpToolCall` with `approval_*` error codes.
+- Breaking change for existing MCP clients: an action call that used to run on
+  `confirm=true` now returns `approval_required` and needs the second call
+  with `approvalId`.
+
 ## HTTP security
 
 - Headers on API and SPA: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, CSP and HSTS when the request arrives over HTTPS.
