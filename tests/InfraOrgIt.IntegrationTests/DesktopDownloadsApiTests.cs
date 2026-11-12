@@ -316,6 +316,44 @@ public sealed class DesktopDownloadsApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Ticket_issued_before_disabling_cannot_be_downloaded()
+    {
+        var suffix = Unique();
+        var seeded = await SeedServerAsync(suffix);
+        var username = "desk.switch." + suffix;
+        await SeedUserAsync(username);
+        await GrantEnvironmentRoleAsync(username, seeded.ProviderEnvironmentId, "ServerAdmin");
+        using var client = await SessionClientAsync(_factory, username);
+
+        var created = await SendAsync(client, HttpMethod.Post,
+            "/api/desktop/downloads/tickets",
+            new { serverId = seeded.ServerId, path = "/notes.txt" });
+        var url = (await ReadAsync(created)).GetProperty("url").GetString()!;
+
+        using var disabled = BuildFactory(enabled: false);
+        using var anonymous = disabled.CreateClient();
+        var download = await anonymous.GetAsync(url);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, download.StatusCode);
+        Assert.Equal("desktop_downloads_disabled", await ReadCodeAsync(download));
+        Assert.Equal("application/problem+json", download.Content.Headers.ContentType?.MediaType);
+        Assert.Null(download.Content.Headers.ContentDisposition);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        var ticket = await db.DownloadTickets.AsNoTracking()
+            .Where(x => x.ServerId == seeded.ServerId)
+            .SingleAsync();
+        Assert.Null(ticket.ConsumedAt);
+        Assert.Contains(await db.AuditEvents.AsNoTracking()
+                .Where(x => x.Kind == "FileTransfer" &&
+                            x.Action == "file.download" &&
+                            x.Outcome == "Denied")
+                .ToListAsync(),
+            x => x.ServerId == seeded.ServerId &&
+                 x.ErrorCode == "desktop_downloads_disabled");
+    }
+
+    [Fact]
     public async Task Ticket_url_uses_public_base_url_when_configured()
     {
         using var custom = BuildFactory(publicBaseUrl: "https://files.example.test/base/");

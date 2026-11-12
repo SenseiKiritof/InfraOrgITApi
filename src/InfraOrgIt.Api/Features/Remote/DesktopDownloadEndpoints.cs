@@ -50,10 +50,7 @@ public static class DesktopDownloadEndpoints
         CancellationToken ct)
     {
         if (!options.Value.Enabled)
-            throw new ApiException(
-                StatusCodes.Status503ServiceUnavailable,
-                "desktop_downloads_disabled",
-                "I download firmati per il desktop sono disattivati.");
+            throw DesktopDownloadsDisabled();
 
         if (input.ServerId <= 0)
             throw Guard.Unprocessable("Indicare il server.");
@@ -130,6 +127,7 @@ public static class DesktopDownloadEndpoints
         EnvironmentAccessService access,
         IFileTransferConnector connector,
         IAuditService audit,
+        IOptions<DesktopDownloadsOptions> options,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length > 128)
@@ -143,6 +141,13 @@ public static class DesktopDownloadEndpoints
             .SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
         if (ticket is null)
             throw TicketInvalid();
+
+        // The kill switch also invalidates tickets issued before it was turned
+        // off: no content is sent and the ticket stays unconsumed.
+        if (!options.Value.Enabled)
+            throw await DeniedTicketAsync(
+                audit, ticket, started, "desktop_downloads_disabled", ct,
+                DesktopDownloadsDisabled());
 
         if (ticket.ConsumedAt is not null)
             throw await DeniedTicketAsync(
@@ -237,14 +242,21 @@ public static class DesktopDownloadEndpoints
         DownloadTicket ticket,
         long started,
         string errorCode,
-        CancellationToken ct)
+        CancellationToken ct,
+        ApiException? response = null)
     {
         await audit.RecordAsync(
             DownloadEntry(ticket, "file.download", "Denied", started,
                 new { path = ticket.Path }, errorCode),
             ct);
-        return TicketInvalid();
+        return response ?? TicketInvalid();
     }
+
+    private static ApiException DesktopDownloadsDisabled() =>
+        new(
+            StatusCodes.Status503ServiceUnavailable,
+            "desktop_downloads_disabled",
+            "I download firmati per il desktop sono disattivati.");
 
     private static ApiException TicketInvalid() =>
         new(
