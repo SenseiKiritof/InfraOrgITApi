@@ -749,6 +749,8 @@ public sealed class DesktopDownloadsApiTests : IAsyncLifetime
 
         private sealed class Session(FakeFileTransfer owner) : IFileTransferSession
         {
+            public string HomePath => "/";
+
             public Task<IReadOnlyList<RemoteFileEntry>> ListAsync(
                 string path, CancellationToken ct) =>
                 Task.FromResult<IReadOnlyList<RemoteFileEntry>>([]);
