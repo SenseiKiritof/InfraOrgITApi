@@ -306,12 +306,17 @@ builder.Services.AddOptions<DesktopDownloadsOptions>()
     .Bind(builder.Configuration.GetSection(DesktopDownloadsOptions.SectionName))
     .Validate(o => o.TicketLifetimeSeconds is >= 1 and <= 3600,
         "DesktopDownloads:TicketLifetimeSeconds tra 1 e 3600.")
+    .Validate(o => o.RetentionDays is >= 1 and <= 365,
+        "DesktopDownloads:RetentionDays tra 1 e 365.")
+    .Validate(o => o.CleanupIntervalMinutes is >= 15 and <= 10080,
+        "DesktopDownloads:CleanupIntervalMinutes tra 15 e 10080.")
     .Validate(o => string.IsNullOrWhiteSpace(o.PublicBaseUrl) ||
                    (Uri.TryCreate(o.PublicBaseUrl, UriKind.Absolute, out var publicBase) &&
                     (publicBase.Scheme == Uri.UriSchemeHttp ||
                      publicBase.Scheme == Uri.UriSchemeHttps)),
         "DesktopDownloads:PublicBaseUrl deve essere un URI HTTP(S) assoluto.")
     .ValidateOnStart();
+builder.Services.AddHostedService<DownloadTicketRetentionService>();
 builder.Services.AddOptions<FrontendOptions>()
     .Bind(builder.Configuration.GetSection("Frontend"))
     .Validate(o => Uri.TryCreate(o.BaseUrl, UriKind.Absolute, out _), "Frontend:BaseUrl non è un URI assoluto.")

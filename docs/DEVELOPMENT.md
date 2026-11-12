@@ -121,7 +121,8 @@ approval, because a model-supplied boolean is not a human confirmation.
 ## Desktop download tickets
 
 `DesktopDownloads` (default `Enabled=true`, `TicketLifetimeSeconds=120`,
-optional `PublicBaseUrl`) backs the desktop bridge:
+`RetentionDays=30`, `CleanupIntervalMinutes=1440`, optional `PublicBaseUrl`)
+backs the desktop bridge:
 
 - `GET /api/desktop/downloads/capabilities` is available to a cookie session,
   a personal API token or an OIDC bearer and returns `{ signedUrl }`.
@@ -137,8 +138,15 @@ optional `PublicBaseUrl`) backs the desktop bridge:
   authentication requirement in OpenAPI. The raw token is visible in the URL
   path, so keep the lifetime short and avoid proxy access-log retention.
 - A failed connector after consuming the ticket requires a new ticket; this is
-  intentional anti-replay behavior. Old rows are not purged yet; the
-  `(ExpiresAt, ConsumedAt)` index supports a future cleanup job.
+  intentional anti-replay behavior.
+- Ticket rows are metadata only: user, server, normalized path, created,
+  expiry and consumption timestamps. They never contain the raw token or file
+  content. `RetentionDays` (default 30, valid 1..365) deletes expired rows,
+  consumed or not, once `ExpiresAt` is older than `now - RetentionDays`;
+  `CleanupIntervalMinutes` (default 1440, valid 15..10080) controls the
+  background pass. The first pass runs shortly after startup, in batches, so
+  it does not block startup or requests. Audit rows keep their independent
+  180-day retention.
 
 ## Audit anchoring (PT-10)
 

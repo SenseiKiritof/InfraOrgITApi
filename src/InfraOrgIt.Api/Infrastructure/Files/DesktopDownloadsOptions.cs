@@ -18,6 +18,15 @@ public sealed class DesktopDownloadsOptions
     public int TicketLifetimeSeconds { get; set; } = 120;
 
     /// <summary>
+    /// GDPR storage limitation for expired ticket metadata. Rows older than
+    /// this window are deleted by the background retention service.
+    /// </summary>
+    public int RetentionDays { get; set; } = 30;
+
+    /// <summary>How often the retention service runs.</summary>
+    public int CleanupIntervalMinutes { get; set; } = 1440;
+
+    /// <summary>
     /// Optional absolute public origin (for example behind a reverse proxy).
     /// When empty the ticket URL uses the current request scheme and host.
     /// </summary>

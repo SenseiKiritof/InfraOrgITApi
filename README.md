@@ -90,6 +90,14 @@ already-issued ones; `TicketLifetimeSeconds` defaults to 120 and
 desktop can instead use its native webview download when the server disables
 the bridge.
 
+Tickets are metadata only: user, server, normalized path and timestamps; the
+raw token and file content are never stored. For GDPR storage limitation,
+`DesktopDownloads:RetentionDays` defaults to 30 and a background job deletes
+expired ticket rows past that window (consumed or not).
+`DesktopDownloads:CleanupIntervalMinutes` defaults to 1440 and the first pass
+runs shortly after startup. Audit rows keep their separate 180-day retention
+policy.
+
 ![MCP approvals page with a pending action, Approve and Deny buttons, and the human-approval warning](docs/screenshots/approvals.png)
 
 ## Run the API

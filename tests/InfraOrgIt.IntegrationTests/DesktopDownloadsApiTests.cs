@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
+using InfraOrgIt.Api.Features.Remote;
 using InfraOrgIt.Api.Infrastructure.Files;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
@@ -14,6 +15,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
@@ -372,6 +376,122 @@ public sealed class DesktopDownloadsApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Retention_deletes_only_tickets_past_the_window()
+    {
+        // A reference time five days ahead puts the 30-day cutoff at
+        // now - 25 days: real-time tickets from other tests stay inside the
+        // window, while this fixture (expired 26 days ago) is outside it.
+        var now = DateTime.UtcNow.AddDays(5);
+        var suffix = Unique();
+        var seeded = await SeedServerAsync(suffix);
+        var userId = await SeedUserAsync("desk.retention." + suffix);
+        int oldId;
+        int expiredWithinId;
+        int consumedWithinId;
+        int futureId;
+        int auditId;
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var old = NewTicket(seeded, userId, "old-" + suffix, now.AddDays(-31));
+            var expiredWithin = NewTicket(seeded, userId, "within-" + suffix, now.AddDays(-10));
+            var consumedWithin = NewTicket(
+                seeded, userId, "consumed-" + suffix, now.AddDays(-5), now.AddDays(-5));
+            var future = NewTicket(seeded, userId, "future-" + suffix, now.AddDays(1));
+            var audit = new AuditEvent
+            {
+                OccurredAt = DateTime.UtcNow.AddDays(-20),
+                Kind = "FileTransfer",
+                ActorUsername = "retention.sentinel." + suffix,
+                Action = "file.download",
+                Outcome = "Ok"
+            };
+
+            db.DownloadTickets.AddRange(old, expiredWithin, consumedWithin, future);
+            db.AuditEvents.Add(audit);
+            await db.SaveChangesAsync();
+            oldId = old.Id;
+            expiredWithinId = expiredWithin.Id;
+            consumedWithinId = consumedWithin.Id;
+            futureId = future.Id;
+            auditId = audit.Id;
+        }
+
+        var service = _factory.Services.GetServices<IHostedService>()
+            .OfType<DownloadTicketRetentionService>()
+            .Single();
+        var deleted = await service.PurgeAsync(now, CancellationToken.None);
+        Assert.Equal(1, deleted);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            Assert.False(await db.DownloadTickets.AnyAsync(x => x.Id == oldId));
+            Assert.True(await db.DownloadTickets.AnyAsync(x => x.Id == expiredWithinId));
+            Assert.True(await db.DownloadTickets.AnyAsync(x => x.Id == consumedWithinId));
+            Assert.True(await db.DownloadTickets.AnyAsync(x => x.Id == futureId));
+            Assert.True(await db.AuditEvents.AnyAsync(x => x.Id == auditId));
+        }
+    }
+
+    [Fact]
+    public async Task Retention_runs_while_desktop_downloads_are_disabled()
+    {
+        // Same five-day shift: only the expired-26-days fixture is outside
+        // the window; real-time rows from other tests stay inside it.
+        var now = DateTime.UtcNow.AddDays(5);
+        var suffix = Unique();
+        var seeded = await SeedServerAsync(suffix);
+        var userId = await SeedUserAsync("desk.retention.disabled." + suffix);
+        int oldId;
+        int recentId;
+        int auditId;
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var old = NewTicket(seeded, userId, "disabled-old-" + suffix, now.AddDays(-31));
+            var recent = NewTicket(seeded, userId, "disabled-recent-" + suffix, now.AddDays(-1));
+            var audit = new AuditEvent
+            {
+                OccurredAt = DateTime.UtcNow.AddDays(-20),
+                Kind = "FileTransfer",
+                ActorUsername = "retention.disabled.sentinel." + suffix,
+                Action = "file.download",
+                Outcome = "Ok"
+            };
+
+            db.DownloadTickets.AddRange(old, recent);
+            db.AuditEvents.Add(audit);
+            await db.SaveChangesAsync();
+            oldId = old.Id;
+            recentId = recent.Id;
+            auditId = audit.Id;
+        }
+
+        var service = new DownloadTicketRetentionService(
+            _factory.Services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new DesktopDownloadsOptions
+            {
+                Enabled = false,
+                RetentionDays = 30,
+                CleanupIntervalMinutes = 1440
+            }),
+            NullLogger<DownloadTicketRetentionService>.Instance);
+        var deleted = await service.PurgeAsync(now, CancellationToken.None);
+        Assert.Equal(1, deleted);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            Assert.False(await db.DownloadTickets.AnyAsync(x => x.Id == oldId));
+            Assert.True(await db.DownloadTickets.AnyAsync(x => x.Id == recentId));
+            Assert.True(await db.AuditEvents.AnyAsync(x => x.Id == auditId));
+        }
+    }
+
+    [Fact]
     public async Task Slow_download_does_not_block_ticket_creation()
     {
         _files.Reset();
@@ -583,6 +703,22 @@ public sealed class DesktopDownloadsApiTests : IAsyncLifetime
     }
 
     private static string Unique() => Guid.NewGuid().ToString("N")[..8];
+
+    private static DownloadTicket NewTicket(
+        SeededServer seeded,
+        int userId,
+        string name,
+        DateTime expiresAt,
+        DateTime? consumedAt = null) =>
+        new()
+        {
+            TokenHash = DownloadTicketTokens.Hash($"retention-{name}-{Guid.NewGuid():N}"),
+            UserId = userId,
+            ServerId = seeded.ServerId,
+            Path = "/" + name + ".txt",
+            ExpiresAt = expiresAt,
+            ConsumedAt = consumedAt
+        };
 
     private sealed record SeededServer(int ServerId, int ProviderEnvironmentId);
 
