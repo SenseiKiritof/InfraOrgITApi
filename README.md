@@ -5,7 +5,8 @@ inventory model, permissions, credentials, SSH/SFTP operations, audit log and
 the tools an AI client can call.
 
 The API has no separate user interface: the pages shown below are served by
-[InfraOrgIT Web](https://github.com/SenseiKiritof/InfraOrgITWeb).
+[InfraOrgIT Web](https://github.com/SenseiKiritof/InfraOrgITWeb). Screenshots
+use fictitious demo data.
 
 ## What it does
 
