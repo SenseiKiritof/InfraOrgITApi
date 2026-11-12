@@ -219,6 +219,7 @@ builder.Services.AddSingleton<ConsoleSessionRegistry>();
 builder.Services.AddScoped<TopologyService>();
 builder.Services.AddScoped<DiagramService>();
 builder.Services.AddHttpClient<OidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient<DesktopOidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("application-api", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("application-api-insecure")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
@@ -250,6 +251,7 @@ builder.Services.AddRateLimiter(options =>
         limiter.QueueLimit = 0;
     });
     options.AddPolicy("auth-callback", context => Partition(ClientKey(context), 30));
+    options.AddPolicy("auth-desktop-session", context => Partition(ClientKey(context), 30));
     options.AddPolicy("remote-run", context => Partition(UserKey(context), 30));
     options.AddPolicy("reachability", context => Partition(UserKey(context), 10));
     options.AddPolicy("console", context => Partition(UserKey(context), 5));
@@ -275,11 +277,15 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
         options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
 });
 
-builder.Services.AddOptions<AuthOptions>().Bind(builder.Configuration.GetSection("Auth"));
+builder.Services.AddOptions<AuthOptions>()
+    .Bind(builder.Configuration.GetSection("Auth"))
+    .Validate(o => o.DesktopSessionDays is >= 1 and <= 90, "Auth:DesktopSessionDays tra 1 e 90.")
+    .ValidateOnStart();
 builder.Services.AddOptions<OidcOptions>()
     .Bind(builder.Configuration.GetSection("Oidc"))
     .Validate(o => Uri.TryCreate(o.Issuer, UriKind.Absolute, out _), "Oidc:Issuer non è un URI assoluto.")
     .Validate(o => !string.IsNullOrWhiteSpace(o.ClientId), "Oidc:ClientId mancante.")
+    .Validate(o => !string.IsNullOrWhiteSpace(o.DesktopClientId), "Oidc:DesktopClientId mancante.")
     .Validate(o => Uri.TryCreate(o.RedirectUri, UriKind.Absolute, out _), "Oidc:RedirectUri non è un URI assoluto.")
     .Validate(o => string.IsNullOrWhiteSpace(o.InternalIssuer) ||
                    Uri.TryCreate(o.InternalIssuer, UriKind.Absolute, out _),

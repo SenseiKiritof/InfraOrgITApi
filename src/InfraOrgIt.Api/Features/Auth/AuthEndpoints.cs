@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
+using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Features.Users;
 using Microsoft.AspNetCore.RateLimiting;
@@ -14,8 +15,99 @@ public static class AuthEndpoints
     {
         app.MapGet("/auth/login", StartLogin).AllowAnonymous().RequireRateLimiting("auth-login");
         app.MapGet("/auth/callback", Callback).AllowAnonymous().RequireRateLimiting("auth-callback");
+        app.MapPost("/auth/desktop-session", DesktopSession)
+            .AllowAnonymous()
+            .RequireRateLimiting("auth-desktop-session")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status502BadGateway);
         app.MapPost("/auth/logout", Logout).AllowAnonymous();
     }
+
+    private sealed record DesktopSessionRequest(string? RefreshToken);
+
+    /// <summary>
+    /// Scambia il refresh token del device flow desktop (client pubblico) in
+    /// una sessione BFF, senza esporre token al chiamante.
+    /// </summary>
+    private static async Task<IResult> DesktopSession(
+        HttpContext http,
+        DesktopSessionRequest? request,
+        DesktopOidcClient desktopOidc,
+        IOidcIdentityValidator identityValidator,
+        UserProvisioningService users,
+        ISessionStore sessions,
+        IOptions<AuthOptions> auth,
+        IOptions<OidcOptions> oidc,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var secure = auth.Value.SecureCookies;
+        var refreshToken = request?.RefreshToken?.Trim();
+        if (string.IsNullOrEmpty(refreshToken) || refreshToken.Length > 8192)
+            return DesktopSessionInvalid();
+
+        var token = await desktopOidc.RedeemRefreshTokenAsync(refreshToken, ct);
+        if (string.IsNullOrWhiteSpace(token.IdToken))
+            return DesktopSessionInvalid();
+
+        OidcIdentity identity;
+        try
+        {
+            identity = await identityValidator.ValidateAsync(
+                token.IdToken, oidc.Value.DesktopClientId, ct);
+        }
+        catch (ApiException)
+        {
+            return DesktopSessionInvalid();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            loggerFactory.CreateLogger("AuthEndpoints")
+                .LogWarning(exception, "Validazione id_token desktop fallita");
+            return DesktopSessionUnavailable();
+        }
+
+        var roles = await users.EnsureUserAsync(identity, ct);
+        var now = DateTimeOffset.UtcNow;
+        // La sessione desktop è autorevole e vive al massimo DesktopSessionDays:
+        // non viene accorciata dalla durata del refresh token di Keycloak.
+        var sessionExpiresAt = now.AddDays(auth.Value.DesktopSessionDays);
+
+        var session = new SessionData(
+            identity.Username,
+            identity.Name,
+            identity.Surname,
+            token.RefreshToken ?? refreshToken,
+            sessionExpiresAt,
+            sessionExpiresAt,
+            CryptoRandom.Token(),
+            roles,
+            Desktop: true);
+
+        var sessionId = sessions.Create(session);
+        http.Response.Cookies.Append(
+            SessionCookie.Session(secure),
+            sessionId,
+            SessionCookie.Options(secure, sessionExpiresAt));
+
+        return Results.NoContent();
+    }
+
+    private static IResult DesktopSessionInvalid() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status401Unauthorized,
+            title: "Sessione desktop non valida",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = "desktop_session_invalid"
+            });
+
+    private static IResult DesktopSessionUnavailable() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Keycloak non raggiungibile",
+            extensions: new Dictionary<string, object?> { ["code"] = "oidc_error" });
 
     private static IResult StartLogin(
         HttpContext http,
@@ -117,6 +209,7 @@ public static class AuthEndpoints
         HttpContext http,
         ISessionStore sessions,
         OidcClient oidc,
+        DesktopOidcClient desktopOidc,
         IOptions<AuthOptions> auth,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
@@ -130,7 +223,10 @@ public static class AuthEndpoints
             {
                 try
                 {
-                    await oidc.LogoutAsync(session.RefreshToken, ct);
+                    if (session.Desktop)
+                        await desktopOidc.LogoutAsync(session.RefreshToken, ct);
+                    else
+                        await oidc.LogoutAsync(session.RefreshToken, ct);
                 }
                 catch (Exception exception)
                 {

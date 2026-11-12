@@ -64,6 +64,7 @@ make legacy-dry-run  # dry-run importer on the JSON fixtures
 - Encrypted configuration: `appsettings.<Environment>.Secure.json` is loaded when the file exists and every value is decrypted with `ENC_KEY` (SSecureUtils `AddSecureConfig`); if the file exists and `ENC_KEY` is missing the API does not start. Production mounts the file read-only, it is never baked into the image.
 - SystemAdmin bootstrap: `Auth:BootstrapAdminUsername=admin` in Development; the first login of the Keycloak user `admin` assigns the role if a SystemAdmin does not exist yet. In production the variable stays empty.
 - Sessions in MySQL (`Sessions`) with payload encrypted via DataProtection, expiry and per-user limit (`SessionStore:MaxSessionsPerUser`, default 10). DataProtection keys live in the `api-dp-keys` volume in production (`DataProtection:KeysPath`); in development the user profile is used.
+- Desktop silent session: `Oidc:DesktopClientId` (default `infraorgit-mcp-desktop`, public client, no secret) and `Auth:DesktopSessionDays` (default 30, valid 1..90) set the lifetime of the BFF session created by `POST /auth/desktop-session`.
 
 ## Credential rewrap
 
@@ -83,7 +84,15 @@ Keys for every `KeyVersion` present in the table must be provided; secrets only 
 - `GET /auth/login` → Keycloak redirect with PKCE S256.
 - `GET /auth/callback` → code exchange, user JIT provisioning, HttpOnly session cookie.
 - `POST /auth/logout` → revokes Keycloak and deletes the session; requires CSRF.
-- `GET /api/session` → user, expiry, CSRF token; renews the token server-side.
+- `POST /auth/desktop-session` → anonymous, rate-limited per IP; redeems a
+  device-flow refresh token with the public `infraorgit-mcp-desktop` client,
+  validates the `id_token`, provisions the user, sets the session cookie and
+  returns `204`. Invalid tokens return `401 desktop_session_invalid`, Keycloak
+  failures `502`. The refresh token is never logged or returned.
+- `GET /api/session` → user, theme, expiry, CSRF token; renews the token
+  server-side.
+- `PATCH /api/session/theme` → `Session` policy + CSRF/Origin, body
+  `{ "theme": "light|dark|system" }`, persists on the user, returns `204`.
 - Mutations: `X-CSRF-Token` header + allowed `Origin`; `SameSite=Lax`.
 - No token is returned to the browser or readable from JavaScript.
 

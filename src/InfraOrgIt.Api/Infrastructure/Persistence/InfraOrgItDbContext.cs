@@ -56,7 +56,10 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.Name).HasMaxLength(100);
             e.Property(x => x.Surname).HasMaxLength(100);
             e.Property(x => x.Username).HasMaxLength(100);
+            e.Property(x => x.Theme).HasMaxLength(10).HasDefaultValue("system");
             e.HasIndex(x => x.Username).IsUnique();
+            e.ToTable(t => t.HasCheckConstraint("CK_Users_Theme",
+                "`Theme` IN ('light','dark','system')"));
             e.HasMany(x => x.Groups).WithMany(x => x.Users)
                 .UsingEntity<GroupUser>(
                     j => j.HasOne(x => x.Group).WithMany().HasForeignKey(x => x.GroupsId),

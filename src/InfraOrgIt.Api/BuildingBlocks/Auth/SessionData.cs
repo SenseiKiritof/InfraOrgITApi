@@ -8,4 +8,5 @@ public sealed record SessionData(
     DateTimeOffset AccessExpiresAt,
     DateTimeOffset? RefreshExpiresAt,
     string CsrfToken,
-    IReadOnlyList<string> Roles);
+    IReadOnlyList<string> Roles,
+    bool Desktop = false);

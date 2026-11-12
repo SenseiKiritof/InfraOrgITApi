@@ -70,6 +70,9 @@ public sealed class AuthApiTests : IAsyncLifetime
                 services.RemoveAll<OidcClient>();
                 services.AddHttpClient<OidcClient>()
                     .ConfigurePrimaryHttpMessageHandler(() => _oidcHandler);
+                services.RemoveAll<DesktopOidcClient>();
+                services.AddHttpClient<DesktopOidcClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() => _oidcHandler);
             });
         });
 
@@ -95,8 +98,154 @@ public sealed class AuthApiTests : IAsyncLifetime
 
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
         Assert.Equal("session.user", json.RootElement.GetProperty("user").GetProperty("username").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(json.RootElement.GetProperty("csrfToken").GetString()));
+        Assert.Equal("system", json.RootElement.GetProperty("theme").GetString());
+        Assert.Equal("csrf", json.RootElement.GetProperty("csrfToken").GetString());
         Assert.Contains("no-store", response.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
+    public async Task Desktop_session_redeems_the_public_client_refresh_token()
+    {
+        _oidcHandler.Forms.Clear();
+        using var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/auth/desktop-session", new { refreshToken = "device-refresh-token" });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        var form = Assert.Single(_oidcHandler.Forms);
+        Assert.Equal("refresh_token", form["grant_type"]);
+        Assert.Equal("device-refresh-token", form["refresh_token"]);
+        Assert.Equal("infraorgit-mcp-desktop", form["client_id"]);
+        Assert.False(form.ContainsKey("client_secret"));
+
+        var sessionId = SessionIdFrom(response);
+        using var scope = _factory.Services.CreateScope();
+        var session = scope.ServiceProvider.GetRequiredService<ISessionStore>().Get(sessionId);
+        Assert.NotNull(session);
+        Assert.Equal("refresh.user", session!.Username);
+        Assert.True(session.Desktop);
+        Assert.Equal("new-refresh-token", session.RefreshToken);
+        Assert.InRange(
+            session.RefreshExpiresAt!.Value,
+            DateTimeOffset.UtcNow.AddDays(29),
+            DateTimeOffset.UtcNow.AddDays(31));
+
+        using var authenticated = ClientWithSession(sessionId);
+        var me = await authenticated.GetAsync("/api/session");
+        Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+        using var json = await JsonDocument.ParseAsync(await me.Content.ReadAsStreamAsync());
+        Assert.Equal("refresh.user", json.RootElement.GetProperty("user").GetProperty("username").GetString());
+        Assert.Equal("system", json.RootElement.GetProperty("theme").GetString());
+    }
+
+    [Fact]
+    public async Task Desktop_session_rejects_invalid_refresh_token()
+    {
+        _oidcHandler.Responder = _ => new HttpResponseMessage(HttpStatusCode.BadRequest);
+        try
+        {
+            using var client = _factory.CreateClient();
+            var response = await client.PostAsJsonAsync(
+                "/auth/desktop-session", new { refreshToken = "revoked-token" });
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+            using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+            Assert.Equal("desktop_session_invalid", json.RootElement.GetProperty("code").GetString());
+        }
+        finally
+        {
+            _oidcHandler.Responder = null;
+        }
+    }
+
+    [Fact]
+    public async Task Desktop_session_returns_bad_gateway_when_keycloak_is_unreachable()
+    {
+        _oidcHandler.Responder = _ => throw new HttpRequestException("offline");
+        try
+        {
+            using var client = _factory.CreateClient();
+            var response = await client.PostAsJsonAsync(
+                "/auth/desktop-session", new { refreshToken = "device-refresh-token" });
+
+            Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        }
+        finally
+        {
+            _oidcHandler.Responder = null;
+        }
+    }
+
+    [Fact]
+    public async Task Desktop_session_is_rate_limited_per_ip()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        HttpResponseMessage response = null!;
+        for (var i = 0; i < 31; i++)
+            response = await client.PostAsJsonAsync(
+                "/auth/desktop-session", new { refreshToken = "" });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Theme_update_requires_session_and_csrf_and_persists()
+    {
+        var sessionId = await CreateSessionAsync("theme.user");
+        using var client = ClientWithSession(sessionId);
+
+        using var anonymous = _factory.CreateClient();
+        var noSession = await anonymous.PatchAsJsonAsync(
+            "/api/session/theme", new { theme = "dark" });
+        Assert.Equal(HttpStatusCode.Unauthorized, noSession.StatusCode);
+
+        var noCsrf = await client.PatchAsJsonAsync("/api/session/theme", new { theme = "dark" });
+        Assert.Equal(HttpStatusCode.Forbidden, noCsrf.StatusCode);
+
+        using var request = new HttpRequestMessage(HttpMethod.Patch, "/api/session/theme")
+        {
+            Content = JsonContent.Create(new { theme = "dark" })
+        };
+        request.Headers.Add("X-CSRF-Token", "csrf");
+        request.Headers.Add("Origin", "http://localhost:3000");
+        var updated = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.NoContent, updated.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        Assert.Equal("dark", await db.Users
+            .Where(x => x.Username == "theme.user")
+            .Select(x => x.Theme)
+            .SingleAsync());
+
+        var me = await client.GetAsync("/api/session");
+        using var json = await JsonDocument.ParseAsync(await me.Content.ReadAsStreamAsync());
+        Assert.Equal("dark", json.RootElement.GetProperty("theme").GetString());
+        Assert.Equal("theme.user", json.RootElement.GetProperty("user").GetProperty("username").GetString());
+        Assert.Equal("Test", json.RootElement.GetProperty("user").GetProperty("name").GetString());
+        Assert.Equal("csrf", json.RootElement.GetProperty("csrfToken").GetString());
+    }
+
+    [Fact]
+    public async Task Theme_update_rejects_unknown_value()
+    {
+        var sessionId = await CreateSessionAsync("theme.invalid");
+        using var client = ClientWithSession(sessionId);
+
+        using var request = new HttpRequestMessage(HttpMethod.Patch, "/api/session/theme")
+        {
+            Content = JsonContent.Create(new { theme = "blue" })
+        };
+        request.Headers.Add("X-CSRF-Token", "csrf");
+        request.Headers.Add("Origin", "http://localhost:3000");
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.Equal("validation_failed", json.RootElement.GetProperty("code").GetString());
     }
 
     [Fact]
@@ -116,6 +265,34 @@ public sealed class AuthApiTests : IAsyncLifetime
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
         Assert.True(json.RootElement.GetProperty("expiresIn").GetInt32() > 0);
         Assert.Equal("refresh.user", json.RootElement.GetProperty("user").GetProperty("username").GetString());
+    }
+
+    [Fact]
+    public async Task Expired_desktop_session_refreshes_with_the_public_client()
+    {
+        _oidcHandler.Forms.Clear();
+        var refreshExpiry = DateTimeOffset.UtcNow.AddDays(10);
+        var sessionId = await CreateSessionAsync(
+            "desktop.refresh",
+            accessExpiresAt: DateTimeOffset.UtcNow.AddSeconds(-1),
+            refreshToken: "desktop-refresh-token",
+            refreshExpiresAt: refreshExpiry,
+            desktop: true);
+
+        using var client = ClientWithSession(sessionId);
+        var response = await client.GetAsync("/api/session");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var form = Assert.Single(_oidcHandler.Forms);
+        Assert.Equal("infraorgit-mcp-desktop", form["client_id"]);
+        Assert.False(form.ContainsKey("client_secret"));
+
+        using var scope = _factory.Services.CreateScope();
+        var session = scope.ServiceProvider.GetRequiredService<ISessionStore>().Get(sessionId);
+        Assert.NotNull(session);
+        Assert.Equal("new-refresh-token", session!.RefreshToken);
+        Assert.True(session.Desktop);
+        Assert.InRange(session.RefreshExpiresAt!.Value, refreshExpiry.AddMinutes(-1), refreshExpiry);
     }
 
     [Fact]
@@ -300,7 +477,8 @@ public sealed class AuthApiTests : IAsyncLifetime
         string? role = null,
         DateTimeOffset? accessExpiresAt = null,
         string? refreshToken = null,
-        DateTimeOffset? refreshExpiresAt = null)
+        DateTimeOffset? refreshExpiresAt = null,
+        bool desktop = false)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
@@ -330,7 +508,16 @@ public sealed class AuthApiTests : IAsyncLifetime
             accessExpiresAt ?? DateTimeOffset.UtcNow.AddHours(1),
             refreshExpiresAt,
             "csrf",
-            role is null ? [] : [role]));
+            role is null ? [] : [role],
+            desktop));
+    }
+
+    private static string SessionIdFrom(HttpResponseMessage response)
+    {
+        var name = SessionCookie.Session(false);
+        var header = response.Headers.GetValues("Set-Cookie")
+            .Single(value => value.StartsWith(name + "=", StringComparison.Ordinal));
+        return header.Split(';')[0][(name.Length + 1)..];
     }
 
     private HttpClient ClientWithSession(string sessionId)
@@ -359,10 +546,26 @@ public sealed class AuthApiTests : IAsyncLifetime
 
     private sealed class FakeOidcHandler : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(
+        public Func<HttpRequestMessage, HttpResponseMessage>? Responder { get; set; }
+        public List<Dictionary<string, string>> Forms { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            if (request.Content is not null)
+            {
+                var raw = await request.Content.ReadAsStringAsync(cancellationToken);
+                Forms.Add(raw.Split('&', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(pair => pair.Split('=', 2))
+                    .ToDictionary(
+                        parts => Uri.UnescapeDataString(parts[0]),
+                        parts => parts.Length > 1 ? Uri.UnescapeDataString(parts[1]) : ""));
+            }
+
+            if (Responder is not null)
+                return Responder(request);
+
             var body = JsonSerializer.Serialize(new
             {
                 access_token = "unused-access-token",
@@ -372,10 +575,10 @@ public sealed class AuthApiTests : IAsyncLifetime
                 refresh_expires_in = 1800
             });
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json")
-            });
+            };
         }
     }
 }

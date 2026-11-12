@@ -70,6 +70,36 @@ sequenceDiagram
 `get_mcp_approval` returns the status and expiry of a request without executing
 it, so a client can poll instead of retrying the action.
 
+## Desktop sign-in
+
+InfraOrgIT Desktop signs in with the Keycloak device flow on the public client
+`infraorgit-mcp-desktop` (no client secret), then exchanges the refresh token
+for a BFF cookie:
+
+- `POST /auth/desktop-session` is anonymous and rate-limited per client IP.
+  The body is `{ "refreshToken": "..." }`; the API redeems it at Keycloak with
+  the public desktop client, validates the returned `id_token`, provisions the
+  user and sets the usual HttpOnly session cookie. It returns `204`.
+- An invalid, expired or revoked refresh token returns `401`
+  `desktop_session_invalid`; an unreachable or failing Keycloak returns `502`
+  `oidc_error`. Arbitrary access tokens are never accepted and `id_token`
+  signature, issuer, audience and lifetime are always validated.
+- The rotated refresh token stays server-side in the encrypted session; it is
+  never returned to the caller or written to logs. The BFF session lives for
+  `Auth:DesktopSessionDays` (default 30, valid 1..90), independently of the
+  shorter Keycloak refresh-token lifetime.
+- `Oidc:DesktopClientId` defaults to `infraorgit-mcp-desktop` and must match the
+  public Keycloak client; the confidential BFF client is not used for this
+  exchange.
+
+## Session theme
+
+- `GET /api/session` returns `theme` (`light`, `dark` or `system`).
+- `PATCH /api/session/theme` requires the `Session` policy plus CSRF and Origin,
+  accepts `{ "theme": "light|dark|system" }` and returns `204`.
+- The preference is stored per user in `Users.Theme`; existing users default to
+  `system`.
+
 ## Desktop downloads
 
 The web UI can hand a server file to InfraOrgIT Desktop through a one-time
