@@ -70,6 +70,34 @@ sequenceDiagram
 `get_mcp_approval` returns the status and expiry of a request without executing
 it, so a client can poll instead of retrying the action.
 
+## Desktop downloads
+
+The web UI can hand a server file to InfraOrgIT Desktop through a one-time
+signed URL instead of relying on the embedded webview:
+
+- `GET /api/desktop/downloads/capabilities` reports whether signed URLs are
+  enabled.
+- `POST /api/desktop/downloads/tickets` creates a short-lived ticket bound to
+  the current user, server and path. It accepts only a cookie session with
+  CSRF; an API token cannot create tickets.
+- `GET /api/desktop/downloads/{token}` is anonymous by design because the
+  ticket is the credential. It is one-time, expires, streams the file without
+  holding a lock, and is audited.
+
+Set `DesktopDownloads:Enabled=false` to disable new tickets and invalidate
+already-issued ones; `TicketLifetimeSeconds` defaults to 120 and
+`PublicBaseUrl` is needed only behind a proxy with a different origin. The
+desktop can instead use its native webview download when the server disables
+the bridge.
+
+Tickets are metadata only: user, server, normalized path and timestamps; the
+raw token and file content are never stored. For GDPR storage limitation,
+`DesktopDownloads:RetentionDays` defaults to 30 and a background job deletes
+expired ticket rows past that window (consumed or not).
+`DesktopDownloads:CleanupIntervalMinutes` defaults to 1440 and the first pass
+runs shortly after startup. Audit rows keep their separate 180-day retention
+policy.
+
 ![MCP approvals page with a pending action, Approve and Deny buttons, and the human-approval warning](docs/screenshots/approvals.png)
 
 ## Run the API

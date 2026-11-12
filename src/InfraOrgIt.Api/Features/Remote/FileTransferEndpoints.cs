@@ -339,7 +339,7 @@ public static class FileTransferEndpoints
             Detail: detail);
     }
 
-    private static async Task<Server> LoadAuthorizedServerAsync(
+    internal static async Task<Server> LoadAuthorizedServerAsync(
         int id,
         ClaimsPrincipal user,
         InfraOrgItDbContext db,
@@ -370,7 +370,7 @@ public static class FileTransferEndpoints
         }
     }
 
-    private static ApiException Failure(Exception exception) =>
+    internal static ApiException Failure(Exception exception) =>
         exception as ApiException
         ?? new ApiException(
             StatusCodes.Status502BadGateway,
