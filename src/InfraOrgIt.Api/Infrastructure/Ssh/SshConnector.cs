@@ -306,6 +306,9 @@ public sealed class SshConnector(
         ForwardedPortLocal? forwarded = null,
         ISshSession? jumpSession = null) : IFileTransferSession
     {
+        // WorkingDirectory è la home restituita dal server dopo il login.
+        public string HomePath => RemotePath.Normalize(client.WorkingDirectory);
+
         public async Task<IReadOnlyList<RemoteFileEntry>> ListAsync(
             string path,
             CancellationToken ct)

@@ -112,6 +112,10 @@ public sealed class FileTransferConnector(
 
     private sealed class FtpFileSession(AsyncFtpClient client) : IFileTransferSession
     {
+        // FTP/FTPS non espongono una home affidabile dopo il login: si parte
+        // dalla radice del server come prima.
+        public string HomePath => "/";
+
         public async Task<IReadOnlyList<RemoteFileEntry>> ListAsync(
             string path,
             CancellationToken ct)
