@@ -4252,6 +4252,76 @@
         ]
       }
     },
+    "/api/desktop/downloads/capabilities": {
+      "get": {
+        "tags": [
+          "DesktopDownloadEndpoints"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          },
+          {
+            "bearer": [ ]
+          }
+        ]
+      }
+    },
+    "/api/desktop/downloads/tickets": {
+      "post": {
+        "tags": [
+          "DesktopDownloadEndpoints"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadTicketInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/desktop/downloads/{token}": {
+      "get": {
+        "tags": [
+          "DesktopDownloadEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/users": {
       "get": {
         "tags": [
@@ -6265,6 +6335,29 @@
           }
         }
       },
+      "DownloadTicketInput": {
+        "required": [
+          "serverId",
+          "path"
+        ],
+        "type": "object",
+        "properties": {
+          "serverId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "path": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "EnvironmentInput": {
         "required": [
           "name",
@@ -7922,6 +8015,12 @@
         "description": "Token CSRF richiesto dalle mutazioni autenticate.",
         "name": "X-CSRF-Token",
         "in": "header"
+      },
+      "bearer": {
+        "type": "http",
+        "description": "Token personale InfraOrgIT (itk_) o access token OIDC.",
+        "scheme": "bearer",
+        "bearerFormat": "API token or OIDC access token"
       }
     }
   },
@@ -8003,6 +8102,9 @@
     },
     {
       "name": "FileTransferEndpoints"
+    },
+    {
+      "name": "DesktopDownloadEndpoints"
     },
     {
       "name": "UsersEndpoints"

@@ -92,15 +92,24 @@ builder.Services.AddOpenApi(options =>
             Name = "X-CSRF-Token",
             Description = "Token CSRF richiesto dalle mutazioni autenticate."
         };
+        components.SecuritySchemes["bearer"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "API token or OIDC access token",
+            Description = "Token personale InfraOrgIT (itk_) o access token OIDC."
+        };
 
         var session = new OpenApiSecuritySchemeReference("session", document);
         var csrfScheme = new OpenApiSecuritySchemeReference("csrf", document);
+        var bearer = new OpenApiSecuritySchemeReference("bearer", document);
 
         foreach (var path in document.Paths)
         {
             if (path.Key == "/" ||
                 path.Key.StartsWith("/auth/", StringComparison.Ordinal) ||
-                path.Key.StartsWith("/health/", StringComparison.Ordinal))
+                path.Key.StartsWith("/health/", StringComparison.Ordinal) ||
+                path.Key == "/api/desktop/downloads/{token}")
                 continue;
 
             if (path.Value is null)
@@ -109,6 +118,20 @@ builder.Services.AddOpenApi(options =>
             var operations = path.Value.Operations;
             if (operations is null)
                 continue;
+
+            if (path.Key == "/api/desktop/downloads/capabilities")
+            {
+                foreach (var operation in operations)
+                {
+                    operation.Value.Security ??= [];
+                    operation.Value.Security.Add(
+                        new OpenApiSecurityRequirement { [session] = [] });
+                    operation.Value.Security.Add(
+                        new OpenApiSecurityRequirement { [bearer] = [] });
+                }
+
+                continue;
+            }
 
             foreach (var operation in operations)
             {
@@ -231,6 +254,7 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("reachability", context => Partition(UserKey(context), 10));
     options.AddPolicy("console", context => Partition(UserKey(context), 5));
     options.AddPolicy("files", context => Partition(UserKey(context), 60));
+    options.AddPolicy("desktop-download", context => Partition(ClientKey(context), 120));
     options.AddPolicy("mcp", context => Partition(ActorKey(context), 120));
     options.AddPolicy("tunnels", context => Partition(ActorKey(context), 120));
 });
@@ -278,6 +302,16 @@ builder.Services.AddScoped<ISshConnector, SshConnector>();
 builder.Services.AddOptions<FileTransferOptions>()
     .Bind(builder.Configuration.GetSection(FileTransferOptions.SectionName));
 builder.Services.AddScoped<IFileTransferConnector, FileTransferConnector>();
+builder.Services.AddOptions<DesktopDownloadsOptions>()
+    .Bind(builder.Configuration.GetSection(DesktopDownloadsOptions.SectionName))
+    .Validate(o => o.TicketLifetimeSeconds is >= 1 and <= 3600,
+        "DesktopDownloads:TicketLifetimeSeconds tra 1 e 3600.")
+    .Validate(o => string.IsNullOrWhiteSpace(o.PublicBaseUrl) ||
+                   (Uri.TryCreate(o.PublicBaseUrl, UriKind.Absolute, out var publicBase) &&
+                    (publicBase.Scheme == Uri.UriSchemeHttp ||
+                     publicBase.Scheme == Uri.UriSchemeHttps)),
+        "DesktopDownloads:PublicBaseUrl deve essere un URI HTTP(S) assoluto.")
+    .ValidateOnStart();
 builder.Services.AddOptions<FrontendOptions>()
     .Bind(builder.Configuration.GetSection("Frontend"))
     .Validate(o => Uri.TryCreate(o.BaseUrl, UriKind.Absolute, out _), "Frontend:BaseUrl non è un URI assoluto.")
@@ -345,6 +379,22 @@ builder.Services.AddAuthorization(options =>
             .RequireAuthenticatedUser()
             .RequireAssertion(context =>
                 HasScope(context.User, "tunnels:operate"));
+    });
+
+    options.AddPolicy("Desktop", policy =>
+    {
+        // Scheme order matters for the anonymous challenge: the API token and
+        // OIDC handlers only set 401, while the session handler writes a
+        // problem body that starts the response. The body writer must run last.
+        var schemes = new List<string>
+        {
+            ApiTokenAuthenticationHandler.SchemeName
+        };
+        if (mcpOidcConfigured)
+            schemes.Add(JwtBearerDefaults.AuthenticationScheme);
+        schemes.Add(SessionAuthenticationHandler.SchemeName);
+        policy.AddAuthenticationSchemes([.. schemes])
+            .RequireAuthenticatedUser();
     });
 });
 builder.Services.AddProblemDetails();
@@ -508,6 +558,7 @@ CommandExecutionEndpoints.Map(app);
 AuditEventsEndpoints.Map(app);
 ConsoleEndpoints.Map(app);
 FileTransferEndpoints.Map(app);
+DesktopDownloadEndpoints.Map(app);
 UsersEndpoints.Map(app);
 GroupsEndpoints.Map(app);
 RolesEndpoints.Map(app);

@@ -40,6 +40,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<ReachabilityTest> ReachabilityTests => Set<ReachabilityTest>();
     public DbSet<CommandExecution> CommandExecutions => Set<CommandExecution>();
     public DbSet<SessionRecord> Sessions => Set<SessionRecord>();
+    public DbSet<DownloadTicket> DownloadTickets => Set<DownloadTicket>();
     public DbSet<Translation> Translations => Set<Translation>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
@@ -553,6 +554,22 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.CreatedAt).HasColumnType("datetime(6)");
             e.HasIndex(x => x.Username);
             e.HasIndex(x => x.ExpiresAt);
+        });
+
+        modelBuilder.Entity<DownloadTicket>(e =>
+        {
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.Property(x => x.Path).HasMaxLength(1024);
+            e.Property(x => x.ExpiresAt).HasColumnType("datetime(6)");
+            e.Property(x => x.ConsumedAt).HasColumnType("datetime(6)");
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.HasIndex(x => x.ServerId);
+            e.HasIndex(x => new { x.ExpiresAt, x.ConsumedAt });
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Server).WithMany()
+                .HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<DiagramEdge>(e =>
