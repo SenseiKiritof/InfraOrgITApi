@@ -24,6 +24,10 @@ use fictitious demo data.
 - **Desktop tunnels**: the tunnel API accepts the authenticated BFF session as
   well as a personal token with `tunnels:operate`, so the desktop reuses the
   Web login.
+- **Connection policy**: a per-installation `Server`/`Client`/`Auto` row in
+  MySQL; `Server` relays allowlisted Local tunnels and deployments through the
+  API node, while `Auto` uses the client when the first SSH hop is reachable.
+  The row is shared by every API node in a cluster.
 - **Human approval**: an MCP action requested by an AI client needs a human
   decision before it runs.
 - **Audit**: MCP calls, console sessions, actions, tests and tunnel events,

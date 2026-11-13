@@ -48,6 +48,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<McpApproval> McpApprovals => Set<McpApproval>();
     public DbSet<TunnelSession> TunnelSessions => Set<TunnelSession>();
     public DbSet<TunnelService> TunnelServices => Set<TunnelService>();
+    public DbSet<ConnectionPolicy> ConnectionPolicies => Set<ConnectionPolicy>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -505,6 +506,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.ActorUsername).HasMaxLength(100);
             e.Property(x => x.ClientId).HasMaxLength(100);
             e.Property(x => x.Mode).HasMaxLength(10).HasDefaultValue("Local");
+            e.Property(x => x.Transport).HasMaxLength(10).HasDefaultValue("Client");
             e.Property(x => x.TargetHost).HasMaxLength(255);
             e.Property(x => x.Outcome).HasMaxLength(20);
             e.Property(x => x.ErrorCode).HasMaxLength(100);
@@ -525,7 +527,17 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
                     "`Outcome` IN ('Active','Stopped','Error','Stale')");
                 t.HasCheckConstraint("CK_TunnelSessions_Mode",
                     "`Mode` IN ('Local','Dynamic','Remote')");
+                t.HasCheckConstraint("CK_TunnelSessions_Transport",
+                    "`Transport` IN ('Client','Server')");
             });
+        });
+
+        modelBuilder.Entity<ConnectionPolicy>(e =>
+        {
+            e.Property(x => x.Mode).HasMaxLength(20).HasDefaultValue("Auto");
+            e.Property(x => x.UpdatedBy).HasMaxLength(100);
+            e.ToTable(t => t.HasCheckConstraint("CK_ConnectionPolicies_Mode",
+                "`Mode` IN ('Server','Client','Auto')"));
         });
 
         modelBuilder.Entity<TunnelService>(e =>
@@ -626,11 +638,21 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             Menu(19, "Credenziali", "/credentials", true, true, true, 80, null),
             Menu(20, "Comandi", "/commands", true, true, true, 81, null),
             Menu(21, "Test di rete", "/reachability", true, true, true, 82, null),
-            Menu(22, "Registro esecuzioni", "/executions", true, true, true, 83, null));
+            Menu(22, "Registro esecuzioni", "/executions", true, true, true, 83, null),
+            Menu(26, "Impostazioni", "/settings", true, true, true, 90, null));
 
-        var systemAdminMenus = new[] { 13, 14, 15, 16, 19, 20, 21, 22 };
+        var systemAdminMenus = new[] { 13, 14, 15, 16, 19, 20, 21, 22, 26 };
         modelBuilder.Entity<MenuRole>().HasData(
             systemAdminMenus.Select(menuId => new MenuRole { MenuId = menuId, RolesId = 3 }).ToArray());
+
+        modelBuilder.Entity<ConnectionPolicy>().HasData(new ConnectionPolicy
+        {
+            Id = 1,
+            Mode = "Auto",
+            UpdatedBy = "",
+            CreatedAt = SeedDate,
+            UpdatedAt = SeedDate
+        });
     }
 
     private static Menu Menu(int id, string name, string path, bool isActive, bool hideBackButton, bool isVisible,

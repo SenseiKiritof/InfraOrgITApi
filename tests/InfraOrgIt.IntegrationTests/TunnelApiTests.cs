@@ -154,6 +154,28 @@ public sealed class TunnelApiTests : IAsyncLifetime
         var invalid = await tunnelClient.PostAsJsonAsync("/api/tunnels/events",
             new { kind = "maybe", serverId = seeded.ServerId });
         Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
+
+        // The relay validates the allowlist and RBAC before the upgrade. A
+        // plain GET reaches the WebSocket check only for an operator.
+        var relayUrl =
+            $"/api/tunnels/relay?serverId={seeded.ServerId}" +
+            $"&serviceId={seeded.ServiceId}";
+        var relayWithoutSocket =
+            await SendAsync(userSession, HttpMethod.Get, relayUrl);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, relayWithoutSocket.StatusCode);
+        var outsiderRelay =
+            await SendAsync(outsiderSession, HttpMethod.Get, relayUrl);
+        Assert.Equal(HttpStatusCode.Forbidden, outsiderRelay.StatusCode);
+
+        var deploymentRelay = await SendAsync(userSession, HttpMethod.Get,
+            $"/api/tunnels/relay?serverId={seeded.ServerId}" +
+            $"&serverApplicationId={seeded.DeploymentId}");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, deploymentRelay.StatusCode);
+        var ambiguousRelay = await SendAsync(userSession, HttpMethod.Get,
+            $"/api/tunnels/relay?serverId={seeded.ServerId}" +
+            $"&serviceId={seeded.ServiceId}" +
+            $"&serverApplicationId={seeded.DeploymentId}");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, ambiguousRelay.StatusCode);
     }
 
     private async Task<SeededTunnel> SeedAsync()
@@ -233,8 +255,21 @@ public sealed class TunnelApiTests : IAsyncLifetime
         db.ServerApplications.Add(deploy);
         await db.SaveChangesAsync();
 
+        var service = new TunnelService
+        {
+            ServerId = server.Id,
+            Name = "web",
+            Mode = "Local",
+            TargetHost = "127.0.0.1",
+            TargetPort = 8081,
+            Kind = "Http",
+            Enabled = true
+        };
+        db.TunnelServices.Add(service);
+        await db.SaveChangesAsync();
+
         return new SeededTunnel(
-            server.Id, providerEnvironment.Id, deploy.Id);
+            server.Id, providerEnvironment.Id, deploy.Id, service.Id);
     }
 
     private static ServerCredential Credential(string name, string username) =>
@@ -317,5 +352,5 @@ public sealed class TunnelApiTests : IAsyncLifetime
     }
 
     private sealed record SeededTunnel(
-        int ServerId, int ProviderEnvironmentId, int DeploymentId);
+        int ServerId, int ProviderEnvironmentId, int DeploymentId, int ServiceId);
 }

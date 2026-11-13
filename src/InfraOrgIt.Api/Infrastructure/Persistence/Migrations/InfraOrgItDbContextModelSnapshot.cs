@@ -670,6 +670,53 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("CommandTemplates");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ConnectionPolicy", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasDefaultValue("Auto");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ConnectionPolicies", t =>
+                        {
+                            t.HasCheckConstraint("CK_ConnectionPolicies_Mode", "`Mode` IN ('Server','Client','Auto')");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Mode = "Auto",
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            UpdatedBy = "",
+                            Version = 0
+                        });
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", b =>
                 {
                     b.Property<int>("Id")
@@ -1400,6 +1447,19 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                             Path = "/executions",
                             UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
                             Version = 0
+                        },
+                        new
+                        {
+                            Id = 26,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            HideBackButton = true,
+                            IsActive = true,
+                            IsVisible = true,
+                            Name = "Impostazioni",
+                            Order = 90,
+                            Path = "/settings",
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Version = 0
                         });
                 });
 
@@ -1456,6 +1516,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         new
                         {
                             MenuId = 22,
+                            RolesId = 3
+                        },
+                        new
+                        {
+                            MenuId = 26,
                             RolesId = 3
                         });
                 });
@@ -2253,6 +2318,13 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<int?>("TargetPort")
                         .HasColumnType("int");
 
+                    b.Property<string>("Transport")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)")
+                        .HasDefaultValue("Client");
+
                     b.Property<int?>("TunnelServiceId")
                         .HasColumnType("int");
 
@@ -2279,6 +2351,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_TunnelSessions_Mode", "`Mode` IN ('Local','Dynamic','Remote')");
 
                             t.HasCheckConstraint("CK_TunnelSessions_Outcome", "`Outcome` IN ('Active','Stopped','Error','Stale')");
+
+                            t.HasCheckConstraint("CK_TunnelSessions_Transport", "`Transport` IN ('Client','Server')");
                         });
                 });
 

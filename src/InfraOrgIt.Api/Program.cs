@@ -4,6 +4,7 @@ using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Features.Admin;
+using InfraOrgIt.Api.Features.Settings;
 using InfraOrgIt.Api.Features.Audit;
 using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Features.Catalog;
@@ -259,6 +260,7 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("desktop-download", context => Partition(ClientKey(context), 120));
     options.AddPolicy("mcp", context => Partition(ActorKey(context), 120));
     options.AddPolicy("tunnels", context => Partition(ActorKey(context), 120));
+    options.AddPolicy("tunnel-relay", context => Partition(ActorKey(context), 600));
 });
 
 var forwardedNetworks = builder.Configuration["ForwardedHeaders:KnownNetworks"];
@@ -580,6 +582,7 @@ UsersEndpoints.Map(app);
 GroupsEndpoints.Map(app);
 RolesEndpoints.Map(app);
 MenusAdminEndpoints.Map(app);
+ConnectionPolicyEndpoints.Map(app);
 ProviderEnvironmentGroupRolesEndpoints.Map(app);
 ProxyEndpoints.Map(app);
 ApiTokensEndpoints.Map(app);

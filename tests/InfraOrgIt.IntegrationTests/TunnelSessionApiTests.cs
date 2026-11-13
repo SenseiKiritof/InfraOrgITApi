@@ -76,6 +76,7 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         Assert.Equal(created.Id.ToString(), first.ClientId);
         Assert.Equal(8081, first.TargetPort);
         Assert.Equal(18081, first.LocalPort);
+        Assert.Equal("Server", first.Transport);
         Assert.Null(first.EndedAt);
         Assert.Null(first.ErrorCode);
 
@@ -613,7 +614,8 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         string status,
         int targetPort = 8081,
         int localPort = 18081,
-        string? errorCode = null) => new
+        string? errorCode = null,
+        string transport = "Server") => new
     {
         sessionKey,
         status,
@@ -622,7 +624,8 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         targetHost = "127.0.0.1",
         targetPort,
         localPort,
-        errorCode
+        errorCode,
+        transport
     };
 
     private static ServerCredential Credential(string name, string username) =>
