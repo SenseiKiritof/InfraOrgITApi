@@ -83,10 +83,15 @@ public static class FileTransferEndpoints
     {
         var server = await LoadAuthorizedServerAsync(id, user, db, access, ct);
         var started = Stopwatch.GetTimestamp();
+        var normalized = RemotePath.Normalize(path);
         try
         {
             await using var session = await ConnectAsync(connector, server, ct);
-            var normalized = RemotePath.Normalize(path);
+            // Senza path si parte dalla home della sessione (per SFTP quella
+            // dell'utente collegato); i path espliciti restano invariati.
+            normalized = string.IsNullOrWhiteSpace(path)
+                ? RemotePath.Normalize(session.HomePath)
+                : RemotePath.Normalize(path);
             var items = await session.ListAsync(normalized, ct);
             await RecordAsync(audit, user, "file.list", server, started,
                 new { path = normalized }, ct);
@@ -95,7 +100,7 @@ public static class FileTransferEndpoints
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             await RecordFailureAsync(audit, user, "file.list", server, started,
-                new { path = RemotePath.Normalize(path) }, exception);
+                new { path = normalized }, exception);
             throw Failure(exception);
         }
     }
@@ -334,7 +339,7 @@ public static class FileTransferEndpoints
             Detail: detail);
     }
 
-    private static async Task<Server> LoadAuthorizedServerAsync(
+    internal static async Task<Server> LoadAuthorizedServerAsync(
         int id,
         ClaimsPrincipal user,
         InfraOrgItDbContext db,
@@ -365,7 +370,7 @@ public static class FileTransferEndpoints
         }
     }
 
-    private static ApiException Failure(Exception exception) =>
+    internal static ApiException Failure(Exception exception) =>
         exception as ApiException
         ?? new ApiException(
             StatusCodes.Status502BadGateway,

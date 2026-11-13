@@ -1005,6 +1005,15 @@ public sealed class InventoryApiTests : IAsyncLifetime
         Assert.Equal(
             "readme.txt",
             listing.GetProperty("items")[0].GetProperty("name").GetString());
+
+        // Senza path la sessione parte dalla home (per SFTP quella dell'utente
+        // collegato); un path esplicito resta invariato.
+        var home = await ReadAsync(await admin.GetAsync(
+            $"/api/servers/{seeded.ServerId}/files"));
+        Assert.Equal("/home/tester", home.GetProperty("path").GetString());
+        Assert.Equal(
+            "readme.txt",
+            home.GetProperty("items")[0].GetProperty("name").GetString());
     }
 
     [Fact]
@@ -2064,6 +2073,9 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         private sealed class Session : IFileTransferSession
         {
+            // Home fittizia diversa da "/" per verificare il default.
+            public string HomePath => "/home/tester";
+
             public Task<IReadOnlyList<RemoteFileEntry>> ListAsync(
                 string path, CancellationToken ct) =>
                 Task.FromResult<IReadOnlyList<RemoteFileEntry>>(

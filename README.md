@@ -21,6 +21,9 @@ use fictitious demo data.
   the server.
 - **MCP**: inventory tools, resources and prompts over `/mcp` (Streamable
   HTTP), for IDE assistants and agents.
+- **Desktop tunnels**: the tunnel API accepts the authenticated BFF session as
+  well as a personal token with `tunnels:operate`, so the desktop reuses the
+  Web login.
 - **Human approval**: an MCP action requested by an AI client needs a human
   decision before it runs.
 - **Audit**: MCP calls, console sessions, actions, tests and tunnel events,
@@ -69,6 +72,67 @@ sequenceDiagram
 
 `get_mcp_approval` returns the status and expiry of a request without executing
 it, so a client can poll instead of retrying the action.
+
+## Desktop sign-in
+
+InfraOrgIT Desktop prefers the BFF session already present in the instance tab.
+Only when no web session is available does it use the Keycloak device flow on
+the public client `infraorgit-mcp-desktop` (no client secret), then exchange the
+refresh token for a BFF cookie:
+
+- `POST /auth/desktop-session` is anonymous and rate-limited per client IP.
+  The body is `{ "refreshToken": "..." }`; the API redeems it at Keycloak with
+  the public desktop client, validates the returned `id_token`, provisions the
+  user and sets the usual HttpOnly session cookie. It returns `204`.
+- An invalid, expired or revoked refresh token returns `401`
+  `desktop_session_invalid`; an unreachable or failing Keycloak returns `502`
+  `oidc_error`. Arbitrary access tokens are never accepted and `id_token`
+  signature, issuer, audience and lifetime are always validated.
+- The rotated refresh token stays server-side in the encrypted session; it is
+  never returned to the caller or written to logs. The BFF session lives for
+  `Auth:DesktopSessionDays` (default 7, valid 1..90), independently of the
+  shorter Keycloak refresh-token lifetime. Calling the endpoint again with the
+  same desktop cookie extends that same session, so the desktop can renew it
+  periodically without creating orphan sessions.
+- `Oidc:DesktopClientId` defaults to `infraorgit-mcp-desktop` and must match the
+  public Keycloak client; the confidential BFF client is not used for this
+  exchange.
+
+## Session theme
+
+- `GET /api/session` returns `theme` (`light`, `dark` or `system`).
+- `PATCH /api/session/theme` requires the `Session` policy plus CSRF and Origin,
+  accepts `{ "theme": "light|dark|system" }` and returns `204`.
+- The preference is stored per user in `Users.Theme`; existing users default to
+  `system`.
+
+## Desktop downloads
+
+The current Electron client uses Chromium's native download for server
+attachments and its blob bridge for generated API results; there is no desktop
+download-mode setting. The signed-ticket endpoints below remain for API
+compatibility, but the Electron client does not use them:
+
+- `GET /api/desktop/downloads/capabilities` reports whether signed URLs are
+  enabled.
+- `POST /api/desktop/downloads/tickets` creates a short-lived ticket bound to
+  the current user, server and path. It accepts only a cookie session with
+  CSRF; an API token cannot create tickets.
+- `GET /api/desktop/downloads/{token}` is anonymous by design because the
+  ticket is the credential. It is one-time, expires, streams the file without
+  holding a lock, and is audited.
+
+Set `DesktopDownloads:Enabled=false` to disable new tickets and invalidate
+already-issued ones; `TicketLifetimeSeconds` defaults to 120 and
+`PublicBaseUrl` is needed only behind a proxy with a different origin.
+
+Tickets are metadata only: user, server, normalized path and timestamps; the
+raw token and file content are never stored. For GDPR storage limitation,
+`DesktopDownloads:RetentionDays` defaults to 30 and a background job deletes
+expired ticket rows past that window (consumed or not).
+`DesktopDownloads:CleanupIntervalMinutes` defaults to 1440 and the first pass
+runs shortly after startup. Audit rows keep their separate 180-day retention
+policy.
 
 ![MCP approvals page with a pending action, Approve and Deny buttons, and the human-approval warning](docs/screenshots/approvals.png)
 

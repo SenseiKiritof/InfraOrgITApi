@@ -14,6 +14,9 @@ public sealed record OidcIdentity(string Username, string Name, string Surname);
 public interface IOidcIdentityValidator
 {
     Task<OidcIdentity> ValidateAsync(string idToken, CancellationToken ct);
+
+    Task<OidcIdentity> ValidateAsync(string idToken, string audience, CancellationToken ct) =>
+        ValidateAsync(idToken, ct);
 }
 
 public sealed class OidcIdentityValidator(
@@ -21,7 +24,10 @@ public sealed class OidcIdentityValidator(
     IOptions<OidcOptions> options,
     ILogger<OidcIdentityValidator> logger) : IOidcIdentityValidator
 {
-    public async Task<OidcIdentity> ValidateAsync(string idToken, CancellationToken ct)
+    public Task<OidcIdentity> ValidateAsync(string idToken, CancellationToken ct) =>
+        ValidateAsync(idToken, options.Value.ClientId, ct);
+
+    public async Task<OidcIdentity> ValidateAsync(string idToken, string audience, CancellationToken ct)
     {
         var oidc = options.Value;
         var configurationData = await configuration.GetConfigurationAsync(ct);
@@ -31,7 +37,7 @@ public sealed class OidcIdentityValidator(
             ValidateIssuer = true,
             ValidIssuer = oidc.Issuer.TrimEnd('/'),
             ValidateAudience = true,
-            ValidAudience = oidc.ClientId,
+            ValidAudience = audience,
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2),
             ValidateIssuerSigningKey = true,

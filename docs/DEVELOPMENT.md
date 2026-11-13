@@ -64,6 +64,7 @@ make legacy-dry-run  # dry-run importer on the JSON fixtures
 - Encrypted configuration: `appsettings.<Environment>.Secure.json` is loaded when the file exists and every value is decrypted with `ENC_KEY` (SSecureUtils `AddSecureConfig`); if the file exists and `ENC_KEY` is missing the API does not start. Production mounts the file read-only, it is never baked into the image.
 - SystemAdmin bootstrap: `Auth:BootstrapAdminUsername=admin` in Development; the first login of the Keycloak user `admin` assigns the role if a SystemAdmin does not exist yet. In production the variable stays empty.
 - Sessions in MySQL (`Sessions`) with payload encrypted via DataProtection, expiry and per-user limit (`SessionStore:MaxSessionsPerUser`, default 10). DataProtection keys live in the `api-dp-keys` volume in production (`DataProtection:KeysPath`); in development the user profile is used.
+- Desktop silent session: `Oidc:DesktopClientId` (default `infraorgit-mcp-desktop`, public client, no secret) and `Auth:DesktopSessionDays` (default 7, valid 1..90) set the lifetime of the BFF session created by `POST /auth/desktop-session`. The desktop renews it periodically with the same cookie; the endpoint updates the existing desktop session instead of creating a new one.
 
 ## Credential rewrap
 
@@ -83,7 +84,15 @@ Keys for every `KeyVersion` present in the table must be provided; secrets only 
 - `GET /auth/login` → Keycloak redirect with PKCE S256.
 - `GET /auth/callback` → code exchange, user JIT provisioning, HttpOnly session cookie.
 - `POST /auth/logout` → revokes Keycloak and deletes the session; requires CSRF.
-- `GET /api/session` → user, expiry, CSRF token; renews the token server-side.
+- `POST /auth/desktop-session` → anonymous, rate-limited per IP; redeems a
+  device-flow refresh token with the public `infraorgit-mcp-desktop` client,
+  validates the `id_token`, provisions the user, sets the session cookie and
+  returns `204`. Invalid tokens return `401 desktop_session_invalid`, Keycloak
+  failures `502`. The refresh token is never logged or returned.
+- `GET /api/session` → user, theme, expiry, CSRF token; renews the token
+  server-side.
+- `PATCH /api/session/theme` → `Session` policy + CSRF/Origin, body
+  `{ "theme": "light|dark|system" }`, persists on the user, returns `204`.
 - Mutations: `X-CSRF-Token` header + allowed `Origin`; `SameSite=Lax`.
 - No token is returned to the browser or readable from JavaScript.
 
@@ -117,6 +126,36 @@ approval, because a model-supplied boolean is not a human confirmation.
 - Breaking change for existing MCP clients: an action call that used to run on
   `confirm=true` now returns `approval_required` and needs the second call
   with `approvalId`.
+
+## Desktop download tickets
+
+`DesktopDownloads` (default `Enabled=true`, `TicketLifetimeSeconds=120`,
+`RetentionDays=30`, `CleanupIntervalMinutes=1440`, optional `PublicBaseUrl`)
+backs the desktop bridge:
+
+- `GET /api/desktop/downloads/capabilities` is available to a cookie session,
+  a personal API token or an OIDC bearer and returns `{ signedUrl }`.
+- `POST /api/desktop/downloads/tickets` requires the `Session` policy, CSRF and
+  the same server file-transfer authorization; it stores only a SHA-256 hash
+  of a random `dt_` token and returns an absolute one-time URL.
+- `GET /api/desktop/downloads/{token}` is anonymous: the ticket is the
+  credential. It re-checks the stored user's RBAC, atomically consumes the
+  ticket, streams with the existing connector and audits the download. A
+  consumed, expired or disabled ticket is rejected; `Enabled=false` also
+  invalidates already-issued tickets.
+- The anonymous route is rate-limited per client IP and deliberately has no
+  authentication requirement in OpenAPI. The raw token is visible in the URL
+  path, so keep the lifetime short and avoid proxy access-log retention.
+- A failed connector after consuming the ticket requires a new ticket; this is
+  intentional anti-replay behavior.
+- Ticket rows are metadata only: user, server, normalized path, created,
+  expiry and consumption timestamps. They never contain the raw token or file
+  content. `RetentionDays` (default 30, valid 1..365) deletes expired rows,
+  consumed or not, once `ExpiresAt` is older than `now - RetentionDays`;
+  `CleanupIntervalMinutes` (default 1440, valid 15..10080) controls the
+  background pass. The first pass runs shortly after startup, in batches, so
+  it does not block startup or requests. Audit rows keep their independent
+  180-day retention.
 
 ## Audit anchoring (PT-10)
 

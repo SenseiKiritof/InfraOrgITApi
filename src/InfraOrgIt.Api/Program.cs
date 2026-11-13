@@ -92,15 +92,24 @@ builder.Services.AddOpenApi(options =>
             Name = "X-CSRF-Token",
             Description = "Token CSRF richiesto dalle mutazioni autenticate."
         };
+        components.SecuritySchemes["bearer"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "API token or OIDC access token",
+            Description = "Token personale InfraOrgIT (itk_) o access token OIDC."
+        };
 
         var session = new OpenApiSecuritySchemeReference("session", document);
         var csrfScheme = new OpenApiSecuritySchemeReference("csrf", document);
+        var bearer = new OpenApiSecuritySchemeReference("bearer", document);
 
         foreach (var path in document.Paths)
         {
             if (path.Key == "/" ||
                 path.Key.StartsWith("/auth/", StringComparison.Ordinal) ||
-                path.Key.StartsWith("/health/", StringComparison.Ordinal))
+                path.Key.StartsWith("/health/", StringComparison.Ordinal) ||
+                path.Key == "/api/desktop/downloads/{token}")
                 continue;
 
             if (path.Value is null)
@@ -109,6 +118,20 @@ builder.Services.AddOpenApi(options =>
             var operations = path.Value.Operations;
             if (operations is null)
                 continue;
+
+            if (path.Key == "/api/desktop/downloads/capabilities")
+            {
+                foreach (var operation in operations)
+                {
+                    operation.Value.Security ??= [];
+                    operation.Value.Security.Add(
+                        new OpenApiSecurityRequirement { [session] = [] });
+                    operation.Value.Security.Add(
+                        new OpenApiSecurityRequirement { [bearer] = [] });
+                }
+
+                continue;
+            }
 
             foreach (var operation in operations)
             {
@@ -196,6 +219,7 @@ builder.Services.AddSingleton<ConsoleSessionRegistry>();
 builder.Services.AddScoped<TopologyService>();
 builder.Services.AddScoped<DiagramService>();
 builder.Services.AddHttpClient<OidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient<DesktopOidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("application-api", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("application-api-insecure")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
@@ -227,10 +251,12 @@ builder.Services.AddRateLimiter(options =>
         limiter.QueueLimit = 0;
     });
     options.AddPolicy("auth-callback", context => Partition(ClientKey(context), 30));
+    options.AddPolicy("auth-desktop-session", context => Partition(ClientKey(context), 30));
     options.AddPolicy("remote-run", context => Partition(UserKey(context), 30));
     options.AddPolicy("reachability", context => Partition(UserKey(context), 10));
     options.AddPolicy("console", context => Partition(UserKey(context), 5));
     options.AddPolicy("files", context => Partition(UserKey(context), 60));
+    options.AddPolicy("desktop-download", context => Partition(ClientKey(context), 120));
     options.AddPolicy("mcp", context => Partition(ActorKey(context), 120));
     options.AddPolicy("tunnels", context => Partition(ActorKey(context), 120));
 });
@@ -251,11 +277,15 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
         options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
 });
 
-builder.Services.AddOptions<AuthOptions>().Bind(builder.Configuration.GetSection("Auth"));
+builder.Services.AddOptions<AuthOptions>()
+    .Bind(builder.Configuration.GetSection("Auth"))
+    .Validate(o => o.DesktopSessionDays is >= 1 and <= 90, "Auth:DesktopSessionDays tra 1 e 90.")
+    .ValidateOnStart();
 builder.Services.AddOptions<OidcOptions>()
     .Bind(builder.Configuration.GetSection("Oidc"))
     .Validate(o => Uri.TryCreate(o.Issuer, UriKind.Absolute, out _), "Oidc:Issuer non è un URI assoluto.")
     .Validate(o => !string.IsNullOrWhiteSpace(o.ClientId), "Oidc:ClientId mancante.")
+    .Validate(o => !string.IsNullOrWhiteSpace(o.DesktopClientId), "Oidc:DesktopClientId mancante.")
     .Validate(o => Uri.TryCreate(o.RedirectUri, UriKind.Absolute, out _), "Oidc:RedirectUri non è un URI assoluto.")
     .Validate(o => string.IsNullOrWhiteSpace(o.InternalIssuer) ||
                    Uri.TryCreate(o.InternalIssuer, UriKind.Absolute, out _),
@@ -278,6 +308,21 @@ builder.Services.AddScoped<ISshConnector, SshConnector>();
 builder.Services.AddOptions<FileTransferOptions>()
     .Bind(builder.Configuration.GetSection(FileTransferOptions.SectionName));
 builder.Services.AddScoped<IFileTransferConnector, FileTransferConnector>();
+builder.Services.AddOptions<DesktopDownloadsOptions>()
+    .Bind(builder.Configuration.GetSection(DesktopDownloadsOptions.SectionName))
+    .Validate(o => o.TicketLifetimeSeconds is >= 1 and <= 3600,
+        "DesktopDownloads:TicketLifetimeSeconds tra 1 e 3600.")
+    .Validate(o => o.RetentionDays is >= 1 and <= 365,
+        "DesktopDownloads:RetentionDays tra 1 e 365.")
+    .Validate(o => o.CleanupIntervalMinutes is >= 15 and <= 10080,
+        "DesktopDownloads:CleanupIntervalMinutes tra 15 e 10080.")
+    .Validate(o => string.IsNullOrWhiteSpace(o.PublicBaseUrl) ||
+                   (Uri.TryCreate(o.PublicBaseUrl, UriKind.Absolute, out var publicBase) &&
+                    (publicBase.Scheme == Uri.UriSchemeHttp ||
+                     publicBase.Scheme == Uri.UriSchemeHttps)),
+        "DesktopDownloads:PublicBaseUrl deve essere un URI HTTP(S) assoluto.")
+    .ValidateOnStart();
+builder.Services.AddHostedService<DownloadTicketRetentionService>();
 builder.Services.AddOptions<FrontendOptions>()
     .Bind(builder.Configuration.GetSection("Frontend"))
     .Validate(o => Uri.TryCreate(o.BaseUrl, UriKind.Absolute, out _), "Frontend:BaseUrl non è un URI assoluto.")
@@ -341,10 +386,32 @@ builder.Services.AddAuthorization(options =>
         };
         if (mcpOidcConfigured)
             schemes.Add(JwtBearerDefaults.AuthenticationScheme);
+        schemes.Add(SessionAuthenticationHandler.SchemeName);
         policy.AddAuthenticationSchemes([.. schemes])
             .RequireAuthenticatedUser()
             .RequireAssertion(context =>
-                HasScope(context.User, "tunnels:operate"));
+                // The desktop can reuse the BFF session from the instance tab
+                // instead of asking for a second device-flow login. Bearer
+                // tokens still need the explicit tunnels:operate scope.
+                HasScope(context.User, "tunnels:operate") ||
+                context.User.Identities.Any(identity =>
+                    identity.AuthenticationType == SessionAuthenticationHandler.SchemeName));
+    });
+
+    options.AddPolicy("Desktop", policy =>
+    {
+        // Scheme order matters for the anonymous challenge: the API token and
+        // OIDC handlers only set 401, while the session handler writes a
+        // problem body that starts the response. The body writer must run last.
+        var schemes = new List<string>
+        {
+            ApiTokenAuthenticationHandler.SchemeName
+        };
+        if (mcpOidcConfigured)
+            schemes.Add(JwtBearerDefaults.AuthenticationScheme);
+        schemes.Add(SessionAuthenticationHandler.SchemeName);
+        policy.AddAuthenticationSchemes([.. schemes])
+            .RequireAuthenticatedUser();
     });
 });
 builder.Services.AddProblemDetails();
@@ -508,6 +575,7 @@ CommandExecutionEndpoints.Map(app);
 AuditEventsEndpoints.Map(app);
 ConsoleEndpoints.Map(app);
 FileTransferEndpoints.Map(app);
+DesktopDownloadEndpoints.Map(app);
 UsersEndpoints.Map(app);
 GroupsEndpoints.Map(app);
 RolesEndpoints.Map(app);
