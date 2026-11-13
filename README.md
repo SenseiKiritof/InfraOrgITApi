@@ -108,9 +108,10 @@ refresh token for a BFF cookie:
 
 ## Desktop downloads
 
-The Web app can hand a server file to the legacy Photino desktop (or the
-bridge mode) through a one-time signed URL instead of relying on the embedded
-webview:
+The current Electron client uses Chromium's native download for server
+attachments and its blob bridge for generated API results; there is no desktop
+download-mode setting. The signed-ticket endpoints below remain for API
+compatibility, but the Electron client does not use them:
 
 - `GET /api/desktop/downloads/capabilities` reports whether signed URLs are
   enabled.
@@ -123,10 +124,7 @@ webview:
 
 Set `DesktopDownloads:Enabled=false` to disable new tickets and invalidate
 already-issued ones; `TicketLifetimeSeconds` defaults to 120 and
-`PublicBaseUrl` is needed only behind a proxy with a different origin. Electron
-uses Chromium's native download for attachments and its blob bridge
-for generated API results; the legacy Photino build can use its native webview
-when the server disables the signed bridge.
+`PublicBaseUrl` is needed only behind a proxy with a different origin.
 
 Tickets are metadata only: user, server, normalized path and timestamps; the
 raw token and file content are never stored. For GDPR storage limitation,
