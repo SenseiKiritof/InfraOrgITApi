@@ -5,6 +5,7 @@ using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
+using InfraOrgIt.Api.Features.Settings;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Ssh;
 using Microsoft.EntityFrameworkCore;
@@ -31,6 +32,7 @@ public static class ConsoleEndpoints
         EnvironmentAccessService access,
         ISshConnector ssh,
         ConsoleSessionRegistry sessions,
+        ConnectionPolicyService policy,
         IOptions<ServerAccessOptions> accessOptions,
         IOptions<FrontendOptions> frontend,
         InfraOrgItDbContext db,
@@ -39,6 +41,8 @@ public static class ConsoleEndpoints
     {
         if (!http.WebSockets.IsWebSocketRequest)
             throw Guard.Unprocessable("Serve una richiesta WebSocket.");
+
+        await policy.RequireServerTransportAsync(ct);
 
         var origin = http.Request.Headers.Origin.ToString().TrimEnd('/');
         if (string.IsNullOrEmpty(origin) ||

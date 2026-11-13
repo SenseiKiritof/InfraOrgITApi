@@ -6,6 +6,7 @@ using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
+using InfraOrgIt.Api.Features.Settings;
 using InfraOrgIt.Api.Infrastructure.Files;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
@@ -22,6 +23,14 @@ public static class FileTransferEndpoints
     public static void Map(WebApplication app)
     {
         var group = app.MapGroup("/api/servers/{id:int}").RequireAuthorization();
+        group.AddEndpointFilter(async (context, next) =>
+        {
+            var policy = context.HttpContext.RequestServices
+                .GetRequiredService<ConnectionPolicyService>();
+            await policy.RequireServerTransportAsync(
+                context.HttpContext.RequestAborted);
+            return await next(context);
+        });
 
         group.MapPut("/file-transfer", ConfigureAsync);
         group.MapGet("/files", ListAsync).RequireRateLimiting("files");

@@ -25,9 +25,14 @@ use fictitious demo data.
   well as a personal token with `tunnels:operate`, so the desktop reuses the
   Web login.
 - **Connection policy**: a per-installation `Server`/`Client`/`Auto` row in
-  MySQL; `Server` relays allowlisted Local tunnels and deployments through the
-  API node, while `Auto` uses the client when the first SSH hop is reachable.
-  The row is shared by every API node in a cluster.
+  MySQL, default `Auto`; `Server` keeps console/files/actions on the API and
+  relays allowlisted Local tunnels and deployments, while `Auto` uses the
+  client when the first SSH hop is reachable and falls back to the server
+  otherwise. `Client` uses the desktop agent for all four. The row is shared by
+  every API node in a cluster. `GET /api/connection-policy` accepts the BFF
+  session or a `tunnels:operate` token; `PUT` is SystemAdmin-only. Direct
+  console/actions are projected to `CommandExecutions`, file operations to the
+  `FileTransfer` audit kind.
 - **Human approval**: an MCP action requested by an AI client needs a human
   decision before it runs.
 - **Audit**: MCP calls, console sessions, actions, tests and tunnel events,
