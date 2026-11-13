@@ -130,7 +130,9 @@ public sealed class TunnelApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, outsiderSessionTargets.StatusCode);
         Assert.Empty((await ReadAsync(outsiderSessionTargets))
             .GetProperty("items").EnumerateArray());
-        var outsiderSessionEvent = await outsiderSession.PostAsJsonAsync(
+        var outsiderSessionEvent = await SendAsync(
+            outsiderSession,
+            HttpMethod.Post,
             "/api/tunnels/events",
             new { kind = "start", serverId = seeded.ServerId });
         Assert.Equal(HttpStatusCode.Forbidden, outsiderSessionEvent.StatusCode);
