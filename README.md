@@ -21,6 +21,9 @@ use fictitious demo data.
   the server.
 - **MCP**: inventory tools, resources and prompts over `/mcp` (Streamable
   HTTP), for IDE assistants and agents.
+- **Desktop tunnels**: the tunnel API accepts the authenticated BFF session as
+  well as a personal token with `tunnels:operate`, so the desktop reuses the
+  Web login.
 - **Human approval**: an MCP action requested by an AI client needs a human
   decision before it runs.
 - **Audit**: MCP calls, console sessions, actions, tests and tunnel events,
@@ -72,9 +75,10 @@ it, so a client can poll instead of retrying the action.
 
 ## Desktop sign-in
 
-InfraOrgIT Desktop signs in with the Keycloak device flow on the public client
-`infraorgit-mcp-desktop` (no client secret), then exchanges the refresh token
-for a BFF cookie:
+InfraOrgIT Desktop prefers the BFF session already present in the instance tab.
+Only when no web session is available does it use the Keycloak device flow on
+the public client `infraorgit-mcp-desktop` (no client secret), then exchange the
+refresh token for a BFF cookie:
 
 - `POST /auth/desktop-session` is anonymous and rate-limited per client IP.
   The body is `{ "refreshToken": "..." }`; the API redeems it at Keycloak with
@@ -104,8 +108,9 @@ for a BFF cookie:
 
 ## Desktop downloads
 
-The web UI can hand a server file to InfraOrgIT Desktop through a one-time
-signed URL instead of relying on the embedded webview:
+The Web app can hand a server file to the legacy Photino desktop (or the
+bridge mode) through a one-time signed URL instead of relying on the embedded
+webview:
 
 - `GET /api/desktop/downloads/capabilities` reports whether signed URLs are
   enabled.
@@ -118,9 +123,10 @@ signed URL instead of relying on the embedded webview:
 
 Set `DesktopDownloads:Enabled=false` to disable new tickets and invalidate
 already-issued ones; `TicketLifetimeSeconds` defaults to 120 and
-`PublicBaseUrl` is needed only behind a proxy with a different origin. The
-desktop can instead use its native webview download when the server disables
-the bridge.
+`PublicBaseUrl` is needed only behind a proxy with a different origin. Electron
+uses Chromium's native download for attachments and its blob bridge
+for generated API results; the legacy Photino build can use its native webview
+when the server disables the signed bridge.
 
 Tickets are metadata only: user, server, normalized path and timestamps; the
 raw token and file content are never stored. For GDPR storage limitation,
