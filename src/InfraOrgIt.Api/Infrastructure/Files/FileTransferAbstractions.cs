@@ -12,6 +12,12 @@ public sealed record RemoteFileEntry(
 /// <summary>Session opened on a server: SFTP over SSH, plain FTP or FTPS.</summary>
 public interface IFileTransferSession : IAsyncDisposable
 {
+    /// <summary>
+    /// Percorso iniziale della sessione: la home dell'utente collegato per
+    /// SFTP, "/" quando il protocollo non espone una home affidabile.
+    /// </summary>
+    string HomePath { get; }
+
     Task<IReadOnlyList<RemoteFileEntry>> ListAsync(string path, CancellationToken ct);
     Task DownloadAsync(string path, Stream destination, CancellationToken ct);
     Task UploadAsync(string path, Stream source, CancellationToken ct);

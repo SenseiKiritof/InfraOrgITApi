@@ -262,6 +262,16 @@ public sealed class RealSshTests : IAsyncLifetime
             listing.GetProperty("items").EnumerateArray(),
             item => item.GetProperty("name").GetString() == "hello.txt");
 
+        // Senza path la sessione SFTP parte dalla home dell'utente collegato.
+        var passwd = await _ssh.ExecAsync(
+            ["sh", "-c", "getent passwd test | cut -d: -f6"]);
+        Assert.Equal(0, passwd.ExitCode);
+        var home = await ReadAsync(await admin.GetAsync(
+            $"/api/servers/{server.Id}/files"));
+        Assert.Equal(
+            passwd.Stdout.Trim(),
+            home.GetProperty("path").GetString());
+
         // PT-09: the SFTP path loads the server untracked, so the first-use
         // host key must still be persisted.
         using (var verify = _factory.Services.CreateScope())

@@ -51,6 +51,41 @@ public sealed class OidcIdentityValidatorTests
         Assert.Equal("Rossi", identity.Surname);
     }
 
+    [Fact]
+    public async Task Desktop_audience_is_validated_explicitly()
+    {
+        using var rsa = RSA.Create(2048);
+        var key = new RsaSecurityKey(rsa) { KeyId = "test-key" };
+        var configuration = new OpenIdConnectConfiguration { Issuer = Issuer };
+        configuration.SigningKeys.Add(key);
+
+        var token = new JwtSecurityToken(
+            issuer: Issuer,
+            audience: "infraorgit-mcp-desktop",
+            claims: [new Claim("preferred_username", "Desktop.User")],
+            notBefore: DateTime.UtcNow.AddMinutes(-1),
+            expires: DateTime.UtcNow.AddMinutes(5),
+            signingCredentials: new SigningCredentials(key, SecurityAlgorithms.RsaSha256));
+        var jwt = new JwtSecurityTokenHandler().WriteToken(token);
+
+        var validator = new OidcIdentityValidator(
+            new FakeConfigurationManager(configuration),
+            Options.Create(new OidcOptions
+            {
+                Issuer = Issuer,
+                ClientId = ClientId,
+                DesktopClientId = "infraorgit-mcp-desktop"
+            }),
+            NullLogger<OidcIdentityValidator>.Instance);
+
+        var identity = await validator.ValidateAsync(
+            jwt, "infraorgit-mcp-desktop", CancellationToken.None);
+        Assert.Equal("desktop.user", identity.Username);
+
+        await Assert.ThrowsAsync<InfraOrgIt.Api.BuildingBlocks.Errors.ApiException>(() =>
+            validator.ValidateAsync(jwt, CancellationToken.None));
+    }
+
     private sealed class FakeConfigurationManager(OpenIdConnectConfiguration configuration)
         : IConfigurationManager<OpenIdConnectConfiguration>
     {

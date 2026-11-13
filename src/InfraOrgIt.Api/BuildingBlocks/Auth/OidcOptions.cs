@@ -7,6 +7,8 @@ public sealed class OidcOptions
     public string InternalIssuer { get; set; } = "";
     public string ClientId { get; set; } = "";
     public string ClientSecret { get; set; } = "";
+    // Client pubblico usato dal desktop per il device flow: nessun secret.
+    public string DesktopClientId { get; set; } = "infraorgit-mcp-desktop";
     public string RedirectUri { get; set; } = "";
     // Solo per reti interne fidate: abilita la discovery su InternalIssuer in HTTP.
     public bool AllowInsecureInternalDiscovery { get; set; }
