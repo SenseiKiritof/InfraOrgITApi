@@ -1,10 +1,15 @@
+using System.Buffers;
+using System.Net.WebSockets;
 using System.Security.Claims;
 using InfraOrgIt.Api.BuildingBlocks.Audit;
+using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
+using InfraOrgIt.Api.Infrastructure.Ssh;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace InfraOrgIt.Api.Features.Tunnels;
 
@@ -34,6 +39,14 @@ public static class TunnelEndpoints
         group.MapGet("/sessions", ListSessionsAsync)
             .RequireAuthorization()
             .Produces<TunnelSessionListDto>();
+
+        // Raw TCP relay for the desktop when the installation policy is
+        // Server (or Auto without client reachability). Kept outside the
+        // /api/tunnels group so a page opening many local connections does not
+        // consume the event/heartbeat budget.
+        app.MapGet("/api/tunnels/relay", RelayAsync)
+            .RequireAuthorization("Tunnel")
+            .RequireRateLimiting("tunnel-relay");
     }
 
     private static async Task<IResult> ListTargetsAsync(
@@ -321,6 +334,11 @@ public static class TunnelEndpoints
                 "Mode ammesso: Local, Dynamic, Remote.")
         };
         var (targetHost, targetPort, localPort, remotePort) = ports;
+        var transport = Guard.Enum<TunnelTransport>(
+            string.IsNullOrWhiteSpace(input.Transport)
+                ? nameof(TunnelTransport.Client)
+                : input.Transport,
+            "Transport");
 
         // PT-14: a Remote forward is only offered to ServerAdmin in the
         // target list, so the write path must enforce the same rule.
@@ -365,6 +383,7 @@ public static class TunnelEndpoints
         session.ServerApplicationId = input.ServerApplicationId;
         session.TunnelServiceId = input.TunnelServiceId;
         session.Mode = mode;
+        session.Transport = transport;
         session.LocalPort = localPort;
         session.TargetHost = targetHost;
         session.TargetPort = targetPort;
@@ -423,6 +442,7 @@ public static class TunnelEndpoints
                         .Select(ts => ts.Name)
                         .FirstOrDefault(),
                 x.Mode,
+                x.Transport,
                 x.LocalPort,
                 x.TargetHost,
                 x.TargetPort,
@@ -433,6 +453,258 @@ public static class TunnelEndpoints
             .ToListAsync(ct);
 
         return Results.Ok(new TunnelSessionListDto(items));
+    }
+
+    /// <summary>
+    /// Opens the SSH forward on the API node and pipes raw bytes to the
+    /// desktop over a WebSocket. The target comes only from an allowlisted
+    /// Local TunnelService or a deployment; the client cannot ask for an
+    /// arbitrary host. Dynamic/Remote would turn the API into a general proxy
+    /// and stay client-only.
+    /// </summary>
+    private static async Task RelayAsync(
+        HttpContext http,
+        int serverId,
+        int? serviceId,
+        int? serverApplicationId,
+        string? tunnelId,
+        ClaimsPrincipal user,
+        InfraOrgItDbContext db,
+        EnvironmentAccessService access,
+        ISshConnector ssh,
+        IAuditService audit,
+        IOptions<FrontendOptions> frontend,
+        CancellationToken ct)
+    {
+        var origin = http.Request.Headers.Origin.ToString().TrimEnd('/');
+        if (string.IsNullOrEmpty(origin) ||
+            !frontend.Value.EffectiveOrigins.Contains(
+                origin, StringComparer.OrdinalIgnoreCase))
+            throw Guard.Forbidden("Origin non ammessa.");
+
+        if ((serviceId is null) == (serverApplicationId is null))
+            throw Guard.Unprocessable(
+                "Indicare serviceId oppure serverApplicationId, non entrambi.");
+
+        var server = await db.Servers.AsNoTracking()
+                         .Include(x => x.Credential)
+                         .SingleOrDefaultAsync(x => x.Id == serverId, ct)
+                     ?? throw Guard.NotFound("Server", serverId);
+
+        var environmentAccess = await access.GetAsync(user, ct);
+        if (!environmentAccess.OperatorEnvironmentIds.Contains(
+                server.ProviderEnvironmentId))
+            throw Guard.Forbidden(
+                "Serve ServerOperator o ServerAdmin sull'ambiente del server.");
+
+        RelayTarget target;
+        if (serviceId is int sid)
+        {
+            var service = await db.TunnelServices.AsNoTracking()
+                              .SingleOrDefaultAsync(
+                                  x => x.Id == sid && x.ServerId == serverId, ct)
+                          ?? throw Guard.NotFound("Servizio tunnel", sid);
+            if (!service.Enabled)
+                throw Guard.Unprocessable("Il servizio tunnel è disabilitato.");
+            if (service.Mode != nameof(TunnelMode.Local))
+                throw Guard.Unprocessable(
+                    "Il relay server supporta solo i servizi tunnel Local.");
+            if (service.TargetPort is not int servicePort)
+                throw Guard.Unprocessable(
+                    "Il servizio tunnel non ha una porta target.");
+            target = new RelayTarget(
+                "TunnelService",
+                service.Id,
+                service.Name,
+                service.TargetHost,
+                servicePort);
+        }
+        else
+        {
+            var application = await db.ServerApplications.AsNoTracking()
+                                  .Where(x => x.Id == serverApplicationId &&
+                                              x.ServerId == serverId)
+                                  .Select(x => new
+                                  {
+                                      x.Id,
+                                      x.HostPort,
+                                      x.ExposedPort,
+                                      Name = x.ApplicationVersion!.Application!.Name
+                                  })
+                                  .SingleOrDefaultAsync(ct)
+                              ?? throw Guard.NotFound(
+                                  "Deployment", serverApplicationId!.Value);
+            var port = application.HostPort ?? application.ExposedPort;
+            if (port <= 0)
+                throw Guard.Unprocessable(
+                    "Il deployment non ha una porta target.");
+            target = new RelayTarget(
+                "ServerApplication",
+                application.Id,
+                application.Name,
+                "127.0.0.1",
+                port);
+        }
+
+        if (!http.WebSockets.IsWebSocketRequest)
+            throw Guard.Unprocessable("Serve una richiesta WebSocket.");
+
+        var correlationId = Guard.OptionalText(tunnelId, "tunnelId", 100);
+        var (actorUserId, actorUsername, clientId) = AuditEntries.Actor(user);
+
+        ISshSession? session = null;
+        Stream? stream = null;
+        try
+        {
+            session = await ssh.ConnectAsync(server, ct);
+            stream = await session.OpenForwardAsync(
+                target.Host, target.Port, ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await AuditRelayErrorAsync(
+                audit, actorUserId, actorUsername, clientId, server, target,
+                correlationId, exception);
+            if (stream is not null) await stream.DisposeAsync();
+            if (session is not null) await session.DisposeAsync();
+            throw;
+        }
+
+        var activeStream = stream
+            ?? throw new InvalidOperationException("Relay senza stream SSH.");
+        try
+        {
+            using var socket = await http.WebSockets.AcceptWebSocketAsync();
+            using var relayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var toSocket = PumpToSocketAsync(activeStream, socket, relayCts.Token);
+            var fromSocket = PumpFromSocketAsync(socket, activeStream, relayCts.Token);
+
+            await Task.WhenAny(toSocket, fromSocket);
+            relayCts.Cancel();
+            try
+            {
+                await Task.WhenAll(toSocket, fromSocket);
+            }
+            catch (Exception exception)
+                when (exception is OperationCanceledException or
+                      WebSocketException or IOException)
+            {
+                // One side closed: the relay is finished.
+            }
+
+            if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+            {
+                try
+                {
+                    await socket.CloseAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        null,
+                        CancellationToken.None);
+                }
+                catch (WebSocketException)
+                {
+                    // Desktop already gone.
+                }
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await AuditRelayErrorAsync(
+                audit, actorUserId, actorUsername, clientId, server, target,
+                correlationId, exception);
+        }
+        finally
+        {
+            await activeStream.DisposeAsync();
+            if (session is not null) await session.DisposeAsync();
+        }
+    }
+
+    private static Task AuditRelayErrorAsync(
+        IAuditService audit,
+        int? actorUserId,
+        string actorUsername,
+        string? clientId,
+        Server server,
+        RelayTarget target,
+        string? correlationId,
+        Exception exception) =>
+        audit.RecordAsync(
+            new AuditEntry(
+                "TunnelError",
+                "relay.error",
+                "Error",
+                ActorUserId: actorUserId,
+                ActorUsername: actorUsername,
+                ClientId: clientId,
+                TargetType: target.Type,
+                TargetId: target.Id,
+                ServerId: server.Id,
+                TargetHost: target.Host,
+                TargetPort: target.Port,
+                ErrorCode: "relay_failed",
+                CorrelationId: correlationId,
+                Detail: new
+                {
+                    target = target.Name,
+                    transport = nameof(TunnelTransport.Server),
+                    message = exception.Message
+                }),
+            CancellationToken.None);
+
+    private sealed record RelayTarget(
+        string Type,
+        int Id,
+        string Name,
+        string Host,
+        int Port);
+
+    private static async Task PumpToSocketAsync(
+        Stream stream,
+        WebSocket socket,
+        CancellationToken ct)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                var read = await stream.ReadAsync(buffer, ct);
+                if (read == 0) break;
+                await socket.SendAsync(
+                    buffer.AsMemory(0, read),
+                    WebSocketMessageType.Binary,
+                    true,
+                    ct);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static async Task PumpFromSocketAsync(
+        WebSocket socket,
+        Stream stream,
+        CancellationToken ct)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                var result = await socket.ReceiveAsync(buffer, ct);
+                if (result.MessageType == WebSocketMessageType.Close) break;
+                if (result.MessageType == WebSocketMessageType.Text) continue;
+                await stream.WriteAsync(buffer.AsMemory(0, result.Count), ct);
+                await stream.FlushAsync(ct);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private static int RequirePort(int? value, string field) =>
@@ -594,7 +866,8 @@ public sealed record TunnelSessionInput(
     string? ErrorCode = null,
     string? Mode = null,
     int? RemotePort = null,
-    int? TunnelServiceId = null);
+    int? TunnelServiceId = null,
+    string? Transport = null);
 
 public sealed record TunnelSessionDto(
     int Id,
@@ -607,6 +880,7 @@ public sealed record TunnelSessionDto(
     int? ServiceId,
     string? ServiceName,
     string Mode,
+    string Transport,
     int? LocalPort,
     string TargetHost,
     int? TargetPort,

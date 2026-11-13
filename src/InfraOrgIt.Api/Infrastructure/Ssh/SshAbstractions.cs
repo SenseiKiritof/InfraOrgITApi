@@ -21,6 +21,15 @@ public interface ISshSession : IAsyncDisposable
 {
     Task<SshCommandResult> RunAsync(string script, TimeSpan timeout, CancellationToken ct);
     Task<IShellSession> OpenShellAsync(uint columns, uint rows, CancellationToken ct);
+
+    /// <summary>
+    /// Opens a loopback TCP stream forwarded to <paramref name="host"/>:
+    /// <paramref name="port"/> through this SSH session. Used by the server
+    /// relay; the caller owns and disposes the returned stream. Test fakes
+    /// that only exercise console/actions keep the default failure.
+    /// </summary>
+    Task<Stream> OpenForwardAsync(string host, int port, CancellationToken ct) =>
+        throw new NotSupportedException("Forward SSH non supportato.");
 }
 
 public interface IShellSession : IAsyncDisposable
