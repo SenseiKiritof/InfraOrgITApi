@@ -61,6 +61,12 @@ public sealed class TunnelApiTests : IAsyncLifetime
         using var userSession = await SessionClientAsync("tunnel.user");
         await AddOperatorRoleAsync("tunnel.user", seeded.ProviderEnvironmentId);
 
+        // The desktop reuses the BFF session from the instance tab.
+        var sessionTargets = await userSession.GetAsync("/api/tunnels/targets");
+        Assert.Equal(HttpStatusCode.OK, sessionTargets.StatusCode);
+        var sessionPayload = await ReadAsync(sessionTargets);
+        Assert.Single(sessionPayload.GetProperty("items").EnumerateArray());
+
         var created = await SendAsync(userSession, HttpMethod.Post,
             "/api/api-tokens",
             new { name = "tunnel", scopes = "tunnels:operate" });
@@ -119,6 +125,15 @@ public sealed class TunnelApiTests : IAsyncLifetime
         }
 
         var outsiderSession = await SessionClientAsync("tunnel.outsider");
+        var outsiderSessionTargets =
+            await outsiderSession.GetAsync("/api/tunnels/targets");
+        Assert.Equal(HttpStatusCode.OK, outsiderSessionTargets.StatusCode);
+        Assert.Empty((await ReadAsync(outsiderSessionTargets))
+            .GetProperty("items").EnumerateArray());
+        var outsiderSessionEvent = await outsiderSession.PostAsJsonAsync(
+            "/api/tunnels/events",
+            new { kind = "start", serverId = seeded.ServerId });
+        Assert.Equal(HttpStatusCode.Forbidden, outsiderSessionEvent.StatusCode);
         var outsiderCreated = await SendAsync(outsiderSession, HttpMethod.Post,
             "/api/api-tokens",
             new { name = "outsider", scopes = "tunnels:operate" });

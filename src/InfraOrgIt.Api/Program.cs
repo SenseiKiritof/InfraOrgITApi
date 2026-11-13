@@ -386,10 +386,16 @@ builder.Services.AddAuthorization(options =>
         };
         if (mcpOidcConfigured)
             schemes.Add(JwtBearerDefaults.AuthenticationScheme);
+        schemes.Add(SessionAuthenticationHandler.SchemeName);
         policy.AddAuthenticationSchemes([.. schemes])
             .RequireAuthenticatedUser()
             .RequireAssertion(context =>
-                HasScope(context.User, "tunnels:operate"));
+                // The desktop can reuse the BFF session from the instance tab
+                // instead of asking for a second device-flow login. Bearer
+                // tokens still need the explicit tunnels:operate scope.
+                HasScope(context.User, "tunnels:operate") ||
+                context.User.Identities.Any(identity =>
+                    identity.AuthenticationType == SessionAuthenticationHandler.SchemeName));
     });
 
     options.AddPolicy("Desktop", policy =>
