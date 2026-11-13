@@ -86,8 +86,10 @@ for a BFF cookie:
   signature, issuer, audience and lifetime are always validated.
 - The rotated refresh token stays server-side in the encrypted session; it is
   never returned to the caller or written to logs. The BFF session lives for
-  `Auth:DesktopSessionDays` (default 30, valid 1..90), independently of the
-  shorter Keycloak refresh-token lifetime.
+  `Auth:DesktopSessionDays` (default 7, valid 1..90), independently of the
+  shorter Keycloak refresh-token lifetime. Calling the endpoint again with the
+  same desktop cookie extends that same session, so the desktop can renew it
+  periodically without creating orphan sessions.
 - `Oidc:DesktopClientId` defaults to `infraorgit-mcp-desktop` and must match the
   public Keycloak client; the confidential BFF client is not used for this
   exchange.

@@ -4,5 +4,5 @@ public sealed class AuthOptions
 {
     public bool SecureCookies { get; set; } = true;
     public string BootstrapAdminUsername { get; set; } = "";
-    public int DesktopSessionDays { get; set; } = 30;
+    public int DesktopSessionDays { get; set; } = 7;
 }

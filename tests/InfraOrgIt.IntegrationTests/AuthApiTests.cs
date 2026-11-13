@@ -128,8 +128,8 @@ public sealed class AuthApiTests : IAsyncLifetime
         Assert.Equal("new-refresh-token", session.RefreshToken);
         Assert.InRange(
             session.RefreshExpiresAt!.Value,
-            DateTimeOffset.UtcNow.AddDays(29),
-            DateTimeOffset.UtcNow.AddDays(31));
+            DateTimeOffset.UtcNow.AddDays(6),
+            DateTimeOffset.UtcNow.AddDays(8));
 
         using var authenticated = ClientWithSession(sessionId);
         var me = await authenticated.GetAsync("/api/session");
@@ -137,6 +137,51 @@ public sealed class AuthApiTests : IAsyncLifetime
         using var json = await JsonDocument.ParseAsync(await me.Content.ReadAsStreamAsync());
         Assert.Equal("refresh.user", json.RootElement.GetProperty("user").GetProperty("username").GetString());
         Assert.Equal("system", json.RootElement.GetProperty("theme").GetString());
+    }
+
+    [Fact]
+    public async Task Desktop_session_renews_the_existing_cookie_session()
+    {
+        _oidcHandler.Forms.Clear();
+        using var client = _factory.CreateClient();
+
+        var first = await client.PostAsJsonAsync(
+            "/auth/desktop-session", new { refreshToken = "device-refresh-token" });
+        Assert.Equal(HttpStatusCode.NoContent, first.StatusCode);
+        var sessionId = SessionIdFrom(first);
+
+        using var scope = _factory.Services.CreateScope();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        var before = await db.Sessions.CountAsync(x => x.Username == "refresh.user");
+        var initial = sessions.Get(sessionId);
+        Assert.NotNull(initial);
+        sessions.Update(sessionId, initial! with
+        {
+            RefreshExpiresAt = DateTimeOffset.UtcNow.AddDays(1)
+        });
+
+        client.DefaultRequestHeaders.Add(
+            "Cookie", $"{SessionCookie.Session(false)}={sessionId}");
+        var renewed = await client.PostAsJsonAsync(
+            "/auth/desktop-session", new { refreshToken = "device-refresh-token" });
+
+        Assert.Equal(HttpStatusCode.NoContent, renewed.StatusCode);
+        Assert.Equal(sessionId, SessionIdFrom(renewed));
+        Assert.Equal(
+            before,
+            await db.Sessions.CountAsync(x => x.Username == "refresh.user"));
+
+        using var verify = _factory.Services.CreateScope();
+        var renewedStore = verify.ServiceProvider.GetRequiredService<ISessionStore>();
+        var session = renewedStore.Get(sessionId);
+        Assert.NotNull(session);
+        Assert.True(session!.Desktop);
+        Assert.Equal("new-refresh-token", session.RefreshToken);
+        Assert.InRange(
+            session.RefreshExpiresAt!.Value,
+            DateTimeOffset.UtcNow.AddDays(6),
+            DateTimeOffset.UtcNow.AddDays(8));
     }
 
     [Fact]

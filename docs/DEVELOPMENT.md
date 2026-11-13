@@ -64,7 +64,7 @@ make legacy-dry-run  # dry-run importer on the JSON fixtures
 - Encrypted configuration: `appsettings.<Environment>.Secure.json` is loaded when the file exists and every value is decrypted with `ENC_KEY` (SSecureUtils `AddSecureConfig`); if the file exists and `ENC_KEY` is missing the API does not start. Production mounts the file read-only, it is never baked into the image.
 - SystemAdmin bootstrap: `Auth:BootstrapAdminUsername=admin` in Development; the first login of the Keycloak user `admin` assigns the role if a SystemAdmin does not exist yet. In production the variable stays empty.
 - Sessions in MySQL (`Sessions`) with payload encrypted via DataProtection, expiry and per-user limit (`SessionStore:MaxSessionsPerUser`, default 10). DataProtection keys live in the `api-dp-keys` volume in production (`DataProtection:KeysPath`); in development the user profile is used.
-- Desktop silent session: `Oidc:DesktopClientId` (default `infraorgit-mcp-desktop`, public client, no secret) and `Auth:DesktopSessionDays` (default 30, valid 1..90) set the lifetime of the BFF session created by `POST /auth/desktop-session`.
+- Desktop silent session: `Oidc:DesktopClientId` (default `infraorgit-mcp-desktop`, public client, no secret) and `Auth:DesktopSessionDays` (default 7, valid 1..90) set the lifetime of the BFF session created by `POST /auth/desktop-session`. The desktop renews it periodically with the same cookie; the endpoint updates the existing desktop session instead of creating a new one.
 
 ## Credential rewrap
 

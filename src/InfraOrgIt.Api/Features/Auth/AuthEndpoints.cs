@@ -85,7 +85,25 @@ public static class AuthEndpoints
             roles,
             Desktop: true);
 
-        var sessionId = sessions.Create(session);
+        // Rinnovo periodico: se la richiesta porta già la sessione desktop
+        // dello stesso utente, la si estende invece di crearne una nuova.
+        // Evita sessioni orfane e mantiene lo stesso cookie per 7 giorni
+        // rinnovabili finché il refresh token Keycloak resta valido.
+        var currentId = http.Request.Cookies[SessionCookie.Session(secure)];
+        var current = string.IsNullOrEmpty(currentId) ? null : sessions.Get(currentId);
+        string sessionId;
+        if (!string.IsNullOrEmpty(currentId)
+            && current is { Desktop: true }
+            && string.Equals(current.Username, identity.Username, StringComparison.Ordinal))
+        {
+            sessionId = currentId;
+            sessions.Update(sessionId, session);
+        }
+        else
+        {
+            sessionId = sessions.Create(session);
+        }
+
         http.Response.Cookies.Append(
             SessionCookie.Session(secure),
             sessionId,
