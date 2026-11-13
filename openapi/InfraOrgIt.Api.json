@@ -3656,6 +3656,220 @@
         ]
       }
     },
+    "/api/remote/targets/{serverId}": {
+      "get": {
+        "tags": [
+          "RemoteClientEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteTargetDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/remote/console-sessions": {
+      "post": {
+        "tags": [
+          "RemoteClientEndpoints"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteConsoleStartInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteConsoleStartDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/remote/console-sessions/{id}/complete": {
+      "post": {
+        "tags": [
+          "RemoteClientEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteConsoleCompleteInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/remote/file-events": {
+      "post": {
+        "tags": [
+          "RemoteClientEndpoints"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteFileEventInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/remote/host-key": {
+      "post": {
+        "tags": [
+          "RemoteClientEndpoints"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteHostKeyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/remote/actions/{executionId}/complete": {
+      "post": {
+        "tags": [
+          "RemoteClientEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "executionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteActionCompleteInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
     "/api/applications/{id}/actions": {
       "get": {
         "tags": [
@@ -3821,6 +4035,62 @@
       }
     },
     "/api/server-applications/{id}/actions/{actionId}/run": {
+      "post": {
+        "tags": [
+          "ApplicationActionsEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ApplicationActionRunInput"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/server-applications/{id}/actions/{actionId}/intent": {
       "post": {
         "tags": [
           "ApplicationActionsEndpoints"
@@ -7245,6 +7515,255 @@
           }
         }
       },
+      "RemoteActionCompleteInput": {
+        "required": [
+          "exitCode",
+          "output"
+        ],
+        "type": "object",
+        "properties": {
+          "exitCode": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "output": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "timedOut": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "RemoteConsoleCompleteInput": {
+        "required": [
+          "exitCode",
+          "output"
+        ],
+        "type": "object",
+        "properties": {
+          "exitCode": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "output": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "timedOut": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "RemoteConsoleStartDto": {
+        "required": [
+          "executionId"
+        ],
+        "type": "object",
+        "properties": {
+          "executionId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "RemoteConsoleStartInput": {
+        "required": [
+          "serverId",
+          "correlationId"
+        ],
+        "type": "object",
+        "properties": {
+          "serverId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "correlationId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RemoteFileEventInput": {
+        "required": [
+          "serverId",
+          "operation",
+          "path"
+        ],
+        "type": "object",
+        "properties": {
+          "serverId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "operation": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "path": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "outcome": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RemoteHostKeyInput": {
+        "required": [
+          "serverId",
+          "fingerprint"
+        ],
+        "type": "object",
+        "properties": {
+          "serverId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "fingerprint": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RemoteJumpDto": {
+        "required": [
+          "host",
+          "port",
+          "username",
+          "hostKeyFingerprint"
+        ],
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "username": {
+            "type": "string"
+          },
+          "hostKeyFingerprint": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RemoteTargetDto": {
+        "required": [
+          "serverId",
+          "name",
+          "host",
+          "sshPort",
+          "username",
+          "jumps",
+          "hostKeyFingerprint",
+          "fileTransferProtocol"
+        ],
+        "type": "object",
+        "properties": {
+          "serverId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "name": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "sshPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "username": {
+            "type": "string"
+          },
+          "jumps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RemoteJumpDto"
+            }
+          },
+          "hostKeyFingerprint": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fileTransferProtocol": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "RoleInput": {
         "required": [
           "name",
@@ -8431,6 +8950,9 @@
     },
     {
       "name": "CommandTemplateEndpoints"
+    },
+    {
+      "name": "RemoteClientEndpoints"
     },
     {
       "name": "ApplicationActionsEndpoints"

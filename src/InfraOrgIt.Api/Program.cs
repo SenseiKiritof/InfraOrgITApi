@@ -182,6 +182,7 @@ builder.Services.AddSingleton<LoginStateProtector>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
+builder.Services.AddScoped<ConnectionPolicyService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddHostedService<TunnelSessionCleanupService>();
 builder.Services.AddOptions<AuditRetentionOptions>()
@@ -571,6 +572,7 @@ TopologyEndpoints.Map(app);
 DiagramEndpoints.Map(app);
 ServerCredentialsEndpoints.Map(app);
 CommandTemplateEndpoints.Map(app);
+RemoteClientEndpoints.Map(app);
 ApplicationActionsEndpoints.Map(app);
 ReachabilityEndpoints.Map(app);
 CommandExecutionEndpoints.Map(app);

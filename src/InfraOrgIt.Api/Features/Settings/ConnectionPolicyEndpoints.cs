@@ -50,7 +50,11 @@ public static class ConnectionPolicyEndpoints
         CancellationToken ct)
     {
         await access.RequireSystemAdminAsync(user, ct);
-        var mode = Guard.Enum<ConnectionPolicyMode>(input.Mode, "Mode");
+        // Missing or empty input keeps the documented default. An explicit
+        // unknown value is still rejected by Guard.
+        var mode = string.IsNullOrWhiteSpace(input.Mode)
+            ? nameof(ConnectionPolicyMode.Auto)
+            : Guard.Enum<ConnectionPolicyMode>(input.Mode, "Mode");
 
         var policy = await db.ConnectionPolicies
             .SingleOrDefaultAsync(x => x.Id == 1, ct);

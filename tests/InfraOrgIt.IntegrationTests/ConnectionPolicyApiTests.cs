@@ -84,6 +84,11 @@ public sealed class ConnectionPolicyApiTests : IAsyncLifetime
         Assert.Equal("Server", read.GetProperty("mode").GetString());
         Assert.Equal("policy.admin", read.GetProperty("updatedBy").GetString());
 
+        var reset = await SendAsync(adminSession, HttpMethod.Put,
+            "/api/connection-policy", new { mode = "" });
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+        Assert.Equal("Auto", (await ReadAsync(reset)).GetProperty("mode").GetString());
+
         var invalid = await SendAsync(adminSession, HttpMethod.Put,
             "/api/connection-policy", new { mode = "Maybe" });
         Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
@@ -92,12 +97,18 @@ public sealed class ConnectionPolicyApiTests : IAsyncLifetime
         {
             var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
             var policy = await db.ConnectionPolicies.AsNoTracking().SingleAsync();
-            Assert.Equal("Server", policy.Mode);
-            var audit = await db.AuditEvents
-                .SingleAsync(x => x.Action == "connection-policy.update");
-            Assert.Equal("AdminChange", audit.Kind);
-            Assert.Equal("Ok", audit.Outcome);
-            Assert.Equal("policy.admin", audit.ActorUsername);
+            Assert.Equal("Auto", policy.Mode);
+            var audits = await db.AuditEvents
+                .Where(x => x.Action == "connection-policy.update")
+                .OrderBy(x => x.Id)
+                .ToListAsync();
+            Assert.Equal(2, audits.Count);
+            Assert.All(audits, audit =>
+            {
+                Assert.Equal("AdminChange", audit.Kind);
+                Assert.Equal("Ok", audit.Outcome);
+                Assert.Equal("policy.admin", audit.ActorUsername);
+            });
         }
     }
 
