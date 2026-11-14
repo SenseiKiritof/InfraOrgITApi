@@ -4,29 +4,24 @@ using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.LegacyImport;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
 
 public sealed class LegacyImportTests : IAsyncLifetime
 {
-    private readonly MySqlContainer _mysql = new MySqlBuilder("mysql:8.4")
-        .WithDatabase("infraorgit")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
+    private string _connectionString = "";
 
     public async Task InitializeAsync()
     {
-        await _mysql.StartAsync();
+        _connectionString = await TestMySql.CreateDatabaseAsync("LegacyImportTests");
         var options = new DbContextOptionsBuilder<InfraOrgItDbContext>()
-            .UseMySQL(_mysql.GetConnectionString())
+            .UseMySQL(_connectionString)
             .Options;
         await using var db = new InfraOrgItDbContext(options);
         await db.Database.MigrateAsync();
     }
 
-    public async Task DisposeAsync() => await _mysql.DisposeAsync();
+    public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
     public async Task Dry_run_reports_without_writing()
@@ -269,7 +264,7 @@ public sealed class LegacyImportTests : IAsyncLifetime
 
     private InfraOrgItDbContext Db() => new(
         new DbContextOptionsBuilder<InfraOrgItDbContext>()
-            .UseMySQL(_mysql.GetConnectionString())
+            .UseMySQL(_connectionString)
             .Options);
 
     private ImportOptions Options(
@@ -280,7 +275,7 @@ public sealed class LegacyImportTests : IAsyncLifetime
         string? input = null) => new(
         input ?? FixturePath,
         Path.Combine(Path.GetTempPath(), $"legacy-import-{Guid.NewGuid():N}.json"),
-        apply ? _mysql.GetConnectionString() : null,
+        apply ? _connectionString : null,
         apply,
         oldKey,
         newKey,
