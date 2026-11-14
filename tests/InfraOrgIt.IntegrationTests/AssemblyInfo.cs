@@ -1,4 +1,5 @@
 using Xunit;
 
-// Un container MySQL per classe: eseguirle in parallelo esaurisce Docker e rende i test instabili.
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
+// Un solo container MySQL condiviso, un database per classe. Due classi in
+// parallelo riducono la durata senza esaurire Docker sui runner CI.
+[assembly: CollectionBehavior(MaxParallelThreads = 2)]
