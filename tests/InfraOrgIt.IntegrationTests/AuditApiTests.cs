@@ -72,6 +72,9 @@ public sealed class AuditApiTests : IAsyncLifetime
         Assert.Equal("token-1", item.GetProperty("clientId").GetString());
         Assert.Equal("list_executions", item.GetProperty("action").GetString());
         Assert.Equal(42, item.GetProperty("serverId").GetInt32());
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("serverName").ValueKind);
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("serverAddress").ValueKind);
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("targetLabel").ValueKind);
         Assert.Equal("Denied", item.GetProperty("outcome").GetString());
         Assert.Equal("forbidden", item.GetProperty("errorCode").GetString());
         Assert.True(item.TryGetProperty("occurredAt", out _));
@@ -95,6 +98,62 @@ public sealed class AuditApiTests : IAsyncLifetime
             [seeded.OldId],
             secondPage.GetProperty("items").EnumerateArray()
                 .Select(x => x.GetProperty("id").GetInt32()).ToArray());
+    }
+
+    [Fact]
+    public async Task Audit_events_resolve_server_and_target_names()
+    {
+        int serverId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var provider = new Provider { Name = "audit-provider" };
+            var environment = new EnvironmentDefinition
+            {
+                Name = "audit-env",
+                Description = ""
+            };
+            db.Providers.Add(provider);
+            db.EnvironmentDefinitions.Add(environment);
+            await db.SaveChangesAsync();
+            var providerEnvironment = new ProviderEnvironment
+            {
+                ProviderId = provider.Id,
+                EnvironmentDefinitionId = environment.Id
+            };
+            db.ProviderEnvironments.Add(providerEnvironment);
+            await db.SaveChangesAsync();
+            var server = new Server
+            {
+                ProviderEnvironmentId = providerEnvironment.Id,
+                Name = "audit-server",
+                IpAddress = "10.0.0.1"
+            };
+            db.Servers.Add(server);
+            await db.SaveChangesAsync();
+            serverId = server.Id;
+            db.AuditEvents.Add(new AuditEvent
+            {
+                OccurredAt = DateTime.UtcNow,
+                Kind = "McpToolCall",
+                ActorUsername = "audit.admin",
+                Action = "get_server",
+                Outcome = "Ok",
+                ServerId = serverId,
+                TargetType = "Server",
+                TargetId = serverId
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var admin = await SessionClientAsync("audit.admin", systemAdmin: true);
+        var page = await admin.GetFromJsonAsync<JsonElement>(
+            "/api/audit-events?kind=McpToolCall&q=get_server");
+        var item = page.GetProperty("items").EnumerateArray().First();
+        Assert.Equal(serverId, item.GetProperty("serverId").GetInt32());
+        Assert.Equal("audit-server", item.GetProperty("serverName").GetString());
+        Assert.Equal("10.0.0.1", item.GetProperty("serverAddress").GetString());
+        Assert.Equal("audit-server (10.0.0.1)", item.GetProperty("targetLabel").GetString());
     }
 
     [Fact]
