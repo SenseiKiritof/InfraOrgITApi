@@ -73,6 +73,7 @@ public sealed class AuditApiTests : IAsyncLifetime
         Assert.Equal("list_executions", item.GetProperty("action").GetString());
         Assert.Equal(42, item.GetProperty("serverId").GetInt32());
         Assert.Equal(JsonValueKind.Null, item.GetProperty("serverName").ValueKind);
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("serverAddress").ValueKind);
         Assert.Equal(JsonValueKind.Null, item.GetProperty("targetLabel").ValueKind);
         Assert.Equal("Denied", item.GetProperty("outcome").GetString());
         Assert.Equal("forbidden", item.GetProperty("errorCode").GetString());
@@ -151,7 +152,8 @@ public sealed class AuditApiTests : IAsyncLifetime
         var item = page.GetProperty("items").EnumerateArray().First();
         Assert.Equal(serverId, item.GetProperty("serverId").GetInt32());
         Assert.Equal("audit-server", item.GetProperty("serverName").GetString());
-        Assert.Equal("audit-server", item.GetProperty("targetLabel").GetString());
+        Assert.Equal("10.0.0.1", item.GetProperty("serverAddress").GetString());
+        Assert.Equal("audit-server (10.0.0.1)", item.GetProperty("targetLabel").GetString());
     }
 
     [Fact]

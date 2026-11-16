@@ -66,10 +66,18 @@ public static class AuditEventsEndpoints
                             .Where(s => s.Id == x.ServerId)
                             .Select(s => s.Name)
                             .FirstOrDefault(),
+                    x.ServerId == null
+                        ? null
+                        : db.Servers
+                            .Where(s => s.Id == x.ServerId)
+                            .Select(s => s.IpAddress)
+                            .FirstOrDefault(),
                     x.TargetType == "Server"
                         ? db.Servers
                             .Where(s => s.Id == x.TargetId)
-                            .Select(s => s.Name)
+                            .Select(s => s.IpAddress == ""
+                                ? s.Name
+                                : s.Name + " (" + s.IpAddress + ")")
                             .FirstOrDefault()
                         : x.TargetType == "Application"
                             ? db.Applications
@@ -197,4 +205,5 @@ public sealed record AuditEventDto(
     int DurationMs,
     string? CorrelationId,
     string? ServerName,
+    string? ServerAddress,
     string? TargetLabel);
