@@ -6085,33 +6085,14 @@
         ]
       }
     },
-    "/api/mcp/approvals": {
+    "/api/mcp/agents": {
       "get": {
         "tags": [
-          "McpApprovalsEndpoints"
-        ],
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
+          "McpAgentsEndpoints"
         ],
         "responses": {
           "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/McpApprovalDto"
-                  }
-                }
-              }
-            }
+            "description": "OK"
           }
         },
         "security": [
@@ -6121,10 +6102,10 @@
         ]
       }
     },
-    "/api/mcp/approvals/{id}/approve": {
+    "/api/mcp/agents/{id}/approve": {
       "post": {
         "tags": [
-          "McpApprovalsEndpoints"
+          "McpAgentsEndpoints"
         ],
         "parameters": [
           {
@@ -6138,16 +6119,19 @@
             }
           }
         ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/McpApprovalDto"
-                }
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpAgentDecisionInput"
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
           }
         },
         "security": [
@@ -6158,10 +6142,10 @@
         ]
       }
     },
-    "/api/mcp/approvals/{id}/deny": {
+    "/api/mcp/agents/{id}/deny": {
       "post": {
         "tags": [
-          "McpApprovalsEndpoints"
+          "McpAgentsEndpoints"
         ],
         "parameters": [
           {
@@ -6177,14 +6161,124 @@
         ],
         "responses": {
           "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/McpApprovalDto"
-                }
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/mcp/agents/{id}/permissions": {
+      "put": {
+        "tags": [
+          "McpAgentsEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpAgentDecisionInput"
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/mcp/permission-requests": {
+      "get": {
+        "tags": [
+          "McpAgentsEndpoints"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/mcp/permission-requests/{id}/approve": {
+      "post": {
+        "tags": [
+          "McpAgentsEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/mcp/permission-requests/{id}/deny": {
+      "post": {
+        "tags": [
+          "McpAgentsEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
           }
         },
         "security": [
@@ -7007,52 +7101,30 @@
           }
         }
       },
-      "McpApprovalDto": {
+      "McpAgentDecisionInput": {
+        "type": "object",
+        "properties": {
+          "permissions": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/McpAgentPermissionInput"
+            }
+          }
+        }
+      },
+      "McpAgentPermissionInput": {
         "required": [
-          "id",
-          "action",
-          "serverId",
-          "serverName",
-          "serverApplicationId",
-          "applicationActionId",
-          "parametersJson",
-          "status",
-          "requestedAt",
-          "expiresAt",
-          "decidedAt",
-          "decidedByUsername",
-          "usedAt",
-          "serverApplicationName",
-          "applicationActionLabel"
+          "action"
         ],
         "type": "object",
         "properties": {
-          "id": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "format": "int32"
-          },
           "action": {
             "type": "string"
           },
-          "serverId": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "format": "int32"
-          },
-          "serverName": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "serverApplicationId": {
+          "environmentDefinitionId": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "null",
@@ -7060,61 +7132,6 @@
               "string"
             ],
             "format": "int32"
-          },
-          "applicationActionId": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "null",
-              "integer",
-              "string"
-            ],
-            "format": "int32"
-          },
-          "parametersJson": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "requestedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "decidedAt": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "date-time"
-          },
-          "decidedByUsername": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "usedAt": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "date-time"
-          },
-          "serverApplicationName": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "applicationActionLabel": {
-            "type": [
-              "null",
-              "string"
-            ]
           }
         }
       },
@@ -8991,7 +9008,7 @@
       "name": "McpGrantsEndpoints"
     },
     {
-      "name": "McpApprovalsEndpoints"
+      "name": "McpAgentsEndpoints"
     }
   ]
 }
