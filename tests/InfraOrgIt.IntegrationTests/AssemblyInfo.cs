@@ -1,5 +1,6 @@
 using Xunit;
 
-// Un solo container MySQL condiviso, un database per classe. Due classi in
-// parallelo riducono la durata senza esaurire Docker sui runner CI.
-[assembly: CollectionBehavior(MaxParallelThreads = 2)]
+// Un solo container MySQL condiviso, un database per classe. Le classi girano
+// in sequenza: due WebApplicationFactory avviate insieme possono perdere
+// l'intercettazione di app.Run e bloccare il testhost.
+[assembly: CollectionBehavior(MaxParallelThreads = 1)]

@@ -209,7 +209,7 @@ builder.Services.AddHostedService<AuditAnchorService>();
 builder.Services.AddScoped<ReachabilityRunner>();
 builder.Services.AddScoped<ApplicationActionRunner>();
 builder.Services.AddScoped<McpGrantService>();
-builder.Services.AddScoped<McpApprovalService>();
+builder.Services.AddScoped<McpAgentService>();
 builder.Services.AddScoped<ApiTokenService>();
 builder.Services
     .AddMcpServer()
@@ -591,7 +591,7 @@ ApiTokensEndpoints.Map(app);
 TunnelEndpoints.Map(app);
 
 McpGrantsEndpoints.Map(app);
-McpApprovalsEndpoints.Map(app);
+McpAgentsEndpoints.Map(app);
 
 static bool HasScope(ClaimsPrincipal user, params string[] allowed)
 {
