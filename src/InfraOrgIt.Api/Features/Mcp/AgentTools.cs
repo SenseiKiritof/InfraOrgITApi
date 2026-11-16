@@ -61,7 +61,8 @@ public static class AgentTools
 
         await McpToolAudit.OkAsync(
             audit, user, "get_mcp_agent",
-            new { agentId = agent.Id, agent.Status }, ct);
+            new { agentId = agent.Id, agent.Status }, ct,
+            targetType: "McpAgent", targetId: agent.Id);
         return JsonSerializer.Serialize(new
         {
             id = agent.Id,
@@ -112,7 +113,8 @@ public static class AgentTools
             }), ct);
         await McpToolAudit.OkAsync(
             audit, user, "request_mcp_permission",
-            new { requestId = request.Id, request.Action }, ct);
+            new { requestId = request.Id, request.Action }, ct,
+            targetType: "McpAgent", targetId: agent.Id);
 
         return JsonSerializer.Serialize(new
         {

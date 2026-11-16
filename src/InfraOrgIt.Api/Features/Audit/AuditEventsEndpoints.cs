@@ -59,7 +59,45 @@ public static class AuditEventsEndpoints
                     x.Outcome,
                     x.ErrorCode,
                     x.DurationMs,
-                    x.CorrelationId))
+                    x.CorrelationId,
+                    x.ServerId == null
+                        ? null
+                        : db.Servers
+                            .Where(s => s.Id == x.ServerId)
+                            .Select(s => s.Name)
+                            .FirstOrDefault(),
+                    x.TargetType == "Server"
+                        ? db.Servers
+                            .Where(s => s.Id == x.TargetId)
+                            .Select(s => s.Name)
+                            .FirstOrDefault()
+                        : x.TargetType == "Application"
+                            ? db.Applications
+                                .Where(a => a.Id == x.TargetId)
+                                .Select(a => a.Name)
+                                .FirstOrDefault()
+                            : x.TargetType == "Project"
+                                ? db.Projects
+                                    .Where(p => p.Id == x.TargetId)
+                                    .Select(p => p.Name)
+                                    .FirstOrDefault()
+                                : x.TargetType == "ServerApplication"
+                                    ? db.ServerApplications
+                                        .Where(sa => sa.Id == x.TargetId)
+                                        .Select(sa => sa.ApplicationVersion!
+                                            .Application!.Name)
+                                        .FirstOrDefault()
+                                    : x.TargetType == "McpAgent"
+                                        ? db.McpAgents
+                                            .Where(a => a.Id == x.TargetId)
+                                            .Select(a => a.Name)
+                                            .FirstOrDefault()
+                                        : x.TargetType == "McpPermissionRequest"
+                                            ? db.McpPermissionRequests
+                                                .Where(r => r.Id == x.TargetId)
+                                                .Select(r => r.Action)
+                                                .FirstOrDefault()
+                                            : null))
                 .ToListAsync(ct);
 
             return Results.Ok(new PagedResult<AuditEventDto>(
@@ -157,4 +195,6 @@ public sealed record AuditEventDto(
     string Outcome,
     string? ErrorCode,
     int DurationMs,
-    string? CorrelationId);
+    string? CorrelationId,
+    string? ServerName,
+    string? TargetLabel);

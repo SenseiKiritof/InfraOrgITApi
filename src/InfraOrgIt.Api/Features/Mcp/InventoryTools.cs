@@ -115,11 +115,13 @@ public static class InventoryTools
         var json = await LoadServerJsonAsync(db, id, ct);
         if (json is null)
         {
-            await McpToolAudit.RecordAsync(audit, user, "get_server", "Error", new { id }, "not_found", ct);
+            await McpToolAudit.RecordAsync(audit, user, "get_server", "Error", new { id }, "not_found", ct,
+                serverId: id, targetType: "Server", targetId: id);
             throw new McpException($"Server {id} non trovato.");
         }
 
-        await McpToolAudit.OkAsync(audit, user, "get_server", new { id }, ct);
+        await McpToolAudit.OkAsync(audit, user, "get_server", new { id }, ct,
+            serverId: id, targetType: "Server", targetId: id);
         return json;
     }
 
@@ -256,11 +258,13 @@ public static class InventoryTools
         var json = await LoadApplicationJsonAsync(db, id, ct);
         if (json is null)
         {
-            await McpToolAudit.RecordAsync(audit, user, "get_application", "Error", new { id }, "not_found", ct);
+            await McpToolAudit.RecordAsync(audit, user, "get_application", "Error", new { id }, "not_found", ct,
+                targetType: "Application", targetId: id);
             throw new McpException($"Applicazione {id} non trovata.");
         }
 
-        await McpToolAudit.OkAsync(audit, user, "get_application", new { id }, ct);
+        await McpToolAudit.OkAsync(audit, user, "get_application", new { id }, ct,
+            targetType: "Application", targetId: id);
         return json;
     }
 
@@ -320,11 +324,13 @@ public static class InventoryTools
 
         if (item is null)
         {
-            await McpToolAudit.RecordAsync(audit, user, "get_project", "Error", new { id }, "not_found", ct);
+            await McpToolAudit.RecordAsync(audit, user, "get_project", "Error", new { id }, "not_found", ct,
+                targetType: "Project", targetId: id);
             throw new McpException($"Progetto {id} non trovato.");
         }
 
-        await McpToolAudit.OkAsync(audit, user, "get_project", new { id }, ct);
+        await McpToolAudit.OkAsync(audit, user, "get_project", new { id }, ct,
+            targetType: "Project", targetId: id);
         return JsonSerializer.Serialize(item, JsonOptions);
     }
 
@@ -367,7 +373,13 @@ public static class InventoryTools
             })
             .ToListAsync(ct);
 
-        await McpToolAudit.OkAsync(audit, user, "list_deployments", new { applicationId, serverId, count = items.Count }, ct);
+        var targetType = applicationId is not null
+            ? "Application"
+            : serverId is not null ? "Server" : null;
+        await McpToolAudit.OkAsync(audit, user, "list_deployments",
+            new { applicationId, serverId, count = items.Count }, ct,
+            serverId: serverId, targetType: targetType,
+            targetId: applicationId ?? serverId);
         return JsonSerializer.Serialize(new { items }, JsonOptions);
     }
 
@@ -387,7 +399,8 @@ public static class InventoryTools
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "list_reachability_tests", "Error",
-                new { serverId }, "not_found", ct, serverId);
+                new { serverId }, "not_found", ct, serverId,
+                serverId is null ? null : "Server", serverId);
             throw new McpException($"Server {serverId} non trovato.");
         }
 
@@ -412,7 +425,8 @@ public static class InventoryTools
 
         await McpToolAudit.OkAsync(
             audit, user, "list_reachability_tests",
-            new { serverId, limit, count = items.Count }, ct, serverId);
+            new { serverId, limit, count = items.Count }, ct, serverId,
+            serverId is null ? null : "Server", serverId);
         return JsonSerializer.Serialize(new { items }, JsonOptions);
     }
 
@@ -477,7 +491,8 @@ public static class InventoryTools
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "list_executions", "Denied",
-                new { serverId, kind, limit }, "forbidden", ct, serverId);
+                new { serverId, kind, limit }, "forbidden", ct, serverId,
+                serverId is null ? null : "Server", serverId);
             throw new McpException("Operazione riservata a SystemAdmin.");
         }
 
@@ -528,7 +543,8 @@ public static class InventoryTools
 
         await McpToolAudit.OkAsync(
             audit, user, "list_executions",
-            new { serverId, kind, limit, count = items.Count }, ct, serverId);
+            new { serverId, kind, limit, count = items.Count }, ct, serverId,
+            serverId is null ? null : "Server", serverId);
         return JsonSerializer.Serialize(new { items }, JsonOptions);
     }
 }

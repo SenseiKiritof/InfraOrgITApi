@@ -11,8 +11,12 @@ internal static class McpToolAudit
         string action,
         object detail,
         CancellationToken ct,
-        int? serverId = null) =>
-        RecordAsync(audit, user, action, "Ok", detail, null, ct, serverId);
+        int? serverId = null,
+        string? targetType = null,
+        int? targetId = null) =>
+        RecordAsync(
+            audit, user, action, "Ok", detail, null, ct, serverId,
+            targetType, targetId);
 
     public static Task RecordAsync(
         IAuditService audit,
@@ -22,7 +26,9 @@ internal static class McpToolAudit
         object? detail,
         string? errorCode,
         CancellationToken ct,
-        int? serverId = null)
+        int? serverId = null,
+        string? targetType = null,
+        int? targetId = null)
     {
         var actorId = int.TryParse(
             user.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
@@ -35,6 +41,8 @@ internal static class McpToolAudit
             ActorUserId: actorId,
             ActorUsername: user.Identity?.Name,
             ClientId: user.FindFirstValue("api_token_id"),
+            TargetType: targetType,
+            TargetId: targetId,
             ServerId: serverId,
             ErrorCode: errorCode,
             Detail: detail), ct);

@@ -64,13 +64,15 @@ public static class InventoryResources
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "read_resource", "Error",
-                new { uri = $"infraorgit://servers/{id}" }, "not_found", ct, id);
+                new { uri = $"infraorgit://servers/{id}" }, "not_found", ct, id,
+                "Server", id);
             throw new McpException($"Server {id} non trovato.");
         }
 
         await McpToolAudit.OkAsync(
             audit, user, "read_resource",
-            new { uri = $"infraorgit://servers/{id}" }, ct, id);
+            new { uri = $"infraorgit://servers/{id}" }, ct, id,
+            "Server", id);
         return json;
     }
 
@@ -92,13 +94,15 @@ public static class InventoryResources
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "read_resource", "Error",
-                new { uri = $"infraorgit://applications/{id}" }, "not_found", ct);
+                new { uri = $"infraorgit://applications/{id}" }, "not_found", ct,
+                targetType: "Application", targetId: id);
             throw new McpException($"Applicazione {id} non trovata.");
         }
 
         await McpToolAudit.OkAsync(
             audit, user, "read_resource",
-            new { uri = $"infraorgit://applications/{id}" }, ct);
+            new { uri = $"infraorgit://applications/{id}" }, ct,
+            targetType: "Application", targetId: id);
         return json;
     }
 }

@@ -47,7 +47,8 @@ public static class ActionTools
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "run_application_action", "Denied",
-                new { serverApplicationId, actionId }, "missing_scope", ct);
+                new { serverApplicationId, actionId }, "missing_scope", ct,
+                targetType: "ServerApplication", targetId: serverApplicationId);
             throw new McpException("Serve lo scope mcp:operate.");
         }
 
@@ -55,7 +56,8 @@ public static class ActionTools
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "run_application_action", "Error",
-                new { serverApplicationId, actionId }, "confirmation_required", ct);
+                new { serverApplicationId, actionId }, "confirmation_required", ct,
+                targetType: "ServerApplication", targetId: serverApplicationId);
             throw new McpException("Passa confirm=true per eseguire l'azione.");
         }
 
@@ -63,7 +65,8 @@ public static class ActionTools
         if (agent.Status != McpAgentStatuses.Approved)
             return await AgentRequiredAsync(
                 audit, user, agent, "run_application_action",
-                new { serverApplicationId, actionId }, ct);
+                new { serverApplicationId, actionId }, ct,
+                targetType: "ServerApplication", targetId: serverApplicationId);
 
         ServerApplication deploy;
         try
@@ -75,7 +78,8 @@ public static class ActionTools
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "run_application_action", "Error",
-                new { serverApplicationId, actionId }, "not_found", ct);
+                new { serverApplicationId, actionId }, "not_found", ct,
+                targetType: "ServerApplication", targetId: serverApplicationId);
             throw new McpException($"Deployment {serverApplicationId} non trovato.");
         }
 
@@ -94,7 +98,8 @@ public static class ActionTools
                 agent.Id, "actions.run", environmentDefinitionId, null, ct);
             return await PermissionRequiredAsync(
                 audit, user, agent, request, "run_application_action",
-                new { serverApplicationId, actionId }, ct);
+                new { serverApplicationId, actionId }, ct, server.Id,
+                "ServerApplication", serverApplicationId);
         }
 
         var environmentAccess = await access.GetAsync(user, ct);
@@ -104,7 +109,7 @@ public static class ActionTools
             await McpToolAudit.RecordAsync(
                 audit, user, "run_application_action", "Denied",
                 new { serverApplicationId, actionId }, "forbidden", ct,
-                server.Id);
+                server.Id, "ServerApplication", serverApplicationId);
             throw new McpException(
                 "Serve ServerOperator o ServerAdmin sull'ambiente del server.");
         }
@@ -114,7 +119,7 @@ public static class ActionTools
         await McpToolAudit.RecordAsync(
             audit, user, "run_application_action", "Ok",
             new { serverApplicationId, actionId, result.ExitCode },
-            null, ct, server.Id);
+            null, ct, server.Id, "ServerApplication", serverApplicationId);
 
         var output = result.Output.Length > 4000
             ? result.Output[..4000]
@@ -148,7 +153,8 @@ public static class ActionTools
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "run_reachability_tests", "Denied",
-                new { serverId }, "missing_scope", ct, serverId);
+                new { serverId }, "missing_scope", ct, serverId,
+                "Server", serverId);
             throw new McpException("Serve lo scope mcp:operate.");
         }
 
@@ -156,7 +162,8 @@ public static class ActionTools
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "run_reachability_tests", "Error",
-                new { serverId }, "confirmation_required", ct, serverId);
+                new { serverId }, "confirmation_required", ct, serverId,
+                "Server", serverId);
             throw new McpException("Passa confirm=true per eseguire i test.");
         }
 
@@ -164,7 +171,7 @@ public static class ActionTools
         if (agent.Status != McpAgentStatuses.Approved)
             return await AgentRequiredAsync(
                 audit, user, agent, "run_reachability_tests",
-                new { serverId }, ct, serverId);
+                new { serverId }, ct, serverId, "Server", serverId);
 
         var server = await db.Servers
             .Include(x => x.ProviderEnvironment)
@@ -175,7 +182,8 @@ public static class ActionTools
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "run_reachability_tests", "Error",
-                new { serverId }, "not_found", ct, serverId);
+                new { serverId }, "not_found", ct, serverId,
+                "Server", serverId);
             throw new McpException($"Server {serverId} non trovato.");
         }
 
@@ -189,7 +197,7 @@ public static class ActionTools
                 agent.Id, "reachability.run", environmentDefinitionId, null, ct);
             return await PermissionRequiredAsync(
                 audit, user, agent, request, "run_reachability_tests",
-                new { serverId }, ct, serverId);
+                new { serverId }, ct, serverId, "Server", serverId);
         }
 
         var environmentAccess = await access.GetAsync(user, ct);
@@ -198,7 +206,8 @@ public static class ActionTools
         {
             await McpToolAudit.RecordAsync(
                 audit, user, "run_reachability_tests", "Denied",
-                new { serverId }, "forbidden", ct, serverId);
+                new { serverId }, "forbidden", ct, serverId,
+                "Server", serverId);
             throw new McpException(
                 "Serve ServerOperator o ServerAdmin sull'ambiente del server.");
         }
@@ -209,7 +218,7 @@ public static class ActionTools
             await McpToolAudit.RecordAsync(
                 audit, user, "run_reachability_tests", "Error",
                 new { serverId, count = normalizedTestIds.Length },
-                "too_many_test_ids", ct, serverId);
+                "too_many_test_ids", ct, serverId, "Server", serverId);
             throw new McpException("Massimo 200 test id per richiesta.");
         }
 
@@ -222,7 +231,7 @@ public static class ActionTools
                 count = results.Count,
                 reachable = results.Count(x => x.Reachable)
             },
-            null, ct, serverId);
+            null, ct, serverId, "Server", serverId);
 
         return JsonSerializer.Serialize(new
         {
@@ -240,7 +249,9 @@ public static class ActionTools
         string action,
         object detail,
         CancellationToken ct,
-        int? serverId = null)
+        int? serverId = null,
+        string? targetType = null,
+        int? targetId = null)
     {
         var errorCode = agent.Status == McpAgentStatuses.Denied
             ? "agent_denied"
@@ -248,7 +259,7 @@ public static class ActionTools
         await McpToolAudit.RecordAsync(
             audit, user, action, "Denied",
             new { agentId = agent.Id, agent.Status, detail },
-            errorCode, ct, serverId);
+            errorCode, ct, serverId, targetType, targetId);
 
         return JsonSerializer.Serialize(new
         {
@@ -269,12 +280,14 @@ public static class ActionTools
         string action,
         object detail,
         CancellationToken ct,
-        int? serverId = null)
+        int? serverId = null,
+        string? targetType = null,
+        int? targetId = null)
     {
         await McpToolAudit.RecordAsync(
             audit, user, action, "Denied",
             new { agentId = agent.Id, permissionRequestId = request.Id, detail },
-            "permission_required", ct, serverId);
+            "permission_required", ct, serverId, targetType, targetId);
 
         return JsonSerializer.Serialize(new
         {
