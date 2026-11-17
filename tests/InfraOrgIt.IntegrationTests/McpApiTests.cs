@@ -250,6 +250,45 @@ public sealed class McpApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task System_admin_lists_and_revokes_other_users_tokens()
+    {
+        using var owner = await SessionClientAsync("token.owner");
+        var created = await SendAsync(owner, HttpMethod.Post, "/api/api-tokens",
+            new { name = "leaked", scopes = "mcp:read", expiresInDays = 30 });
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var createdDto = await ReadAsync(created);
+        var tokenId = createdDto.GetProperty("id").GetInt32();
+        using var mcp = McpClientFor(createdDto.GetProperty("token").GetString()!);
+
+        using var other = await SessionClientAsync("token.other");
+        var otherList = await ReadAsync(await other.GetAsync("/api/api-tokens"));
+        Assert.DoesNotContain(otherList.EnumerateArray(),
+            x => x.GetProperty("id").GetInt32() == tokenId);
+        var notOwner = await SendAsync(other, HttpMethod.Delete,
+            $"/api/api-tokens/{tokenId}");
+        Assert.Equal(HttpStatusCode.NotFound, notOwner.StatusCode);
+
+        using var admin = await SessionClientAsync("token.admin", systemAdmin: true);
+        var adminList = await ReadAsync(await admin.GetAsync("/api/api-tokens"));
+        var row = adminList.EnumerateArray()
+            .Single(x => x.GetProperty("id").GetInt32() == tokenId);
+        Assert.Equal("token.owner", row.GetProperty("username").GetString());
+
+        var revoked = await SendAsync(admin, HttpMethod.Delete,
+            $"/api/api-tokens/{tokenId}");
+        Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);
+
+        var afterRevoke = await mcp.PostAsJsonAsync("/mcp", InitializeBody(1));
+        Assert.Equal(HttpStatusCode.Unauthorized, afterRevoke.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        var audit = await db.AuditEvents.SingleAsync(
+            x => x.Action == "api_token_revoke" && x.TargetId == tokenId);
+        Assert.Equal("token.admin", audit.ActorUsername);
+    }
+
+    [Fact]
     public async Task Unauthenticated_mcp_request_advertises_protected_resource_metadata()
     {
         var unauthorized = await _factory.CreateClient()
