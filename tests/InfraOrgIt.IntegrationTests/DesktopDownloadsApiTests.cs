@@ -33,9 +33,6 @@ public sealed class DesktopDownloadsApiTests : IAsyncLifetime
         _connectionString = await TestMySql.CreateDatabaseAsync("DesktopDownloadsApiTests");
         _factory = BuildFactory();
 
-        using var scope = _factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>()
-            .Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()

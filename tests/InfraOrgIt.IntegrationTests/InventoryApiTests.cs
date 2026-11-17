@@ -61,8 +61,6 @@ public sealed class InventoryApiTests : IAsyncLifetime
             });
         });
 
-        using var scope = _factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>().Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()
