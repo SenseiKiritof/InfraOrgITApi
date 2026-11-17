@@ -52,6 +52,7 @@ public static class ApplicationsEndpoints
             .Select(ToDto)
             .ToListAsync(ct);
 
+        items = await WithTranslationsAsync(db, items, ct);
         return Results.Ok(new PagedResult<ApplicationDto>(items, total, page.Page, page.PageSize));
     }
 
@@ -61,7 +62,9 @@ public static class ApplicationsEndpoints
             .Where(x => x.Id == id)
             .Select(ToDto)
             .SingleOrDefaultAsync(ct);
-        return dto is null ? throw Guard.NotFound("Applicazione", id) : Results.Ok(dto);
+        if (dto is null)
+            throw Guard.NotFound("Applicazione", id);
+        return Results.Ok((await WithTranslationsAsync(db, [dto], ct))[0]);
     }
 
     private static async Task<IResult> CreateAsync(
@@ -85,6 +88,7 @@ public static class ApplicationsEndpoints
         await EnsureUniqueAsync(db, entity.Name, null, ct);
         db.Applications.Add(entity);
         await db.SaveChangesAsync(ct);
+        await UpsertTranslationsAsync(db, entity.Id, input.Translations, ct);
         await audit.RecordAsync(AuditEntries.Change(
             user, "application.create", "Application", entity.Id,
             detail: new { entity.Name, entity.Type }), ct);
@@ -113,6 +117,7 @@ public static class ApplicationsEndpoints
         entity.ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort");
         entity.Type = ApplicationType(input.Type);
         await db.SaveChangesAsync(ct);
+        await UpsertTranslationsAsync(db, id, input.Translations, ct);
         await audit.RecordAsync(AuditEntries.Change(
             user, "application.update", "Application", id,
             detail: new { entity.Name, entity.Type }), ct);
@@ -134,6 +139,10 @@ public static class ApplicationsEndpoints
         if (versions > 0)
             throw Guard.Conflict($"Applicazione con {versions} versioni: rimuoverle prima.");
 
+        var translations = await db.Translations
+            .Where(x => x.EntityType == "Application" && x.EntityId == id)
+            .ToListAsync(ct);
+        db.Translations.RemoveRange(translations);
         db.Applications.Remove(entity);
         await db.SaveChangesAsync(ct);
         await audit.RecordAsync(AuditEntries.Change(
@@ -221,11 +230,112 @@ public static class ApplicationsEndpoints
     }
 
     internal static async Task<ApplicationDto> LoadAsync(
-        InfraOrgItDbContext db, int id, CancellationToken ct) =>
-        await db.Applications.AsNoTracking()
+        InfraOrgItDbContext db, int id, CancellationToken ct)
+    {
+        var dto = await db.Applications.AsNoTracking()
             .Where(x => x.Id == id)
             .Select(ToDto)
             .SingleAsync(ct);
+        return (await WithTranslationsAsync(db, [dto], ct))[0];
+    }
+
+    private static readonly string[] TranslationLanguages = ["it", "fr", "de", "es"];
+
+    private static async Task<List<ApplicationDto>> WithTranslationsAsync(
+        InfraOrgItDbContext db,
+        List<ApplicationDto> items,
+        CancellationToken ct)
+    {
+        if (items.Count == 0)
+            return items;
+
+        var ids = items.Select(x => x.Id).ToList();
+        var rows = await db.Translations.AsNoTracking()
+            .Where(x => x.EntityType == "Application" && ids.Contains(x.EntityId))
+            .ToListAsync(ct);
+
+        var byLanguage = rows
+            .GroupBy(x => (x.EntityId, x.Language.ToLowerInvariant()))
+            .ToDictionary(
+                group => group.Key,
+                group => group.ToDictionary(x => x.Field, x => x.Value));
+
+        return items
+            .Select(item => item with { Translations = Localize(item.Id, byLanguage) })
+            .ToList();
+    }
+
+    private static Dictionary<string, ApplicationTranslationDto> Localize(
+        int id,
+        Dictionary<(int EntityId, string Language), Dictionary<string, string>> byLanguage)
+    {
+        var result = new Dictionary<string, ApplicationTranslationDto>();
+        foreach (var language in TranslationLanguages)
+        {
+            if (!byLanguage.TryGetValue((id, language), out var fields))
+                continue;
+            var name = fields.GetValueOrDefault("Name", "");
+            var description = fields.GetValueOrDefault("Description", "");
+            if (name.Length == 0 && description.Length == 0)
+                continue;
+            result[language] = new ApplicationTranslationDto(name, description);
+        }
+        return result;
+    }
+
+    private static async Task UpsertTranslationsAsync(
+        InfraOrgItDbContext db,
+        int id,
+        Dictionary<string, ApplicationTranslationInput>? input,
+        CancellationToken ct)
+    {
+        if (input is null || input.Count == 0)
+            return;
+
+        var existing = await db.Translations
+            .Where(x => x.EntityType == "Application" && x.EntityId == id)
+            .ToListAsync(ct);
+
+        foreach (var (rawLanguage, values) in input)
+        {
+            var language = rawLanguage.Trim().ToLowerInvariant();
+            if (!TranslationLanguages.Contains(language))
+                continue;
+            Upsert(language, "Name", values?.Name);
+            Upsert(language, "Description", values?.Description);
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        void Upsert(string language, string field, string? raw)
+        {
+            var value = Guard.OptionalText(raw, field, 200);
+            var current = existing.FirstOrDefault(
+                x => x.Field == field && x.Language == language);
+            if (value is null)
+            {
+                if (current is not null)
+                {
+                    db.Translations.Remove(current);
+                    existing.Remove(current);
+                }
+                return;
+            }
+            if (current is not null)
+            {
+                current.Value = value;
+                return;
+            }
+            db.Translations.Add(new Translation
+            {
+                EntityType = "Application",
+                EntityId = id,
+                Field = field,
+                Language = language,
+                Value = value
+            });
+        }
+    }
 
     internal static readonly Expression<Func<Application, ApplicationDto>> ToDto = x => new ApplicationDto(
         x.Id,
@@ -237,7 +347,8 @@ public static class ApplicationsEndpoints
         x.Versions.Count,
         x.CreatedAt,
         x.UpdatedAt,
-        x.Version);
+        x.Version,
+        new Dictionary<string, ApplicationTranslationDto>());
 }
 
 public sealed record ApplicationInput(
@@ -245,7 +356,12 @@ public sealed record ApplicationInput(
     string? Description,
     string? BasePath,
     int ListeningOnPort,
-    string? Type = null);
+    string? Type = null,
+    Dictionary<string, ApplicationTranslationInput>? Translations = null);
+
+public sealed record ApplicationTranslationInput(string? Name, string? Description);
+
+public sealed record ApplicationTranslationDto(string Name, string Description);
 
 public sealed record ApplicationDto(
     int Id,
@@ -257,7 +373,8 @@ public sealed record ApplicationDto(
     int VersionCount,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    int Version);
+    int Version,
+    Dictionary<string, ApplicationTranslationDto> Translations);
 
 public sealed record ApplicationSummaryDto(
     int Id,
