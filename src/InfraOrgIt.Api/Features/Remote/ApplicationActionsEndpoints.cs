@@ -125,6 +125,7 @@ public static class ApplicationActionsEndpoints
         var actions = await LoadActionsAsync(db, deploy.ApplicationVersion!.ApplicationId, ct);
         return Results.Ok(actions.Select(x => new ApplicationActionButtonDto(
             x.Id, x.Label, x.Order, x.RequiresConfirmation,
+            x.RequiresSudo || (x.CommandTemplate?.RequiresSudo ?? false),
             deploy.ServerId)).ToList());
     }
 
@@ -170,7 +171,8 @@ public static class ApplicationActionsEndpoints
             prepared.Label,
             prepared.Script,
             prepared.CustomValues,
-            options.Value.CommandTimeoutMinutes * 60));
+            options.Value.CommandTimeoutMinutes * 60,
+            prepared.RequiresSudo));
     }
 
     private static async Task<ApplicationAction> ValidateAsync(
@@ -221,7 +223,8 @@ public static class ApplicationActionsEndpoints
             CommandTemplateId = hasTemplate ? input.CommandTemplateId : null,
             CustomScript = hasTemplate ? null : script,
             ParameterValuesJson = JsonSerializer.Serialize(values),
-            RequiresConfirmation = input.RequiresConfirmation
+            RequiresConfirmation = input.RequiresConfirmation,
+            RequiresSudo = input.RequiresSudo
         };
     }
 
@@ -254,7 +257,8 @@ public static class ApplicationActionsEndpoints
         action.CommandTemplate?.Name,
         action.CustomScript,
         ApplicationActionRunner.ParseParameterValues(action.ParameterValuesJson),
-        action.RequiresConfirmation);
+        action.RequiresConfirmation,
+        action.RequiresSudo || (action.CommandTemplate?.RequiresSudo ?? false));
 }
 
 public sealed record ApplicationActionInput(
@@ -263,7 +267,8 @@ public sealed record ApplicationActionInput(
     int? CommandTemplateId,
     string? CustomScript,
     Dictionary<string, string>? ParameterValues,
-    bool RequiresConfirmation);
+    bool RequiresConfirmation,
+    bool RequiresSudo);
 
 /// <summary>
 /// Body of the action run endpoint. <c>confirm</c> must be true when the
@@ -281,13 +286,15 @@ public sealed record ApplicationActionConfigDto(
     string? CommandTemplateName,
     string? CustomScript,
     Dictionary<string, string> ParameterValues,
-    bool RequiresConfirmation);
+    bool RequiresConfirmation,
+    bool RequiresSudo);
 
 public sealed record ApplicationActionButtonDto(
     int Id,
     string Label,
     int Order,
     bool RequiresConfirmation,
+    bool RequiresSudo,
     int ServerId);
 
 public sealed record ApplicationActionIntentDto(
@@ -296,6 +303,7 @@ public sealed record ApplicationActionIntentDto(
     string Label,
     string Script,
     IReadOnlyDictionary<string, string> RedactValues,
-    int TimeoutSeconds);
+    int TimeoutSeconds,
+    bool RequiresSudo);
 
 public sealed record CommandResultDto(int? ExitCode, string Output, bool TimedOut);

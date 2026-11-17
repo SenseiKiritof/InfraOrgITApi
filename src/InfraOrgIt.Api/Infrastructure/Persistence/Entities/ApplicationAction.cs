@@ -9,6 +9,7 @@ public sealed class ApplicationAction : EntityBase
     public string? CustomScript { get; set; }
     public string ParameterValuesJson { get; set; } = "{}";
     public bool RequiresConfirmation { get; set; }
+    public bool RequiresSudo { get; set; }
     public Application? Application { get; set; }
     public CommandTemplate? CommandTemplate { get; set; }
 }

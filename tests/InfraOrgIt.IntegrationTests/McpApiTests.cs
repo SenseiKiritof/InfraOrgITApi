@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
+using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Infrastructure.Files;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
@@ -924,6 +925,55 @@ public sealed class McpApiTests : IAsyncLifetime
             Assert.Equal("Ok", audit.Outcome);
             Assert.Equal(seeded.Id, audit.ServerId);
         }
+
+        // A sudo action gets the stored password on stdin, never in the script.
+        var (sudoDeploymentId, sudoActionId) =
+            await SeedActionAsync(seeded.Id, requiresSudo: true);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var cipher = scope.ServiceProvider.GetRequiredService<CredentialCipher>();
+            var (secret, version) = cipher.Encrypt("ssh-secret");
+            var (sudoSecret, sudoVersion) = cipher.Encrypt("s3cr3t-sudo");
+            var credential = new ServerCredential
+            {
+                Name = "sudo-" + Guid.NewGuid().ToString("N")[..8],
+                Username = "deploy",
+                AuthType = "Password",
+                EncryptedSecret = secret,
+                KeyVersion = version,
+                EncryptedSudoSecret = sudoSecret,
+                SudoKeyVersion = sudoVersion
+            };
+            db.ServerCredentials.Add(credential);
+            await db.SaveChangesAsync();
+            var server = await db.Servers.SingleAsync(x => x.Id == seeded.Id);
+            server.CredentialId = credential.Id;
+            await db.SaveChangesAsync();
+        }
+
+        var sudoRun = await CallTool(mcp, "run_application_action",
+            new
+            {
+                serverApplicationId = sudoDeploymentId,
+                actionId = sudoActionId,
+                confirm = true,
+                idempotencyKey = "mcp-sudo-" + Guid.NewGuid().ToString("N")
+            });
+        Assert.False(
+            sudoRun.TryGetProperty("isError", out var sudoError) &&
+            sudoError.GetBoolean());
+        Assert.Contains("s3cr3t-sudo", _ssh.SudoPasswords);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var execution = await db.CommandExecutions
+                .Where(x => x.Kind == "Action")
+                .OrderByDescending(x => x.Id)
+                .FirstAsync();
+            Assert.True(execution.RequiresSudo);
+            Assert.DoesNotContain("s3cr3t-sudo", execution.Script);
+        }
     }
 
     private async Task<JsonElement> ApproveAgentAsync(
@@ -940,7 +990,8 @@ public sealed class McpApiTests : IAsyncLifetime
         result.GetProperty("content").EnumerateArray().Single()
             .GetProperty("text").GetString() ?? "";
 
-    private async Task<(int DeploymentId, int ActionId)> SeedActionAsync(int serverId)
+    private async Task<(int DeploymentId, int ActionId)> SeedActionAsync(
+        int serverId, bool requiresSudo = false)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
@@ -979,7 +1030,8 @@ public sealed class McpApiTests : IAsyncLifetime
             Order = 0,
             CustomScript = "echo ok",
             ParameterValuesJson = "{}",
-            RequiresConfirmation = true
+            RequiresConfirmation = true,
+            RequiresSudo = requiresSudo
         };
         db.ApplicationActions.Add(action);
         await db.SaveChangesAsync();
@@ -1001,9 +1053,11 @@ public sealed class McpApiTests : IAsyncLifetime
 
     private sealed class FakeSsh : ISshConnector
     {
+        public List<string?> SudoPasswords { get; } = [];
+
         public Task<ISshSession> ConnectAsync(
             Server server, CancellationToken ct) =>
-            Task.FromResult<ISshSession>(new Session());
+            Task.FromResult<ISshSession>(new Session(SudoPasswords));
 
         public Task<IFileTransferSession> OpenSftpAsync(
             Server server,
@@ -1012,11 +1066,21 @@ public sealed class McpApiTests : IAsyncLifetime
             CancellationToken ct) =>
             throw new NotSupportedException();
 
-        private sealed class Session : ISshSession
+        private sealed class Session(List<string?> sudoPasswords) : ISshSession
         {
             public Task<SshCommandResult> RunAsync(
                 string script, TimeSpan timeout, CancellationToken ct) =>
                 Task.FromResult(new SshCommandResult(0, ""));
+
+            public Task<SshCommandResult> RunSudoAsync(
+                string script,
+                string? password,
+                TimeSpan timeout,
+                CancellationToken ct)
+            {
+                sudoPasswords.Add(password);
+                return Task.FromResult(new SshCommandResult(0, "sudo ok"));
+            }
 
             public Task<IShellSession> OpenShellAsync(
                 uint columns, uint rows, CancellationToken ct) =>

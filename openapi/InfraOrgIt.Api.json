@@ -6362,7 +6362,8 @@
           "commandTemplateId",
           "customScript",
           "parameterValues",
-          "requiresConfirmation"
+          "requiresConfirmation",
+          "requiresSudo"
         ],
         "type": "object",
         "properties": {
@@ -6405,6 +6406,9 @@
             }
           },
           "requiresConfirmation": {
+            "type": "boolean"
+          },
+          "requiresSudo": {
             "type": "boolean"
           }
         }
@@ -6705,7 +6709,8 @@
         "required": [
           "name",
           "description",
-          "script"
+          "script",
+          "requiresSudo"
         ],
         "type": "object",
         "properties": {
@@ -6726,6 +6731,9 @@
               "null",
               "string"
             ]
+          },
+          "requiresSudo": {
+            "type": "boolean"
           }
         }
       },
@@ -7965,7 +7973,8 @@
           "username",
           "authType",
           "secret",
-          "passphrase"
+          "passphrase",
+          "sudoPassword"
         ],
         "type": "object",
         "properties": {
@@ -7994,6 +8003,12 @@
             ]
           },
           "passphrase": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sudoPassword": {
             "type": [
               "null",
               "string"

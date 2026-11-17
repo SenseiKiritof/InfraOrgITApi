@@ -48,7 +48,8 @@ public static class ServerCredentialsEndpoints
             .Take(page.PageSize)
             .Select(x => new ServerCredentialDto(
                 x.Id, x.Name, x.Username, x.AuthType,
-                x.EncryptedSecret != "", x.Servers.Count, x.NeedsReauth))
+                x.EncryptedSecret != "", x.EncryptedSudoSecret != null,
+                x.Servers.Count, x.NeedsReauth))
             .ToListAsync(ct);
 
         return Results.Ok(new PagedResult<ServerCredentialDto>(
@@ -66,7 +67,8 @@ public static class ServerCredentialsEndpoints
             .Where(x => x.Id == id)
             .Select(x => new ServerCredentialDto(
                 x.Id, x.Name, x.Username, x.AuthType,
-                x.EncryptedSecret != "", x.Servers.Count, x.NeedsReauth))
+                x.EncryptedSecret != "", x.EncryptedSudoSecret != null,
+                x.Servers.Count, x.NeedsReauth))
             .SingleOrDefaultAsync(ct);
         return dto is null ? throw Guard.NotFound("Credenziale", id) : Results.Ok(dto);
     }
@@ -88,6 +90,14 @@ public static class ServerCredentialsEndpoints
         ValidatePrivateKey(authType, secret, input.Passphrase);
 
         var (ciphertext, keyVersion) = cipher.Encrypt(secret);
+        string? sudoCiphertext = null;
+        int? sudoKeyVersion = null;
+        if (!string.IsNullOrEmpty(input.SudoPassword))
+        {
+            var (value, version) = cipher.Encrypt(input.SudoPassword);
+            sudoCiphertext = value;
+            sudoKeyVersion = version;
+        }
         var entity = new ServerCredential
         {
             Name = name,
@@ -97,6 +107,8 @@ public static class ServerCredentialsEndpoints
             EncryptedPassphrase = string.IsNullOrEmpty(input.Passphrase)
                 ? null
                 : cipher.Encrypt(input.Passphrase).Ciphertext,
+            EncryptedSudoSecret = sudoCiphertext,
+            SudoKeyVersion = sudoKeyVersion,
             KeyVersion = keyVersion
         };
         db.ServerCredentials.Add(entity);
@@ -104,7 +116,7 @@ public static class ServerCredentialsEndpoints
 
         return Results.Ok(new ServerCredentialDto(
             entity.Id, entity.Name, entity.Username, entity.AuthType,
-            true, 0, entity.NeedsReauth));
+            true, entity.EncryptedSudoSecret != null, 0, entity.NeedsReauth));
     }
 
     private static async Task<IResult> UpdateAsync(
@@ -136,6 +148,21 @@ public static class ServerCredentialsEndpoints
                 ? null
                 : cipher.Encrypt(input.Passphrase).Ciphertext;
             entity.KeyVersion = keyVersion;
+        }
+
+        if (input.SudoPassword is not null)
+        {
+            if (input.SudoPassword.Length == 0)
+            {
+                entity.EncryptedSudoSecret = null;
+                entity.SudoKeyVersion = null;
+            }
+            else
+            {
+                var (value, version) = cipher.Encrypt(input.SudoPassword);
+                entity.EncryptedSudoSecret = value;
+                entity.SudoKeyVersion = version;
+            }
         }
 
         entity.Name = name;
@@ -240,7 +267,8 @@ public sealed record ServerCredentialInput(
     string? Username,
     string? AuthType,
     string? Secret,
-    string? Passphrase);
+    string? Passphrase,
+    string? SudoPassword);
 
 public sealed record ServerCredentialDto(
     int Id,
@@ -248,6 +276,7 @@ public sealed record ServerCredentialDto(
     string Username,
     string AuthType,
     bool HasSecret,
+    bool HasSudoPassword,
     int ServersCount,
     bool NeedsReauth);
 

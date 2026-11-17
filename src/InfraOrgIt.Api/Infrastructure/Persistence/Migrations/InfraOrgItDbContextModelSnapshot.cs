@@ -148,6 +148,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<bool>("RequiresConfirmation")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<bool>("RequiresSudo")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
 
@@ -597,6 +600,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
+                    b.Property<bool>("RequiresSudo")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<string>("Script")
                         .IsRequired()
                         .HasColumnType("longtext");
@@ -650,6 +656,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)");
+
+                    b.Property<bool>("RequiresSudo")
+                        .HasColumnType("tinyint(1)");
 
                     b.Property<string>("Script")
                         .IsRequired()
@@ -2154,6 +2163,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
+                    b.Property<string>("EncryptedSudoSecret")
+                        .HasColumnType("longtext");
+
                     b.Property<int>("KeyVersion")
                         .HasColumnType("int");
 
@@ -2164,6 +2176,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.Property<bool>("NeedsReauth")
                         .HasColumnType("tinyint(1)");
+
+                    b.Property<int?>("SudoKeyVersion")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
