@@ -13,29 +13,24 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
 
 public sealed class McpApiTests : IAsyncLifetime
 {
-    private readonly MySqlContainer _mysql = new MySqlBuilder("mysql:8.4")
-        .WithDatabase("infraorgit")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
 
+    private string _connectionString = "";
     private WebApplicationFactory<Program> _factory = null!;
     private readonly FakeSsh _ssh = new();
 
     public async Task InitializeAsync()
     {
-        await _mysql.StartAsync();
+        _connectionString = await TestMySql.CreateDatabaseAsync("McpApiTests");
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
-            builder.UseSetting("ConnectionStrings:MySql", _mysql.GetConnectionString());
+            builder.UseSetting("ConnectionStrings:MySql", _connectionString);
             builder.UseSetting("Auth:SecureCookies", "false");
             builder.UseSetting("Auth:BootstrapAdminUsername", "");
             builder.UseSetting("Oidc:Issuer", "http://localhost:8080/realms/test");
@@ -61,7 +56,6 @@ public sealed class McpApiTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _factory.DisposeAsync();
-        await _mysql.DisposeAsync();
     }
 
     [Fact]
@@ -114,7 +108,8 @@ public sealed class McpApiTests : IAsyncLifetime
         Assert.Contains("list_reachability_tests", toolNames);
         Assert.Contains("get_topology", toolNames);
         Assert.Contains("list_executions", toolNames);
-        Assert.Contains("get_mcp_approval", toolNames);
+        Assert.Contains("get_mcp_agent", toolNames);
+        Assert.Contains("request_mcp_permission", toolNames);
 
         var resources = await McpAsync(mcp, new
         {
@@ -252,6 +247,45 @@ public sealed class McpApiTests : IAsyncLifetime
 
         var afterRevoke = await mcp.PostAsJsonAsync("/mcp", InitializeBody(4));
         Assert.Equal(HttpStatusCode.Unauthorized, afterRevoke.StatusCode);
+    }
+
+    [Fact]
+    public async Task System_admin_lists_and_revokes_other_users_tokens()
+    {
+        using var owner = await SessionClientAsync("token.owner");
+        var created = await SendAsync(owner, HttpMethod.Post, "/api/api-tokens",
+            new { name = "leaked", scopes = "mcp:read", expiresInDays = 30 });
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var createdDto = await ReadAsync(created);
+        var tokenId = createdDto.GetProperty("id").GetInt32();
+        using var mcp = McpClientFor(createdDto.GetProperty("token").GetString()!);
+
+        using var other = await SessionClientAsync("token.other");
+        var otherList = await ReadAsync(await other.GetAsync("/api/api-tokens"));
+        Assert.DoesNotContain(otherList.EnumerateArray(),
+            x => x.GetProperty("id").GetInt32() == tokenId);
+        var notOwner = await SendAsync(other, HttpMethod.Delete,
+            $"/api/api-tokens/{tokenId}");
+        Assert.Equal(HttpStatusCode.NotFound, notOwner.StatusCode);
+
+        using var admin = await SessionClientAsync("token.admin", systemAdmin: true);
+        var adminList = await ReadAsync(await admin.GetAsync("/api/api-tokens"));
+        var row = adminList.EnumerateArray()
+            .Single(x => x.GetProperty("id").GetInt32() == tokenId);
+        Assert.Equal("token.owner", row.GetProperty("username").GetString());
+
+        var revoked = await SendAsync(admin, HttpMethod.Delete,
+            $"/api/api-tokens/{tokenId}");
+        Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);
+
+        var afterRevoke = await mcp.PostAsJsonAsync("/mcp", InitializeBody(1));
+        Assert.Equal(HttpStatusCode.Unauthorized, afterRevoke.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        var audit = await db.AuditEvents.SingleAsync(
+            x => x.Action == "api_token_revoke" && x.TargetId == tokenId);
+        Assert.Equal("token.admin", audit.ActorUsername);
     }
 
     [Fact]
@@ -591,7 +625,7 @@ public sealed class McpApiTests : IAsyncLifetime
     private sealed record SeededCatalog(int ApplicationId, int ProjectId);
 
     [Fact]
-    public async Task Mcp_action_requires_scope_grant_and_rbac()
+    public async Task Mcp_action_requires_scope_and_agent_approval_then_runs()
     {
         var seeded = await SeedServerAsync();
         using var userSession = await SessionClientAsync("mcp.action");
@@ -599,19 +633,52 @@ public sealed class McpApiTests : IAsyncLifetime
         var operate = await SendAsync(userSession, HttpMethod.Post,
             "/api/api-tokens",
             new { name = "action", scopes = "mcp:read mcp:operate" });
-        var operateToken = (await ReadAsync(operate)).GetProperty("token").GetString()!;
+        var operateDto = await ReadAsync(operate);
+        var operateToken = operateDto.GetProperty("token").GetString()!;
+        var operateTokenId = operateDto.GetProperty("id").GetInt32();
         using var mcp = McpClientFor(operateToken);
 
         var noConfirm = await CallTool(mcp, "run_reachability_tests",
             new { serverId = seeded.Id });
         Assert.True(noConfirm.GetProperty("isError").GetBoolean());
 
-        var noGrant = await CallTool(mcp, "run_reachability_tests",
+        var pending = await CallTool(mcp, "run_reachability_tests",
             new { serverId = seeded.Id, confirm = true });
-        Assert.True(noGrant.GetProperty("isError").GetBoolean());
+        var pendingPayload = ToolPayload(pending);
+        Assert.Equal("agent_approval_required",
+            pendingPayload.GetProperty("status").GetString());
+        var agentId = pendingPayload.GetProperty("agentId").GetInt32();
+
+        var agentStatus = ToolPayload(
+            await CallTool(mcp, "get_mcp_agent", new { }));
+        Assert.Equal("Pending", agentStatus.GetProperty("status").GetString());
+        Assert.Equal(agentId, agentStatus.GetProperty("id").GetInt32());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var agent = await db.McpAgents
+                .Include(x => x.User)
+                .SingleAsync(x => x.Id == agentId);
+            Assert.Equal("Pending", agent.Status);
+            Assert.Equal("mcp.action", agent.User!.Username);
+        }
+
+        using (var foreign = await SessionClientAsync("mcp.action.foreign"))
+        {
+            var denied = await SendAsync(foreign, HttpMethod.Post,
+                $"/api/mcp/agents/{agentId}/approve",
+                new { permissions = Array.Empty<object>() });
+            Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+        }
+
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await mcp.GetAsync("/api/mcp/agents")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await mcp.PostAsync(
+                $"/api/mcp/agents/{agentId}/approve", null)).StatusCode);
 
         int userId;
-        int grantId;
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
@@ -637,29 +704,22 @@ public sealed class McpApiTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        using var admin = await SessionClientAsync("mcp.admin", systemAdmin: true);
-        var grant = await SendAsync(admin, HttpMethod.Post, "/api/mcp/grants",
-            new
-            {
-                userId,
-                action = "reachability.run",
-                environmentDefinitionId = seeded.EnvironmentDefinitionId
-            });
-        grantId = (await ReadAsync(grant)).GetInt32();
+        var approved = await ApproveAgentAsync(
+            userSession, agentId,
+            [new { action = "reachability.run", environmentDefinitionId = seeded.EnvironmentDefinitionId }]);
+        Assert.Equal("Approved", approved.GetProperty("status").GetString());
+        Assert.Single(approved.GetProperty("permissions").EnumerateArray());
 
-        var requested = await CallTool(mcp, "run_reachability_tests",
-            new { serverId = seeded.Id, confirm = true });
-        var requestedPayload = ToolPayload(requested);
-        Assert.Equal("approval_required",
-            requestedPayload.GetProperty("status").GetString());
-        var approvalId = requestedPayload.GetProperty("approvalId").GetInt32();
-
-        var approved = await SendAsync(userSession, HttpMethod.Post,
-            $"/api/mcp/approvals/{approvalId}/approve");
-        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        var ownAgents = await ReadAsync(
+            await userSession.GetAsync("/api/mcp/agents"));
+        var ownAgent = ownAgents.EnumerateArray()
+            .Single(x => x.GetProperty("id").GetInt32() == agentId);
+        Assert.Equal("Approved", ownAgent.GetProperty("status").GetString());
+        Assert.Equal("mcp.action", ownAgent.GetProperty("username").GetString());
+        Assert.Single(ownAgent.GetProperty("permissions").EnumerateArray());
 
         var run = await CallTool(mcp, "run_reachability_tests",
-            new { serverId = seeded.Id, confirm = true, approvalId });
+            new { serverId = seeded.Id, confirm = true });
         Assert.False(
             run.TryGetProperty("isError", out var isError) &&
             isError.GetBoolean());
@@ -680,13 +740,92 @@ public sealed class McpApiTests : IAsyncLifetime
             Assert.Equal(seeded.Id, audit.ServerId);
         }
 
-        var removed = await SendAsync(admin, HttpMethod.Delete,
-            $"/api/mcp/grants/{grantId}");
-        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        // Removing the permission produces one pending permission request.
+        var cleared = await SendAsync(userSession, HttpMethod.Put,
+            $"/api/mcp/agents/{agentId}/permissions",
+            new { permissions = Array.Empty<object>() });
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
 
-        var afterRemove = await CallTool(mcp, "run_reachability_tests",
+        var explicitRequest = ToolPayload(
+            await CallTool(mcp, "request_mcp_permission", new
+            {
+                action = "reachability.run",
+                environmentDefinitionId = seeded.EnvironmentDefinitionId,
+                reason = "test"
+            }));
+        Assert.Equal("Pending", explicitRequest.GetProperty("status").GetString());
+        var requestId = explicitRequest.GetProperty("requestId").GetInt32();
+
+        var missing = await CallTool(mcp, "run_reachability_tests",
             new { serverId = seeded.Id, confirm = true });
-        Assert.True(afterRemove.GetProperty("isError").GetBoolean());
+        var missingPayload = ToolPayload(missing);
+        Assert.Equal("permission_required",
+            missingPayload.GetProperty("status").GetString());
+        Assert.Equal(requestId,
+            missingPayload.GetProperty("permissionRequestId").GetInt32());
+
+        var requests = await ReadAsync(
+            await userSession.GetAsync("/api/mcp/permission-requests"));
+        Assert.Contains(requests.EnumerateArray(), x =>
+            x.GetProperty("id").GetInt32() == requestId &&
+            x.GetProperty("status").GetString() == "Pending");
+
+        var requestApproved = await SendAsync(userSession, HttpMethod.Post,
+            $"/api/mcp/permission-requests/{requestId}/approve");
+        Assert.Equal(HttpStatusCode.OK, requestApproved.StatusCode);
+
+        var afterApprove = await CallTool(mcp, "run_reachability_tests",
+            new { serverId = seeded.Id, confirm = true });
+        Assert.False(
+            afterApprove.TryGetProperty("isError", out var approvedError) &&
+            approvedError.GetBoolean());
+
+        // Denying a permission request does not grant anything.
+        await SendAsync(userSession, HttpMethod.Put,
+            $"/api/mcp/agents/{agentId}/permissions",
+            new { permissions = Array.Empty<object>() });
+        var denyRequest = await CallTool(mcp, "run_reachability_tests",
+            new { serverId = seeded.Id, confirm = true });
+        var denyId = ToolPayload(denyRequest)
+            .GetProperty("permissionRequestId").GetInt32();
+        Assert.Equal(HttpStatusCode.OK,
+            (await SendAsync(userSession, HttpMethod.Post,
+                $"/api/mcp/permission-requests/{denyId}/deny")).StatusCode);
+        var afterDeny = await CallTool(mcp, "run_reachability_tests",
+            new { serverId = seeded.Id, confirm = true });
+        Assert.Equal("permission_required",
+            ToolPayload(afterDeny).GetProperty("status").GetString());
+
+        // Denying the agent revokes the personal token, even with a legacy grant.
+        using var admin = await SessionClientAsync("mcp.admin", systemAdmin: true);
+        await SendAsync(admin, HttpMethod.Post, "/api/mcp/grants",
+            new
+            {
+                userId,
+                action = "reachability.run",
+                environmentDefinitionId = seeded.EnvironmentDefinitionId
+            });
+        Assert.Equal(HttpStatusCode.OK,
+            (await SendAsync(userSession, HttpMethod.Post,
+                $"/api/mcp/agents/{agentId}/deny")).StatusCode);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var token = await db.ApiTokens.SingleAsync(x => x.Id == operateTokenId);
+            Assert.NotNull(token.RevokedAt);
+        }
+        var deniedCall = await mcp.PostAsJsonAsync("/mcp", new
+        {
+            jsonrpc = "2.0",
+            id = 99,
+            method = "tools/call",
+            @params = new
+            {
+                name = "run_reachability_tests",
+                arguments = new { serverId = seeded.Id, confirm = true }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, deniedCall.StatusCode);
 
         var readOnly = await SendAsync(userSession, HttpMethod.Post,
             "/api/api-tokens",
@@ -739,13 +878,8 @@ public sealed class McpApiTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        using var admin = await SessionClientAsync("mcp.actions.admin", systemAdmin: true);
-        var grant = await SendAsync(admin, HttpMethod.Post, "/api/mcp/grants",
-            new { userId, action = "actions.run" });
-        Assert.Equal(HttpStatusCode.OK, grant.StatusCode);
-
         var idempotencyKey = "mcp-action-" + Guid.NewGuid().ToString("N");
-        var requested = await CallTool(mcp, "run_application_action",
+        var pending = await CallTool(mcp, "run_application_action",
             new
             {
                 serverApplicationId = deploymentId,
@@ -753,30 +887,16 @@ public sealed class McpApiTests : IAsyncLifetime
                 confirm = true,
                 idempotencyKey
             });
-        var requestedPayload = ToolPayload(requested);
-        Assert.Equal("approval_required",
-            requestedPayload.GetProperty("status").GetString());
-        var approvalId = requestedPayload.GetProperty("approvalId").GetInt32();
+        var agentId = ToolPayload(pending).GetProperty("agentId").GetInt32();
 
-        var approved = await SendAsync(userSession, HttpMethod.Post,
-            $"/api/mcp/approvals/{approvalId}/approve");
-        var approvedDto = await ReadAsync(approved);
-        Assert.Equal("Approved", approvedDto.GetProperty("status").GetString());
-        Assert.StartsWith("MCP Action App",
-            approvedDto.GetProperty("serverApplicationName").GetString());
-        Assert.Equal("Ping",
-            approvedDto.GetProperty("applicationActionLabel").GetString());
-        Assert.Equal("mcp-server",
-            approvedDto.GetProperty("serverName").GetString());
-
-        var approvalList = await ReadAsync(
-            await userSession.GetAsync("/api/mcp/approvals"));
-        var approvalRow = approvalList.EnumerateArray()
-            .Single(x => x.GetProperty("id").GetInt32() == approvalId);
-        Assert.StartsWith("MCP Action App",
-            approvalRow.GetProperty("serverApplicationName").GetString());
-        Assert.Equal("Ping",
-            approvalRow.GetProperty("applicationActionLabel").GetString());
+        var approved = await ApproveAgentAsync(
+            userSession, agentId,
+            [new
+            {
+                action = "actions.run",
+                environmentDefinitionId = seeded.EnvironmentDefinitionId
+            }]);
+        Assert.Equal("Approved", approved.GetProperty("status").GetString());
 
         var run = await CallTool(mcp, "run_application_action",
             new
@@ -784,8 +904,7 @@ public sealed class McpApiTests : IAsyncLifetime
                 serverApplicationId = deploymentId,
                 actionId,
                 confirm = true,
-                idempotencyKey,
-                approvalId
+                idempotencyKey
             });
         Assert.False(
             run.TryGetProperty("isError", out var isError) &&
@@ -807,293 +926,14 @@ public sealed class McpApiTests : IAsyncLifetime
         }
     }
 
-    [Fact]
-    public async Task Mcp_approval_is_human_single_use_and_bound_to_target()
+    private async Task<JsonElement> ApproveAgentAsync(
+        HttpClient session,
+        int agentId,
+        object[] permissions)
     {
-        var seeded = await SeedServerAsync();
-        int testId;
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
-            testId = await db.ReachabilityTests
-                .Where(x => x.ServerId == seeded.Id)
-                .Select(x => x.Id)
-                .SingleAsync();
-        }
-
-        var (userId, session, mcp) =
-            await OperatorAsync(seeded, "mcp.approval", "reachability.run");
-
-        var noConfirm = await CallTool(mcp, "run_reachability_tests",
-            new { serverId = seeded.Id, testIds = new[] { testId } });
-        Assert.True(noConfirm.GetProperty("isError").GetBoolean());
-
-        var requested = await CallTool(mcp, "run_reachability_tests",
-            new
-            {
-                serverId = seeded.Id,
-                testIds = new[] { testId },
-                confirm = true
-            });
-        var requestedPayload = ToolPayload(requested);
-        Assert.Equal("approval_required",
-            requestedPayload.GetProperty("status").GetString());
-        var approvalId = requestedPayload.GetProperty("approvalId").GetInt32();
-
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
-            var row = await db.McpApprovals.SingleAsync(x => x.Id == approvalId);
-            Assert.Equal(userId, row.UserId);
-            Assert.Equal("Pending", row.Status);
-            Assert.Equal("run_reachability_tests", row.Action);
-            Assert.Equal(seeded.Id, row.ServerId);
-            Assert.False(await db.CommandExecutions.AnyAsync(
-                x => x.Kind == "Reachability" && x.ServerId == seeded.Id));
-        }
-
-        var polled = ToolPayload(
-            await CallTool(mcp, "get_mcp_approval", new { approvalId }));
-        Assert.Equal("Pending", polled.GetProperty("status").GetString());
-
-        var (_, otherSession, otherMcp) = await OperatorAsync(
-            seeded, "mcp.approval.other", "reachability.run");
-
-        var foreignDecision = await SendAsync(otherSession, HttpMethod.Post,
-            $"/api/mcp/approvals/{approvalId}/approve");
-        Assert.Equal(HttpStatusCode.NotFound, foreignDecision.StatusCode);
-
-        var foreignRun = await CallTool(otherMcp, "run_reachability_tests",
-            new
-            {
-                serverId = seeded.Id,
-                testIds = new[] { testId },
-                confirm = true,
-                approvalId
-            });
-        Assert.True(foreignRun.GetProperty("isError").GetBoolean());
-        Assert.Contains("non trovata", ToolErrorText(foreignRun));
-
-        var bearerOnly = await mcp.PostAsync(
-            $"/api/mcp/approvals/{approvalId}/approve", null);
-        Assert.Equal(HttpStatusCode.Unauthorized, bearerOnly.StatusCode);
-
-        var approved = await ReadAsync(await SendAsync(session, HttpMethod.Post,
-            $"/api/mcp/approvals/{approvalId}/approve"));
-        Assert.Equal("Approved", approved.GetProperty("status").GetString());
-        Assert.Equal("mcp.approval",
-            approved.GetProperty("decidedByUsername").GetString());
-
-        var run = await CallTool(mcp, "run_reachability_tests",
-            new
-            {
-                serverId = seeded.Id,
-                testIds = new[] { testId },
-                confirm = true,
-                approvalId
-            });
-        Assert.False(
-            run.TryGetProperty("isError", out var isError) && isError.GetBoolean());
-
-        var reused = await CallTool(mcp, "run_reachability_tests",
-            new
-            {
-                serverId = seeded.Id,
-                testIds = new[] { testId },
-                confirm = true,
-                approvalId
-            });
-        Assert.True(reused.GetProperty("isError").GetBoolean());
-        Assert.Contains("già usata", ToolErrorText(reused));
-
-        var mismatchRequest = await CallTool(mcp, "run_reachability_tests",
-            new
-            {
-                serverId = seeded.Id,
-                testIds = new[] { testId },
-                confirm = true
-            });
-        var mismatchId = ToolPayload(mismatchRequest)
-            .GetProperty("approvalId").GetInt32();
-        Assert.Equal(HttpStatusCode.OK,
-            (await SendAsync(session, HttpMethod.Post,
-                $"/api/mcp/approvals/{mismatchId}/approve")).StatusCode);
-
-        var mismatch = await CallTool(mcp, "run_reachability_tests",
-            new
-            {
-                serverId = seeded.Id,
-                testIds = Array.Empty<int>(),
-                confirm = true,
-                approvalId = mismatchId
-            });
-        Assert.True(mismatch.GetProperty("isError").GetBoolean());
-        Assert.Contains("non corrisponde", ToolErrorText(mismatch));
-
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
-            var requestAudit = await db.AuditEvents
-                .Where(x => x.Action == "mcp_approval_request")
-                .OrderByDescending(x => x.Id)
-                .FirstAsync();
-            Assert.Equal("AdminChange", requestAudit.Kind);
-            Assert.Equal("McpApproval", requestAudit.TargetType);
-
-            var approveAudit = await db.AuditEvents
-                .SingleAsync(x => x.Action == "mcp_approval_approve" &&
-                                  x.TargetId == approvalId);
-            Assert.Equal("AdminChange", approveAudit.Kind);
-            Assert.Equal("McpApproval", approveAudit.TargetType);
-            Assert.Equal(approvalId, approveAudit.TargetId);
-            Assert.Equal("mcp.approval", approveAudit.ActorUsername);
-        }
-    }
-
-    [Fact]
-    public async Task Mcp_approval_deny_expiry_and_cookie_only_endpoints_are_audited()
-    {
-        var seeded = await SeedServerAsync();
-        var (_, session, mcp) = await OperatorAsync(
-            seeded, "mcp.approval.lifecycle", "reachability.run");
-
-        var denyRequest = await CallTool(mcp, "run_reachability_tests",
-            new { serverId = seeded.Id, confirm = true });
-        var denyId = ToolPayload(denyRequest)
-            .GetProperty("approvalId").GetInt32();
-
-        var denied = await ReadAsync(await SendAsync(session, HttpMethod.Post,
-            $"/api/mcp/approvals/{denyId}/deny"));
-        Assert.Equal("Denied", denied.GetProperty("status").GetString());
-
-        var deniedRun = await CallTool(mcp, "run_reachability_tests",
-            new { serverId = seeded.Id, confirm = true, approvalId = denyId });
-        Assert.True(deniedRun.GetProperty("isError").GetBoolean());
-        Assert.Contains("negata", ToolErrorText(deniedRun));
-
-        var expiring = await CallTool(mcp, "run_reachability_tests",
-            new { serverId = seeded.Id, confirm = true });
-        var expiringId = ToolPayload(expiring)
-            .GetProperty("approvalId").GetInt32();
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
-            var row = await db.McpApprovals.SingleAsync(x => x.Id == expiringId);
-            row.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
-            await db.SaveChangesAsync();
-        }
-
-        var expiredList = await ReadAsync(
-            await session.GetAsync("/api/mcp/approvals?status=Expired"));
-        Assert.Contains(expiredList.EnumerateArray(), x =>
-            x.GetProperty("id").GetInt32() == expiringId &&
-            x.GetProperty("status").GetString() == "Expired");
-
-        var lateApprove = await SendAsync(session, HttpMethod.Post,
-            $"/api/mcp/approvals/{expiringId}/approve");
-        Assert.Equal(HttpStatusCode.Conflict, lateApprove.StatusCode);
-
-        var expiredRun = await CallTool(mcp, "run_reachability_tests",
-            new
-            {
-                serverId = seeded.Id,
-                confirm = true,
-                approvalId = expiringId
-            });
-        Assert.True(expiredRun.GetProperty("isError").GetBoolean());
-        Assert.Contains("scaduta", ToolErrorText(expiredRun));
-
-        var pending = await CallTool(mcp, "run_reachability_tests",
-            new { serverId = seeded.Id, confirm = true });
-        var pendingId = ToolPayload(pending)
-            .GetProperty("approvalId").GetInt32();
-
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await mcp.GetAsync("/api/mcp/approvals")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await mcp.PostAsync(
-                $"/api/mcp/approvals/{pendingId}/approve", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await mcp.PostAsync(
-                $"/api/mcp/approvals/{pendingId}/deny", null)).StatusCode);
-
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
-            Assert.Equal("Pending",
-                (await db.McpApprovals.SingleAsync(x => x.Id == pendingId)).Status);
-
-            var denyAudit = await db.AuditEvents
-                .Where(x => x.Action == "mcp_approval_deny")
-                .OrderByDescending(x => x.Id)
-                .FirstAsync();
-            Assert.Equal("AdminChange", denyAudit.Kind);
-            Assert.Equal("McpApproval", denyAudit.TargetType);
-            Assert.Equal(denyId, denyAudit.TargetId);
-            Assert.Equal("mcp.approval.lifecycle", denyAudit.ActorUsername);
-
-            var deniedToolAudit = await db.AuditEvents
-                .SingleAsync(x => x.Action == "run_reachability_tests" &&
-                                  x.ErrorCode == "approval_denied");
-            Assert.Equal("Denied", deniedToolAudit.Outcome);
-        }
-    }
-
-    /// <summary>
-    /// Creates a user with a session, an operate token, ServerOperator on the
-    /// seeded environment and an MCP grant for the requested action.
-    /// </summary>
-    private async Task<(int UserId, HttpClient Session, HttpClient Mcp)> OperatorAsync(
-        SeededServer seeded,
-        string username,
-        string grantAction)
-    {
-        var session = await SessionClientAsync(username);
-        var created = await SendAsync(session, HttpMethod.Post, "/api/api-tokens",
-            new { name = "approval", scopes = "mcp:read mcp:operate" });
-        var token = (await ReadAsync(created)).GetProperty("token").GetString()!;
-        var mcp = McpClientFor(token);
-
-        int userId;
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
-            userId = await db.Users
-                .Where(x => x.Username == username)
-                .Select(x => x.Id)
-                .SingleAsync();
-            var role = await db.Roles.SingleAsync(x => x.Name == "ServerOperator");
-            var group = new Group
-            {
-                Name = "MCP approval " + Guid.NewGuid().ToString("N")[..8]
-            };
-            db.Groups.Add(group);
-            await db.SaveChangesAsync();
-            db.GroupUsers.Add(new GroupUser
-            {
-                GroupsId = group.Id,
-                UsersId = userId
-            });
-            db.ProviderEnvironmentGroupRoles.Add(new ProviderEnvironmentGroupRole
-            {
-                ProviderEnvironmentId = seeded.ProviderEnvironmentId,
-                GroupId = group.Id,
-                RoleId = role.Id
-            });
-            await db.SaveChangesAsync();
-        }
-
-        using var admin = await SessionClientAsync(
-            username + ".admin", systemAdmin: true);
-        var grant = await SendAsync(admin, HttpMethod.Post, "/api/mcp/grants",
-            new
-            {
-                userId,
-                action = grantAction,
-                environmentDefinitionId = seeded.EnvironmentDefinitionId
-            });
-        Assert.Equal(HttpStatusCode.OK, grant.StatusCode);
-        return (userId, session, mcp);
+        var response = await SendAsync(session, HttpMethod.Post,
+            $"/api/mcp/agents/{agentId}/approve", new { permissions });
+        return await ReadAsync(response);
     }
 
     private static string ToolErrorText(JsonElement result) =>

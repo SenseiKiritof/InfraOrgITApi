@@ -4,6 +4,7 @@ using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
+using InfraOrgIt.Api.Features.Settings;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 using InfraOrgIt.Api.Infrastructure.Ssh;
@@ -33,6 +34,8 @@ public static class ApplicationActionsEndpoints
         var deploys = app.MapGroup("/api/server-applications").RequireAuthorization();
         deploys.MapGet("/{id:int}/actions", ListForDeployAsync);
         deploys.MapPost("/{id:int}/actions/{actionId:int}/run", RunAsync)
+            .RequireRateLimiting("remote-run");
+        deploys.MapPost("/{id:int}/actions/{actionId:int}/intent", PrepareAsync)
             .RequireRateLimiting("remote-run");
     }
 
@@ -121,7 +124,8 @@ public static class ApplicationActionsEndpoints
 
         var actions = await LoadActionsAsync(db, deploy.ApplicationVersion!.ApplicationId, ct);
         return Results.Ok(actions.Select(x => new ApplicationActionButtonDto(
-            x.Id, x.Label, x.Order, x.RequiresConfirmation)).ToList());
+            x.Id, x.Label, x.Order, x.RequiresConfirmation,
+            deploy.ServerId)).ToList());
     }
 
     private static async Task<IResult> RunAsync(
@@ -131,12 +135,42 @@ public static class ApplicationActionsEndpoints
         HttpContext http,
         ClaimsPrincipal user,
         ApplicationActionRunner runner,
+        ConnectionPolicyService policy,
         CancellationToken ct)
     {
+        await policy.RequireServerTransportAsync(ct);
         var result = await runner.RunAsync(
             user, id, actionId, http.Request.Headers["Idempotency-Key"].ToString(),
             input?.Confirm ?? false, ct);
         return Results.Ok(result);
+    }
+
+    private static async Task<IResult> PrepareAsync(
+        int id,
+        int actionId,
+        ApplicationActionRunInput? input,
+        HttpContext http,
+        ClaimsPrincipal user,
+        ApplicationActionRunner runner,
+        ConnectionPolicyService policy,
+        IOptions<ServerAccessOptions> options,
+        CancellationToken ct)
+    {
+        await policy.RequireClientIntentAllowedAsync(ct);
+        var prepared = await runner.PrepareAsync(
+            user,
+            id,
+            actionId,
+            http.Request.Headers["Idempotency-Key"].ToString(),
+            input?.Confirm ?? false,
+            ct);
+        return Results.Ok(new ApplicationActionIntentDto(
+            prepared.Execution.Id,
+            prepared.Server.Id,
+            prepared.Label,
+            prepared.Script,
+            prepared.CustomValues,
+            options.Value.CommandTimeoutMinutes * 60));
     }
 
     private static async Task<ApplicationAction> ValidateAsync(
@@ -253,6 +287,15 @@ public sealed record ApplicationActionButtonDto(
     int Id,
     string Label,
     int Order,
-    bool RequiresConfirmation);
+    bool RequiresConfirmation,
+    int ServerId);
+
+public sealed record ApplicationActionIntentDto(
+    int ExecutionId,
+    int ServerId,
+    string Label,
+    string Script,
+    IReadOnlyDictionary<string, string> RedactValues,
+    int TimeoutSeconds);
 
 public sealed record CommandResultDto(int? ExitCode, string Output, bool TimedOut);

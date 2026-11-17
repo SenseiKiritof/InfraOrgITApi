@@ -45,9 +45,12 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
     public DbSet<McpGrant> McpGrants => Set<McpGrant>();
-    public DbSet<McpApproval> McpApprovals => Set<McpApproval>();
+    public DbSet<McpAgent> McpAgents => Set<McpAgent>();
+    public DbSet<McpAgentPermission> McpAgentPermissions => Set<McpAgentPermission>();
+    public DbSet<McpPermissionRequest> McpPermissionRequests => Set<McpPermissionRequest>();
     public DbSet<TunnelSession> TunnelSessions => Set<TunnelSession>();
     public DbSet<TunnelService> TunnelServices => Set<TunnelService>();
+    public DbSet<ConnectionPolicy> ConnectionPolicies => Set<ConnectionPolicy>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -466,27 +469,51 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<McpApproval>(e =>
+        modelBuilder.Entity<McpAgent>(e =>
         {
-            e.Property(x => x.Action).HasMaxLength(50);
-            e.Property(x => x.ParametersJson).HasMaxLength(2048);
+            e.Property(x => x.ClientKey).HasMaxLength(200);
+            e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.Status).HasMaxLength(20);
-            e.HasIndex(x => new { x.UserId, x.Status, x.ExpiresAt });
-            e.HasIndex(x => new { x.Status, x.ExpiresAt });
-            e.ToTable(t => t.HasCheckConstraint("CK_McpApprovals_Status",
-                "`Status` IN ('Pending','Approved','Denied','Used','Expired')"));
+            e.HasIndex(x => new { x.UserId, x.ClientKey }).IsUnique();
+            e.HasIndex(x => x.Status);
+            e.ToTable(t => t.HasCheckConstraint("CK_McpAgents_Status",
+                "`Status` IN ('Pending','Approved','Denied')"));
             e.HasOne(x => x.User).WithMany()
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ApprovedByUser).WithMany()
+                .HasForeignKey(x => x.ApprovedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<McpAgentPermission>(e =>
+        {
+            e.Property(x => x.Action).HasMaxLength(50);
+            e.HasIndex(x => x.AgentId);
+            e.HasIndex(x => new { x.Action, x.EnvironmentDefinitionId });
+            e.ToTable(t => t.HasCheckConstraint("CK_McpAgentPermissions_Action",
+                "`Action` IN ('reachability.run','actions.run','*')"));
+            e.HasOne(x => x.Agent).WithMany(x => x.Permissions)
+                .HasForeignKey(x => x.AgentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.EnvironmentDefinition).WithMany()
+                .HasForeignKey(x => x.EnvironmentDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<McpPermissionRequest>(e =>
+        {
+            e.Property(x => x.Action).HasMaxLength(50);
+            e.Property(x => x.Reason).HasMaxLength(500);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.HasIndex(x => new { x.AgentId, x.Status });
+            e.ToTable(t => t.HasCheckConstraint("CK_McpPermissionRequests_Status",
+                "`Status` IN ('Pending','Approved','Denied')"));
+            e.HasOne(x => x.Agent).WithMany(x => x.PermissionRequests)
+                .HasForeignKey(x => x.AgentId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.DecidedByUser).WithMany()
                 .HasForeignKey(x => x.DecidedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(x => x.Server).WithMany()
-                .HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.ServerApplication).WithMany()
-                .HasForeignKey(x => x.ServerApplicationId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.ApplicationAction).WithMany()
-                .HasForeignKey(x => x.ApplicationActionId)
+            e.HasOne(x => x.EnvironmentDefinition).WithMany()
+                .HasForeignKey(x => x.EnvironmentDefinitionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -505,6 +532,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.ActorUsername).HasMaxLength(100);
             e.Property(x => x.ClientId).HasMaxLength(100);
             e.Property(x => x.Mode).HasMaxLength(10).HasDefaultValue("Local");
+            e.Property(x => x.Transport).HasMaxLength(10).HasDefaultValue("Client");
             e.Property(x => x.TargetHost).HasMaxLength(255);
             e.Property(x => x.Outcome).HasMaxLength(20);
             e.Property(x => x.ErrorCode).HasMaxLength(100);
@@ -525,7 +553,17 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
                     "`Outcome` IN ('Active','Stopped','Error','Stale')");
                 t.HasCheckConstraint("CK_TunnelSessions_Mode",
                     "`Mode` IN ('Local','Dynamic','Remote')");
+                t.HasCheckConstraint("CK_TunnelSessions_Transport",
+                    "`Transport` IN ('Client','Server')");
             });
+        });
+
+        modelBuilder.Entity<ConnectionPolicy>(e =>
+        {
+            e.Property(x => x.Mode).HasMaxLength(20).HasDefaultValue("Auto");
+            e.Property(x => x.UpdatedBy).HasMaxLength(100);
+            e.ToTable(t => t.HasCheckConstraint("CK_ConnectionPolicies_Mode",
+                "`Mode` IN ('Server','Client','Auto')"));
         });
 
         modelBuilder.Entity<TunnelService>(e =>
@@ -626,11 +664,21 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             Menu(19, "Credenziali", "/credentials", true, true, true, 80, null),
             Menu(20, "Comandi", "/commands", true, true, true, 81, null),
             Menu(21, "Test di rete", "/reachability", true, true, true, 82, null),
-            Menu(22, "Registro esecuzioni", "/executions", true, true, true, 83, null));
+            Menu(22, "Registro esecuzioni", "/executions", true, true, true, 83, null),
+            Menu(26, "Impostazioni", "/settings", true, true, true, 90, null));
 
-        var systemAdminMenus = new[] { 13, 14, 15, 16, 19, 20, 21, 22 };
+        var systemAdminMenus = new[] { 13, 14, 15, 16, 19, 20, 21, 22, 26 };
         modelBuilder.Entity<MenuRole>().HasData(
             systemAdminMenus.Select(menuId => new MenuRole { MenuId = menuId, RolesId = 3 }).ToArray());
+
+        modelBuilder.Entity<ConnectionPolicy>().HasData(new ConnectionPolicy
+        {
+            Id = 1,
+            Mode = "Auto",
+            UpdatedBy = "",
+            CreatedAt = SeedDate,
+            UpdatedAt = SeedDate
+        });
     }
 
     private static Menu Menu(int id, string name, string path, bool isActive, bool hideBackButton, bool isVisible,

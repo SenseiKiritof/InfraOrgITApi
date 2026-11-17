@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Infrastructure.Files;
@@ -278,6 +280,28 @@ public sealed class SshConnector(
             return Task.FromResult<IShellSession>(new ShellSession(stream));
         }
 
+        public async Task<Stream> OpenForwardAsync(
+            string host,
+            int port,
+            CancellationToken ct)
+        {
+            var forwarded = new ForwardedPortLocal("127.0.0.1", host, (uint)port);
+            client.AddForwardedPort(forwarded);
+            forwarded.Start();
+            var tcp = new TcpClient();
+            try
+            {
+                await tcp.ConnectAsync(IPAddress.Loopback, (int)forwarded.BoundPort, ct);
+                return new ForwardedStream(tcp, forwarded);
+            }
+            catch
+            {
+                tcp.Dispose();
+                forwarded.Dispose();
+                throw;
+            }
+        }
+
         public async ValueTask DisposeAsync()
         {
             client.Dispose();
@@ -361,6 +385,66 @@ public sealed class SshConnector(
             if (jumpSession is not null)
                 return jumpSession.DisposeAsync();
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class ForwardedStream(
+        TcpClient tcp,
+        ForwardedPortLocal forwarded) : Stream
+    {
+        private readonly NetworkStream stream = tcp.GetStream();
+
+        public override bool CanRead => stream.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => stream.CanWrite;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            stream.Read(buffer, offset, count);
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            stream.ReadAsync(buffer, cancellationToken);
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            stream.Write(buffer, offset, count);
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            stream.WriteAsync(buffer, cancellationToken);
+
+        public override void Flush() => stream.Flush();
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                stream.Dispose();
+                tcp.Dispose();
+                try
+                {
+                    forwarded.Dispose();
+                }
+                catch
+                {
+                    // The client may already be gone; nothing else to release.
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 

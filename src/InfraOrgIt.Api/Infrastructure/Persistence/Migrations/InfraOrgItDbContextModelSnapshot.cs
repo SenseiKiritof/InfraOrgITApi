@@ -670,6 +670,53 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("CommandTemplates");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ConnectionPolicy", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasDefaultValue("Auto");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ConnectionPolicies", t =>
+                        {
+                            t.HasCheckConstraint("CK_ConnectionPolicies_Mode", "`Mode` IN ('Server','Client','Auto')");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Mode = "Auto",
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            UpdatedBy = "",
+                            Version = 0
+                        });
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", b =>
                 {
                     b.Property<int>("Id")
@@ -979,7 +1026,65 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("GroupUser", (string)null);
                 });
 
-            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpApproval", b =>
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ClientKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedByUserId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("UserId", "ClientKey")
+                        .IsUnique();
+
+                    b.ToTable("McpAgents", t =>
+                        {
+                            t.HasCheckConstraint("CK_McpAgents_Status", "`Status` IN ('Pending','Approved','Denied')");
+                        });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgentPermission", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -990,60 +1095,33 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)");
 
-                    b.Property<int?>("ApplicationActionId")
+                    b.Property<int>("AgentId")
                         .HasColumnType("int");
 
-                    b.Property<DateTime?>("DecidedAt")
+                    b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<int?>("DecidedByUserId")
+                    b.Property<int?>("EnvironmentDefinitionId")
                         .HasColumnType("int");
 
-                    b.Property<DateTime>("ExpiresAt")
+                    b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<string>("ParametersJson")
-                        .IsRequired()
-                        .HasMaxLength(2048)
-                        .HasColumnType("varchar(2048)");
-
-                    b.Property<DateTime>("RequestedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<int?>("ServerApplicationId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("ServerId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)");
-
-                    b.Property<DateTime?>("UsedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<int>("UserId")
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ApplicationActionId");
+                    b.HasIndex("AgentId");
 
-                    b.HasIndex("DecidedByUserId");
+                    b.HasIndex("EnvironmentDefinitionId");
 
-                    b.HasIndex("ServerApplicationId");
+                    b.HasIndex("Action", "EnvironmentDefinitionId");
 
-                    b.HasIndex("ServerId");
-
-                    b.HasIndex("Status", "ExpiresAt");
-
-                    b.HasIndex("UserId", "Status", "ExpiresAt");
-
-                    b.ToTable("McpApprovals", t =>
+                    b.ToTable("McpAgentPermissions", t =>
                         {
-                            t.HasCheckConstraint("CK_McpApprovals_Status", "`Status` IN ('Pending','Approved','Denied','Used','Expired')");
+                            t.HasCheckConstraint("CK_McpAgentPermissions_Action", "`Action` IN ('reachability.run','actions.run','*')");
                         });
                 });
 
@@ -1085,6 +1163,62 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_McpGrants_Action", "`Action` IN ('reachability.run','actions.run','*')");
 
                             t.HasCheckConstraint("CK_McpGrants_Subject", "((`UserId` IS NULL) + (`GroupId` IS NULL)) = 1");
+                        });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpPermissionRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<int>("AgentId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("EnvironmentDefinitionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DecidedByUserId");
+
+                    b.HasIndex("EnvironmentDefinitionId");
+
+                    b.HasIndex("AgentId", "Status");
+
+                    b.ToTable("McpPermissionRequests", t =>
+                        {
+                            t.HasCheckConstraint("CK_McpPermissionRequests_Status", "`Status` IN ('Pending','Approved','Denied')");
                         });
                 });
 
@@ -1400,6 +1534,19 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                             Path = "/executions",
                             UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
                             Version = 0
+                        },
+                        new
+                        {
+                            Id = 26,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            HideBackButton = true,
+                            IsActive = true,
+                            IsVisible = true,
+                            Name = "Impostazioni",
+                            Order = 90,
+                            Path = "/settings",
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Version = 0
                         });
                 });
 
@@ -1456,6 +1603,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         new
                         {
                             MenuId = 22,
+                            RolesId = 3
+                        },
+                        new
+                        {
+                            MenuId = 26,
                             RolesId = 3
                         });
                 });
@@ -2253,6 +2405,13 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<int?>("TargetPort")
                         .HasColumnType("int");
 
+                    b.Property<string>("Transport")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)")
+                        .HasDefaultValue("Client");
+
                     b.Property<int?>("TunnelServiceId")
                         .HasColumnType("int");
 
@@ -2279,6 +2438,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_TunnelSessions_Mode", "`Mode` IN ('Local','Dynamic','Remote')");
 
                             t.HasCheckConstraint("CK_TunnelSessions_Outcome", "`Outcome` IN ('Active','Stopped','Error','Stale')");
+
+                            t.HasCheckConstraint("CK_TunnelSessions_Transport", "`Transport` IN ('Client','Server')");
                         });
                 });
 
@@ -2538,28 +2699,12 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpApproval", b =>
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", b =>
                 {
-                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ApplicationAction", "ApplicationAction")
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.User", "ApprovedByUser")
                         .WithMany()
-                        .HasForeignKey("ApplicationActionId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.User", "DecidedByUser")
-                        .WithMany()
-                        .HasForeignKey("DecidedByUserId")
+                        .HasForeignKey("ApprovedByUserId")
                         .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerApplication", "ServerApplication")
-                        .WithMany()
-                        .HasForeignKey("ServerApplicationId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", "Server")
-                        .WithMany()
-                        .HasForeignKey("ServerId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
 
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.User", "User")
                         .WithMany()
@@ -2567,15 +2712,27 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("ApplicationAction");
-
-                    b.Navigation("DecidedByUser");
-
-                    b.Navigation("Server");
-
-                    b.Navigation("ServerApplication");
+                    b.Navigation("ApprovedByUser");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgentPermission", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", "Agent")
+                        .WithMany("Permissions")
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", "EnvironmentDefinition")
+                        .WithMany()
+                        .HasForeignKey("EnvironmentDefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Agent");
+
+                    b.Navigation("EnvironmentDefinition");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpGrant", b =>
@@ -2600,6 +2757,31 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("Group");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpPermissionRequest", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", "Agent")
+                        .WithMany("PermissionRequests")
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.User", "DecidedByUser")
+                        .WithMany()
+                        .HasForeignKey("DecidedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", "EnvironmentDefinition")
+                        .WithMany()
+                        .HasForeignKey("EnvironmentDefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Agent");
+
+                    b.Navigation("DecidedByUser");
+
+                    b.Navigation("EnvironmentDefinition");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Menu", b =>
@@ -2862,6 +3044,13 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", b =>
                 {
                     b.Navigation("ProviderEnvironments");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", b =>
+                {
+                    b.Navigation("PermissionRequests");
+
+                    b.Navigation("Permissions");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Menu", b =>

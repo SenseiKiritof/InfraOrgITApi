@@ -12,29 +12,24 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
 
 public sealed class TunnelServiceApiTests : IAsyncLifetime
 {
-    private readonly MySqlContainer _mysql = new MySqlBuilder("mysql:8.4")
-        .WithDatabase("infraorgit")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
 
     private readonly FakeSsh _ssh = new();
+    private string _connectionString = "";
     private WebApplicationFactory<Program> _factory = null!;
 
     public async Task InitializeAsync()
     {
-        await _mysql.StartAsync();
+        _connectionString = await TestMySql.CreateDatabaseAsync("TunnelServiceApiTests");
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
-            builder.UseSetting("ConnectionStrings:MySql", _mysql.GetConnectionString());
+            builder.UseSetting("ConnectionStrings:MySql", _connectionString);
             builder.UseSetting("Auth:SecureCookies", "false");
             builder.UseSetting("Auth:BootstrapAdminUsername", "");
             builder.UseSetting("Oidc:Issuer", "http://localhost:8080/realms/test");
@@ -60,7 +55,6 @@ public sealed class TunnelServiceApiTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _factory.DisposeAsync();
-        await _mysql.DisposeAsync();
     }
 
     [Fact]

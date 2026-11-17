@@ -9,28 +9,23 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
 
 public sealed class TunnelSessionApiTests : IAsyncLifetime
 {
-    private readonly MySqlContainer _mysql = new MySqlBuilder("mysql:8.4")
-        .WithDatabase("infraorgit")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
 
+    private string _connectionString = "";
     private WebApplicationFactory<Program> _factory = null!;
 
     public async Task InitializeAsync()
     {
-        await _mysql.StartAsync();
+        _connectionString = await TestMySql.CreateDatabaseAsync("TunnelSessionApiTests");
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
-            builder.UseSetting("ConnectionStrings:MySql", _mysql.GetConnectionString());
+            builder.UseSetting("ConnectionStrings:MySql", _connectionString);
             builder.UseSetting("Auth:SecureCookies", "false");
             builder.UseSetting("Auth:BootstrapAdminUsername", "");
             builder.UseSetting("Oidc:Issuer", "http://localhost:8080/realms/test");
@@ -51,7 +46,6 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _factory.DisposeAsync();
-        await _mysql.DisposeAsync();
     }
 
     [Fact]
@@ -76,6 +70,7 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         Assert.Equal(created.Id.ToString(), first.ClientId);
         Assert.Equal(8081, first.TargetPort);
         Assert.Equal(18081, first.LocalPort);
+        Assert.Equal("Server", first.Transport);
         Assert.Null(first.EndedAt);
         Assert.Null(first.ErrorCode);
 
@@ -613,7 +608,8 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         string status,
         int targetPort = 8081,
         int localPort = 18081,
-        string? errorCode = null) => new
+        string? errorCode = null,
+        string transport = "Server") => new
     {
         sessionKey,
         status,
@@ -622,7 +618,8 @@ public sealed class TunnelSessionApiTests : IAsyncLifetime
         targetHost = "127.0.0.1",
         targetPort,
         localPort,
-        errorCode
+        errorCode,
+        transport
     };
 
     private static ServerCredential Credential(string name, string username) =>

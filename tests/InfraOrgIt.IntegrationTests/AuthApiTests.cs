@@ -13,18 +13,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
 
 public sealed class AuthApiTests : IAsyncLifetime
 {
-    private readonly MySqlContainer _mysql = new MySqlBuilder("mysql:8.4")
-        .WithDatabase("infraorgit")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
 
+    private string _connectionString = "";
     private WebApplicationFactory<Program> _factory = null!;
     private readonly FakeOidcHandler _oidcHandler = new();
     private readonly string _keysPath = Path.Combine(
@@ -32,7 +27,7 @@ public sealed class AuthApiTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await _mysql.StartAsync();
+        _connectionString = await TestMySql.CreateDatabaseAsync("AuthApiTests");
 
         _factory = CreateFactory();
 
@@ -43,14 +38,13 @@ public sealed class AuthApiTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _factory.DisposeAsync();
-        await _mysql.DisposeAsync();
     }
 
     private WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
-            builder.UseSetting("ConnectionStrings:MySql", _mysql.GetConnectionString());
+            builder.UseSetting("ConnectionStrings:MySql", _connectionString);
             builder.UseSetting("Auth:SecureCookies", "false");
             builder.UseSetting("Auth:BootstrapAdminUsername", "");
             builder.UseSetting("DataProtection:KeysPath", _keysPath);

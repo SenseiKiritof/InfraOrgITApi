@@ -14,6 +14,7 @@ public sealed class TunnelSession
     public int? ServerApplicationId { get; set; }
     public int? TunnelServiceId { get; set; }
     public string Mode { get; set; } = "Local";
+    public string Transport { get; set; } = "Client";
     public int? LocalPort { get; set; }
     public string TargetHost { get; set; } = "";
     public int? TargetPort { get; set; }

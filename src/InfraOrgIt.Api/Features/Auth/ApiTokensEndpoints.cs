@@ -1,5 +1,7 @@
 using System.Security.Claims;
+using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
+using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -23,12 +25,15 @@ public static class ApiTokensEndpoints
         CancellationToken ct)
     {
         var userId = await CurrentUserIdAsync(user, db, ct);
-        var items = await db.ApiTokens.AsNoTracking()
-            .Where(x => x.UserId == userId)
+        var query = db.ApiTokens.AsNoTracking();
+        // SystemAdmin sees every user's tokens, so a leaked one can be revoked.
+        if (!IsSystemAdmin(user))
+            query = query.Where(x => x.UserId == userId);
+        var items = await query
             .OrderByDescending(x => x.Id)
             .Select(x => new ApiTokenDto(
                 x.Id, x.Name, x.Scopes, x.CreatedAt, x.ExpiresAt,
-                x.LastUsedAt, x.RevokedAt))
+                x.LastUsedAt, x.RevokedAt, x.User!.Username))
             .ToListAsync(ct);
         return Results.Ok(items);
     }
@@ -57,18 +62,27 @@ public static class ApiTokensEndpoints
         int id,
         ClaimsPrincipal user,
         InfraOrgItDbContext db,
+        IAuditService audit,
         CancellationToken ct)
     {
         var userId = await CurrentUserIdAsync(user, db, ct);
+        var isSystemAdmin = IsSystemAdmin(user);
         var entity = await db.ApiTokens
                          .SingleOrDefaultAsync(
-                             x => x.Id == id && x.UserId == userId, ct)
+                             x => x.Id == id &&
+                                  (isSystemAdmin || x.UserId == userId), ct)
                      ?? throw Guard.NotFound("Token", id);
 
         entity.RevokedAt ??= DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "api_token_revoke", "ApiToken", entity.Id,
+            detail: new { ownerUserId = entity.UserId, entity.Name }), ct);
         return Results.NoContent();
     }
+
+    private static bool IsSystemAdmin(ClaimsPrincipal user) =>
+        user.IsInRole(EnvironmentAccessService.SystemAdminRole);
 
     private static async Task<int> CurrentUserIdAsync(
         ClaimsPrincipal user,
@@ -96,7 +110,8 @@ public sealed record ApiTokenDto(
     DateTime CreatedAt,
     DateTime? ExpiresAt,
     DateTime? LastUsedAt,
-    DateTime? RevokedAt);
+    DateTime? RevokedAt,
+    string Username);
 
 public sealed record ApiTokenCreatedDto(
     int Id,

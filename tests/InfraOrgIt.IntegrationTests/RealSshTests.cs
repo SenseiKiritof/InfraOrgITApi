@@ -10,17 +10,11 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
 
 public sealed class RealSshTests : IAsyncLifetime
 {
-    private readonly MySqlContainer _mysql = new MySqlBuilder("mysql:8.4")
-        .WithDatabase("infraorgit")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
 
     private readonly IContainer _ssh = new ContainerBuilder("linuxserver/openssh-server:latest")
         .WithEnvironment("PUID", "1000")
@@ -33,16 +27,18 @@ public sealed class RealSshTests : IAsyncLifetime
         .WithPortBinding(2222, true)
         .Build();
 
+    private string _connectionString = "";
     private WebApplicationFactory<Program> _factory = null!;
 
     public async Task InitializeAsync()
     {
-        await Task.WhenAll(_mysql.StartAsync(), _ssh.StartAsync());
+        _connectionString = await TestMySql.CreateDatabaseAsync("RealSshTests");
+        await _ssh.StartAsync();
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
-            builder.UseSetting("ConnectionStrings:MySql", _mysql.GetConnectionString());
+            builder.UseSetting("ConnectionStrings:MySql", _connectionString);
             builder.UseSetting("Auth:SecureCookies", "false");
             builder.UseSetting("Auth:BootstrapAdminUsername", "");
             builder.UseSetting("Oidc:Issuer", "http://localhost:8080/realms/test");
@@ -63,7 +59,7 @@ public sealed class RealSshTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _factory.DisposeAsync();
-        await Task.WhenAll(_mysql.DisposeAsync().AsTask(), _ssh.DisposeAsync().AsTask());
+        await _ssh.DisposeAsync();
     }
 
     [Fact]

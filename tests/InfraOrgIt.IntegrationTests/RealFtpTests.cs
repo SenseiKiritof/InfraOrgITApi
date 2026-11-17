@@ -10,7 +10,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Testcontainers.MySql;
 
 namespace InfraOrgIt.IntegrationTests;
 
@@ -18,11 +17,6 @@ public sealed class RealFtpTests : IAsyncLifetime
 {
     private const int PassivePort = 21100;
 
-    private readonly MySqlContainer _mysql = new MySqlBuilder("mysql:8.4")
-        .WithDatabase("infraorgit")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
 
     private readonly IContainer _ftp = new ContainerBuilder("fauria/vsftpd:latest")
         .WithEnvironment("FTP_USER", "test")
@@ -35,17 +29,19 @@ public sealed class RealFtpTests : IAsyncLifetime
         .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(21))
         .Build();
 
+    private string _connectionString = "";
     private WebApplicationFactory<Program> _factory = null!;
 
     public async Task InitializeAsync()
     {
-        await Task.WhenAll(_mysql.StartAsync(), _ftp.StartAsync());
+        _connectionString = await TestMySql.CreateDatabaseAsync("RealFtpTests");
+        await _ftp.StartAsync();
         await Task.Delay(TimeSpan.FromSeconds(2));
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
-            builder.UseSetting("ConnectionStrings:MySql", _mysql.GetConnectionString());
+            builder.UseSetting("ConnectionStrings:MySql", _connectionString);
             builder.UseSetting("Auth:SecureCookies", "false");
             builder.UseSetting("Auth:BootstrapAdminUsername", "");
             builder.UseSetting("Oidc:Issuer", "http://localhost:8080/realms/test");
@@ -66,7 +62,7 @@ public sealed class RealFtpTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _factory.DisposeAsync();
-        await Task.WhenAll(_mysql.DisposeAsync().AsTask(), _ftp.DisposeAsync().AsTask());
+        await _ftp.DisposeAsync();
     }
 
     [Fact]

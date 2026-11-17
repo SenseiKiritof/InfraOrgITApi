@@ -24,8 +24,17 @@ use fictitious demo data.
 - **Desktop tunnels**: the tunnel API accepts the authenticated BFF session as
   well as a personal token with `tunnels:operate`, so the desktop reuses the
   Web login.
-- **Human approval**: an MCP action requested by an AI client needs a human
-  decision before it runs.
+- **Connection policy**: a per-installation `Server`/`Client`/`Auto` row in
+  MySQL, default `Auto`; `Server` keeps console/files/actions on the API and
+  relays allowlisted Local tunnels and deployments, while `Auto` uses the
+  client when the first SSH hop is reachable and falls back to the server
+  otherwise. `Client` uses the desktop agent for all four. The row is shared by
+  every API node in a cluster. `GET /api/connection-policy` accepts the BFF
+  session or a `tunnels:operate` token; `PUT` is SystemAdmin-only. Direct
+  console/actions are projected to `CommandExecutions`, file operations to the
+  `FileTransfer` audit kind.
+- **Agent approval**: each MCP client is approved once by its owner with
+  individual permissions; action calls then need no per-call decision.
 - **Audit**: MCP calls, console sessions, actions, tests and tunnel events,
   with a tamper-evident hash chain and an optional external anchor.
 
@@ -39,23 +48,29 @@ use fictitious demo data.
    a bearer token. OAuth clients can discover the resource metadata at
    `/.well-known/oauth-protected-resource` and use Keycloak for authorization
    instead of a personal token.
-3. Read tools and resources work immediately. Action tools also need an
-   `McpGrant` for the user or group, the environment operator right and human
-   approval.
+3. Read tools and resources work immediately. Action tools need an approved
+   MCP agent with an individual permission (or a legacy `McpGrant`) and the
+   environment operator right.
 
 ![Personal API tokens with scopes, creation, expiry, last use and state](docs/screenshots/tokens.png)
 
-### Action approval
+### Agent approval and permissions
 
-`confirm=true` is not a human confirmation. The action tools
-`run_reachability_tests` and `run_application_action`:
+`confirm=true` is not a human confirmation. The first action call creates a
+**Pending** MCP agent, keyed by the API token or OAuth client. The owner
+approves it once from `/approvals` with individual permissions
+(`reachability.run`, `actions.run`, per environment or all), then edits or
+revokes them at any time. Denying or revoking an agent also revokes the
+personal API token that created it; the client needs a new token and a new
+approval. OAuth clients are revoked in Keycloak. Action tools:
 
-1. check scope, MCP grant and environment role;
-2. create a **Pending** approval bound to the user, action, server, target and
-   parameters, and return `{ "status": "approval_required", "approvalId": … }`;
-3. wait for the owner to approve or deny the request from `/approvals` in a
-   browser session (cookie + CSRF, one-time, 10 minutes);
-4. execute only when called again with the approved `approvalId`.
+1. check scope, approved agent, permission (or legacy grant) and environment
+   role;
+2. return `{ "status": "agent_approval_required", "agentId": … }` while the
+   agent is Pending or Denied, and
+   `{ "status": "permission_required", "permissionRequestId": … }` when the
+   permission is missing;
+3. execute directly after approval, without a per-call approval row.
 
 ```mermaid
 sequenceDiagram
@@ -64,14 +79,17 @@ sequenceDiagram
     participant You as You (browser)
 
     AI->>API: run_reachability_tests(confirm=true)
-    API-->>AI: approval_required + approvalId
-    You->>API: POST /api/mcp/approvals/{id}/approve
-    AI->>API: run_reachability_tests(approvalId)
-    API-->>AI: result (approval used once)
+    API-->>AI: agent_approval_required + agentId
+    You->>API: POST /api/mcp/agents/{id}/approve (permissions)
+    AI->>API: run_reachability_tests(confirm=true)
+    API-->>AI: result
+    AI->>API: request_mcp_permission(actions.run)
+    You->>API: POST /api/mcp/permission-requests/{id}/approve
 ```
 
-`get_mcp_approval` returns the status and expiry of a request without executing
-it, so a client can poll instead of retrying the action.
+`get_mcp_agent` returns status, approved permissions and pending requests.
+`request_mcp_permission` creates one Pending request per agent, action and
+environment; the owner approves or denies it from the web UI.
 
 ## Desktop sign-in
 
@@ -134,7 +152,7 @@ expired ticket rows past that window (consumed or not).
 runs shortly after startup. Audit rows keep their separate 180-day retention
 policy.
 
-![MCP approvals page with a pending action, Approve and Deny buttons, and the human-approval warning](docs/screenshots/approvals.png)
+![MCP agents page with pending agents, individual permissions and Approve/Deny buttons](docs/screenshots/approvals.png)
 
 ## Run the API
 

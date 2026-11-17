@@ -4,6 +4,7 @@ using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Features.Admin;
+using InfraOrgIt.Api.Features.Settings;
 using InfraOrgIt.Api.Features.Audit;
 using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Features.Catalog;
@@ -181,6 +182,7 @@ builder.Services.AddSingleton<LoginStateProtector>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MenuService>();
 builder.Services.AddScoped<EnvironmentAccessService>();
+builder.Services.AddScoped<ConnectionPolicyService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddHostedService<TunnelSessionCleanupService>();
 builder.Services.AddOptions<AuditRetentionOptions>()
@@ -207,7 +209,7 @@ builder.Services.AddHostedService<AuditAnchorService>();
 builder.Services.AddScoped<ReachabilityRunner>();
 builder.Services.AddScoped<ApplicationActionRunner>();
 builder.Services.AddScoped<McpGrantService>();
-builder.Services.AddScoped<McpApprovalService>();
+builder.Services.AddScoped<McpAgentService>();
 builder.Services.AddScoped<ApiTokenService>();
 builder.Services
     .AddMcpServer()
@@ -259,6 +261,7 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("desktop-download", context => Partition(ClientKey(context), 120));
     options.AddPolicy("mcp", context => Partition(ActorKey(context), 120));
     options.AddPolicy("tunnels", context => Partition(ActorKey(context), 120));
+    options.AddPolicy("tunnel-relay", context => Partition(ActorKey(context), 600));
 });
 
 var forwardedNetworks = builder.Configuration["ForwardedHeaders:KnownNetworks"];
@@ -569,6 +572,7 @@ TopologyEndpoints.Map(app);
 DiagramEndpoints.Map(app);
 ServerCredentialsEndpoints.Map(app);
 CommandTemplateEndpoints.Map(app);
+RemoteClientEndpoints.Map(app);
 ApplicationActionsEndpoints.Map(app);
 ReachabilityEndpoints.Map(app);
 CommandExecutionEndpoints.Map(app);
@@ -580,13 +584,14 @@ UsersEndpoints.Map(app);
 GroupsEndpoints.Map(app);
 RolesEndpoints.Map(app);
 MenusAdminEndpoints.Map(app);
+ConnectionPolicyEndpoints.Map(app);
 ProviderEnvironmentGroupRolesEndpoints.Map(app);
 ProxyEndpoints.Map(app);
 ApiTokensEndpoints.Map(app);
 TunnelEndpoints.Map(app);
 
 McpGrantsEndpoints.Map(app);
-McpApprovalsEndpoints.Map(app);
+McpAgentsEndpoints.Map(app);
 
 static bool HasScope(ClaimsPrincipal user, params string[] allowed)
 {

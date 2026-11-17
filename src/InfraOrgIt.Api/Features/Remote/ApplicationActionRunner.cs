@@ -14,8 +14,8 @@ namespace InfraOrgIt.Api.Features.Remote;
 
 /// <summary>
 /// Runs one configured application action on a deployment. Shared by the
-/// HTTP endpoint and the MCP action tool; the same script, audit row,
-/// idempotency and redaction apply.
+/// HTTP endpoint, the MCP action tool and the desktop-native path; the same
+/// script, audit row, idempotency and redaction apply.
 /// </summary>
 public sealed class ApplicationActionRunner(
     ISshConnector ssh,
@@ -23,7 +23,60 @@ public sealed class ApplicationActionRunner(
     EnvironmentAccessService access,
     InfraOrgItDbContext db)
 {
+    public sealed record PreparedAction(
+        CommandExecution Execution,
+        Server Server,
+        string Script,
+        string Label,
+        IReadOnlyDictionary<string, string> CustomValues);
+
     public async Task<CommandResultDto> RunAsync(
+        ClaimsPrincipal user,
+        int deploymentId,
+        int actionId,
+        string? idempotencyKey,
+        bool confirm,
+        CancellationToken ct)
+    {
+        var prepared = await PrepareAsync(
+            user, deploymentId, actionId, idempotencyKey, confirm, ct);
+        try
+        {
+            await using var session = await ssh.ConnectAsync(prepared.Server, ct);
+            await db.SaveChangesAsync(ct);
+
+            var result = await session.RunAsync(
+                prepared.Script,
+                TimeSpan.FromMinutes(options.Value.CommandTimeoutMinutes),
+                ct);
+
+            CommandAudit.Complete(
+                prepared.Execution,
+                result,
+                options.Value,
+                prepared.CustomValues);
+            await db.SaveChangesAsync(ct);
+            return new CommandResultDto(
+                result.ExitCode, result.Output, result.TimedOut);
+        }
+        catch (Exception exception)
+        {
+            CommandAudit.Complete(
+                prepared.Execution,
+                new SshCommandResult(null, exception.Message),
+                options.Value,
+                prepared.CustomValues);
+            await db.SaveChangesAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Authorizes and renders the action, checks confirmation and idempotency,
+    /// then persists a pending CommandExecution. The desktop executes the
+    /// returned script with the user's SSH agent and reports the result back.
+    /// </summary>
+    public async Task<PreparedAction> PrepareAsync(
         ClaimsPrincipal user,
         int deploymentId,
         int actionId,
@@ -82,37 +135,45 @@ public sealed class ApplicationActionRunner(
             throw Guard.Conflict("Idempotency-Key già usata.");
 
         var username = user.Identity?.Name ?? "";
-        var startedAt = DateTime.UtcNow;
         var label = $"{application.Name}: {action.Label}";
         var execution = CommandAudit.Start(
-            db, username, server, "Action", label, script, startedAt,
+            db, username, server, "Action", label, script, DateTime.UtcNow,
             string.IsNullOrEmpty(idempotencyKey) ? null : idempotencyKey);
         db.CommandExecutions.Add(execution);
         await db.SaveChangesAsync(ct);
 
-        try
-        {
-            await using var session = await ssh.ConnectAsync(server, ct);
-            await db.SaveChangesAsync(ct);
+        return new PreparedAction(
+            execution, server, rendered, label, custom);
+    }
 
-            var result = await session.RunAsync(rendered, TimeSpan.FromMinutes(
-                options.Value.CommandTimeoutMinutes), ct);
+    /// <summary>
+    /// Completes an execution created by <see cref="PrepareAsync"/>. The
+    /// desktop already redacts its output with the values returned by the
+    /// intent endpoint; ownership and terminal state are re-checked here.
+    /// </summary>
+    public async Task CompleteClientAsync(
+        ClaimsPrincipal user,
+        int executionId,
+        CommandResultDto result,
+        CancellationToken ct)
+    {
+        var username = user.Identity?.Name ?? "";
+        var execution = await db.CommandExecutions
+                            .SingleOrDefaultAsync(
+                                x => x.Id == executionId &&
+                                     x.Username == username, ct)
+                        ?? throw Guard.NotFound("Esecuzione", executionId);
+        if (execution.Kind != "Action")
+            throw Guard.Unprocessable("L'esecuzione non è un'azione.");
+        if (execution.EndedAt is not null)
+            throw Guard.Conflict("L'esecuzione è già conclusa.");
 
-            CommandAudit.Complete(execution, result, options.Value, custom);
-            await db.SaveChangesAsync(ct);
-            return new CommandResultDto(
-                result.ExitCode, result.Output, result.TimedOut);
-        }
-        catch (Exception exception)
-        {
-            CommandAudit.Complete(
-                execution,
-                new SshCommandResult(null, exception.Message),
-                options.Value,
-                custom);
-            await db.SaveChangesAsync(CancellationToken.None);
-            throw;
-        }
+        CommandAudit.Complete(
+            execution,
+            new SshCommandResult(
+                result.ExitCode, result.Output, result.TimedOut),
+            options.Value);
+        await db.SaveChangesAsync(ct);
     }
 
     internal static async Task<ServerApplication> LoadDeployAsync(
