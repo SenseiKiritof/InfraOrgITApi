@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using InfraOrgIt.Api.BuildingBlocks.Errors;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.Infrastructure.Files;
@@ -260,6 +261,52 @@ public sealed class SshConnector(
             try
             {
                 await command.ExecuteAsync(cts.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return new SshCommandResult(
+                    null,
+                    Truncate(command.Result + command.Error + $"\n[timeout dopo {timeout}]", maxOutputBytes),
+                    TimedOut: true);
+            }
+
+            return new SshCommandResult(
+                command.ExitStatus,
+                Truncate(command.Result + command.Error, maxOutputBytes));
+        }
+
+        public async Task<SshCommandResult> RunSudoAsync(
+            string script,
+            string? password,
+            TimeSpan timeout,
+            CancellationToken ct)
+        {
+            using var command = client.CreateCommand(
+                SudoCommand.Wrap(script, password is not null));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(timeout);
+
+            var execute = command.ExecuteAsync(cts.Token);
+            if (password is not null)
+            {
+                try
+                {
+                    await using var input = command.CreateInputStream();
+                    await input.WriteAsync(
+                        Encoding.UTF8.GetBytes(password + "\n"), cts.Token);
+                    await input.FlushAsync(cts.Token);
+                }
+                catch (Exception exception)
+                    when (exception is IOException or ObjectDisposedException)
+                {
+                    // sudo exited before reading stdin (wrong password or no
+                    // permission): the exit code and stderr carry the reason.
+                }
+            }
+
+            try
+            {
+                await execute;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {

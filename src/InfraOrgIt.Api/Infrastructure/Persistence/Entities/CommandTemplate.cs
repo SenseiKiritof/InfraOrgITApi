@@ -5,4 +5,5 @@ public sealed class CommandTemplate : EntityBase
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
     public string Script { get; set; } = "";
+    public bool RequiresSudo { get; set; }
 }

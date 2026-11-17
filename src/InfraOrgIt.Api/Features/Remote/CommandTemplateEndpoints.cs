@@ -41,12 +41,12 @@ public static class CommandTemplateEndpoints
             .Take(page.PageSize)
             .Select(x => new
             {
-                x.Id, x.Name, x.Description, x.Script,
+                x.Id, x.Name, x.Description, x.Script, x.RequiresSudo,
                 x.CreatedAt, x.UpdatedAt, x.Version, PlaceholderCount = 0
             })
             .ToListAsync(ct);
         var items = rows.Select(x => new CommandTemplateDto(
-            x.Id, x.Name, x.Description, x.Script,
+            x.Id, x.Name, x.Description, x.Script, x.RequiresSudo,
             CommandRenderer.Placeholders(x.Script).Count,
             x.CreatedAt, x.UpdatedAt, x.Version)).ToList();
 
@@ -63,12 +63,12 @@ public static class CommandTemplateEndpoints
         EnvironmentAccessService.RequireSystemAdmin(user);
         var row = await db.CommandTemplates.AsNoTracking()
             .Where(x => x.Id == id)
-            .Select(x => new { x.Id, x.Name, x.Description, x.Script, x.CreatedAt, x.UpdatedAt, x.Version })
+            .Select(x => new { x.Id, x.Name, x.Description, x.Script, x.RequiresSudo, x.CreatedAt, x.UpdatedAt, x.Version })
             .SingleOrDefaultAsync(ct);
         return row is null
             ? throw Guard.NotFound("Comando", id)
             : Results.Ok(new CommandTemplateDto(
-                row.Id, row.Name, row.Description, row.Script,
+                row.Id, row.Name, row.Description, row.Script, row.RequiresSudo,
                 CommandRenderer.Placeholders(row.Script).Count,
                 row.CreatedAt, row.UpdatedAt, row.Version));
     }
@@ -87,13 +87,14 @@ public static class CommandTemplateEndpoints
         {
             Name = name,
             Description = Guard.Text(input.Description, "Description", 500, required: false),
-            Script = Guard.Text(input.Script, "Script", 100_000)
+            Script = Guard.Text(input.Script, "Script", 100_000),
+            RequiresSudo = input.RequiresSudo
         };
         db.CommandTemplates.Add(entity);
         await db.SaveChangesAsync(ct);
 
         return Results.Ok(new CommandTemplateDto(
-            entity.Id, entity.Name, entity.Description, entity.Script,
+            entity.Id, entity.Name, entity.Description, entity.Script, entity.RequiresSudo,
             CommandRenderer.Placeholders(entity.Script).Count,
             entity.CreatedAt, entity.UpdatedAt, entity.Version));
     }
@@ -115,6 +116,7 @@ public static class CommandTemplateEndpoints
         entity.Name = name;
         entity.Description = Guard.Text(input.Description, "Description", 500, required: false);
         entity.Script = Guard.Text(input.Script, "Script", 100_000);
+        entity.RequiresSudo = input.RequiresSudo;
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
@@ -148,13 +150,18 @@ public static class CommandTemplateEndpoints
     }
 }
 
-public sealed record CommandTemplateInput(string? Name, string? Description, string? Script);
+public sealed record CommandTemplateInput(
+    string? Name,
+    string? Description,
+    string? Script,
+    bool RequiresSudo);
 
 public sealed record CommandTemplateDto(
     int Id,
     string Name,
     string Description,
     string Script,
+    bool RequiresSudo,
     int PlaceholderCount,
     DateTime CreatedAt,
     DateTime UpdatedAt,

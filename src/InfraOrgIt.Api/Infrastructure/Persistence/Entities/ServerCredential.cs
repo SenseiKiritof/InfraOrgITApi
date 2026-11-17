@@ -7,6 +7,8 @@ public sealed class ServerCredential : EntityBase
     public string AuthType { get; set; } = "Password";
     public string EncryptedSecret { get; set; } = "";
     public string? EncryptedPassphrase { get; set; }
+    public string? EncryptedSudoSecret { get; set; }
+    public int? SudoKeyVersion { get; set; }
     public int KeyVersion { get; set; }
     public bool NeedsReauth { get; set; }
     public List<Server> Servers { get; set; } = [];

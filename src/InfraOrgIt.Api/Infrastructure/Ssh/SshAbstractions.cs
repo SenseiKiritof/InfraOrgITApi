@@ -20,6 +20,18 @@ public interface ISshConnector
 public interface ISshSession : IAsyncDisposable
 {
     Task<SshCommandResult> RunAsync(string script, TimeSpan timeout, CancellationToken ct);
+
+    /// <summary>
+    /// Runs a script through sudo. <paramref name="password"/> is written to
+    /// stdin and never appears in the command; null uses sudo -n (NOPASSWD).
+    /// </summary>
+    Task<SshCommandResult> RunSudoAsync(
+        string script,
+        string? password,
+        TimeSpan timeout,
+        CancellationToken ct) =>
+        throw new NotSupportedException(
+            "Questa sessione SSH non supporta l'esecuzione sudo.");
     Task<IShellSession> OpenShellAsync(uint columns, uint rows, CancellationToken ct);
 
     /// <summary>

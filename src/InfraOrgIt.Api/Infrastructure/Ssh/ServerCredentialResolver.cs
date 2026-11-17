@@ -44,6 +44,30 @@ public sealed class ServerCredentialResolver(CredentialCipher cipher)
         return (credential.Username, secret, passphrase);
     }
 
+    /// <summary>
+    /// Decrypts the optional sudo password. null means the server must allow
+    /// sudo without a password (NOPASSWD); the runner then uses sudo -n.
+    /// </summary>
+    public string? ResolveSudo(ServerCredential credential)
+    {
+        if (string.IsNullOrEmpty(credential.EncryptedSudoSecret))
+            return null;
+        try
+        {
+            return cipher.Decrypt(
+                credential.EncryptedSudoSecret,
+                credential.SudoKeyVersion ?? credential.KeyVersion);
+        }
+        catch (Exception exception)
+            when (exception is CryptographicException or FormatException)
+        {
+            throw new ApiException(
+                StatusCodes.Status409Conflict,
+                "credential_rejected",
+                $"La password sudo della credenziale {credential.Name} non è decifrabile: reinserirla.");
+        }
+    }
+
     public AuthenticationMethod BuildAuthentication(ServerCredential credential)
     {
         var (username, secret, passphrase) = Resolve(credential);
