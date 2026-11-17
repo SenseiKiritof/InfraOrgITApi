@@ -66,8 +66,13 @@ public static class RemoteClientEndpoints
         var host = string.IsNullOrWhiteSpace(server.IpAddress)
             ? server.Hostname
             : server.IpAddress;
-        var jumps = await JumpChainAsync(
+        var (jumps, jumpsUseKey) = await JumpChainAsync(
             db, server.JumpServerId, username, ct);
+        var clientAuth =
+            string.Equals(
+                server.Credential?.AuthType, "Key",
+                StringComparison.OrdinalIgnoreCase) &&
+            jumpsUseKey;
 
         return Results.Ok(new RemoteTargetDto(
             server.Id,
@@ -75,6 +80,7 @@ public static class RemoteClientEndpoints
             host,
             server.SshPort,
             username,
+            clientAuth,
             jumps,
             server.HostKeyFingerprint,
             server.FileTransferProtocol));
@@ -217,7 +223,7 @@ public static class RemoteClientEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IReadOnlyList<RemoteJumpDto>> JumpChainAsync(
+    private static async Task<(IReadOnlyList<RemoteJumpDto> Jumps, bool AllKey)> JumpChainAsync(
         InfraOrgItDbContext db,
         int? jumpServerId,
         string fallbackUsername,
@@ -230,16 +236,21 @@ public static class RemoteClientEndpoints
                 string.IsNullOrWhiteSpace(x.IpAddress) ? x.Hostname : x.IpAddress,
                 x.SshPort,
                 x.Credential != null ? x.Credential.Username : null,
+                x.Credential != null ? x.Credential.AuthType : null,
                 x.HostKeyFingerprint))
             .ToDictionaryAsync(x => x.Id, ct);
 
         var jumps = new List<RemoteJumpDto>();
         var seen = new HashSet<int>();
         var current = jumpServerId;
+        var allKey = true;
         while (current is int id && jumps.Count < 3 && seen.Add(id))
         {
             if (!links.TryGetValue(id, out var link))
                 break;
+            if (!string.Equals(
+                    link.AuthType, "Key", StringComparison.OrdinalIgnoreCase))
+                allKey = false;
             jumps.Add(new RemoteJumpDto(
                 link.Host,
                 link.Port,
@@ -248,7 +259,7 @@ public static class RemoteClientEndpoints
             current = link.JumpServerId;
         }
 
-        return jumps;
+        return (jumps, allKey);
     }
 
     private sealed record JumpLink(
@@ -257,6 +268,7 @@ public static class RemoteClientEndpoints
         string Host,
         int Port,
         string? Username,
+        string? AuthType,
         string? HostKeyFingerprint);
 }
 
@@ -281,6 +293,7 @@ public sealed record RemoteTargetDto(
     string Host,
     int SshPort,
     string Username,
+    bool ClientAuth,
     IReadOnlyList<RemoteJumpDto> Jumps,
     string? HostKeyFingerprint,
     string? FileTransferProtocol);
