@@ -6582,6 +6582,15 @@
               "null",
               "string"
             ]
+          },
+          "translations": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ApplicationTranslationInput"
+            }
           }
         }
       },
@@ -6598,6 +6607,27 @@
               "string"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "ApplicationTranslationInput": {
+        "required": [
+          "name",
+          "description"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
