@@ -125,6 +125,23 @@ public static class McpAgentsEndpoints
         agent.Status = McpAgentStatuses.Denied;
         agent.ApprovedAt = null;
         agent.ApprovedByUserId = null;
+
+        // A personal token approved as this agent stays valid for the MCP
+        // endpoint until it is revoked too. Denying the agent is the owner's
+        // revocation, so the client credential must die with it.
+        int? revokedTokenId = null;
+        if (agent.ClientKey.StartsWith("token:", StringComparison.Ordinal) &&
+            int.TryParse(agent.ClientKey["token:".Length..], out var tokenId))
+        {
+            var token = await db.ApiTokens.SingleOrDefaultAsync(
+                x => x.Id == tokenId && x.UserId == agent.UserId, ct);
+            if (token is not null)
+            {
+                token.RevokedAt ??= DateTime.UtcNow;
+                revokedTokenId = token.Id;
+            }
+        }
+
         await db.SaveChangesAsync(ct);
 
         await audit.RecordAsync(AuditEntries.Change(
@@ -132,7 +149,7 @@ public static class McpAgentsEndpoints
             "mcp_agent_deny",
             "McpAgent",
             agent.Id,
-            detail: new { agent.Name, agent.ClientKey }), ct);
+            detail: new { agent.Name, agent.ClientKey, revokedTokenId }), ct);
         return Results.Ok(await AgentDtoAsync(db, agent.Id, ct));
     }
 

@@ -60,7 +60,9 @@ use fictitious demo data.
 **Pending** MCP agent, keyed by the API token or OAuth client. The owner
 approves it once from `/approvals` with individual permissions
 (`reachability.run`, `actions.run`, per environment or all), then edits or
-revokes them at any time. Action tools:
+revokes them at any time. Denying or revoking an agent also revokes the
+personal API token that created it; the client needs a new token and a new
+approval. OAuth clients are revoked in Keycloak. Action tools:
 
 1. check scope, approved agent, permission (or legacy grant) and environment
    role;
