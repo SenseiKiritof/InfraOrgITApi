@@ -55,7 +55,7 @@ public static class CommandExecutionEndpoints
                 .Take(page.PageSize)
                 .Select(x => new CommandExecutionDto(
                     x.Id, x.Username, x.ServerId, x.ServerName, x.Kind, x.Label,
-                    x.ExitCode, x.Output, x.StartedAt, x.EndedAt))
+                    x.ExitCode, x.RequiresSudo, x.Output, x.StartedAt, x.EndedAt))
                 .ToListAsync(ct);
 
             return Results.Ok(new PagedResult<CommandExecutionDto>(
@@ -72,6 +72,7 @@ public sealed record CommandExecutionDto(
     string Kind,
     string Label,
     int? ExitCode,
+    bool RequiresSudo,
     string Output,
     DateTime StartedAt,
     DateTime? EndedAt);

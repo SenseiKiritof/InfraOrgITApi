@@ -19,6 +19,7 @@ namespace InfraOrgIt.Api.Features.Remote;
 /// </summary>
 public sealed class ApplicationActionRunner(
     ISshConnector ssh,
+    ServerCredentialResolver credentials,
     IOptions<ServerAccessOptions> options,
     EnvironmentAccessService access,
     InfraOrgItDbContext db)
@@ -28,7 +29,8 @@ public sealed class ApplicationActionRunner(
         Server Server,
         string Script,
         string Label,
-        IReadOnlyDictionary<string, string> CustomValues);
+        IReadOnlyDictionary<string, string> CustomValues,
+        bool RequiresSudo);
 
     public async Task<CommandResultDto> RunAsync(
         ClaimsPrincipal user,
@@ -40,15 +42,27 @@ public sealed class ApplicationActionRunner(
     {
         var prepared = await PrepareAsync(
             user, deploymentId, actionId, idempotencyKey, confirm, ct);
+        string? sudoPassword = null;
+        if (prepared.RequiresSudo)
+        {
+            var credential = prepared.Server.Credential
+                ?? throw Guard.Unprocessable(
+                    "Serve una credenziale SSH per eseguire l'azione con sudo.");
+            sudoPassword = credentials.ResolveSudo(credential);
+        }
         try
         {
             await using var session = await ssh.ConnectAsync(prepared.Server, ct);
             await db.SaveChangesAsync(ct);
 
-            var result = await session.RunAsync(
-                prepared.Script,
-                TimeSpan.FromMinutes(options.Value.CommandTimeoutMinutes),
-                ct);
+            var timeout = TimeSpan.FromMinutes(options.Value.CommandTimeoutMinutes);
+            var result = prepared.RequiresSudo
+                ? await session.RunSudoAsync(
+                    prepared.Script,
+                    sudoPassword,
+                    timeout,
+                    ct)
+                : await session.RunAsync(prepared.Script, timeout, ct);
 
             CommandAudit.Complete(
                 prepared.Execution,
@@ -106,6 +120,9 @@ public sealed class ApplicationActionRunner(
                 "confirmation_required",
                 $"L'azione {action.Label} richiede una conferma esplicita.");
 
+        var requiresSudo =
+            action.RequiresSudo ||
+            (action.CommandTemplate?.RequiresSudo ?? false);
         var script = action.CommandTemplate?.Script ?? action.CustomScript ?? "";
         var custom = ParseParameterValues(action.ParameterValuesJson);
         CommandRenderer.CheckValues(script, custom);
@@ -138,12 +155,13 @@ public sealed class ApplicationActionRunner(
         var label = $"{application.Name}: {action.Label}";
         var execution = CommandAudit.Start(
             db, username, server, "Action", label, script, DateTime.UtcNow,
-            string.IsNullOrEmpty(idempotencyKey) ? null : idempotencyKey);
+            string.IsNullOrEmpty(idempotencyKey) ? null : idempotencyKey,
+            requiresSudo);
         db.CommandExecutions.Add(execution);
         await db.SaveChangesAsync(ct);
 
         return new PreparedAction(
-            execution, server, rendered, label, custom);
+            execution, server, rendered, label, custom, requiresSudo);
     }
 
     /// <summary>
@@ -165,6 +183,9 @@ public sealed class ApplicationActionRunner(
                         ?? throw Guard.NotFound("Esecuzione", executionId);
         if (execution.Kind != "Action")
             throw Guard.Unprocessable("L'esecuzione non è un'azione.");
+        if (execution.RequiresSudo)
+            throw Guard.Unprocessable(
+                "Le azioni sudo vengono eseguite solo dal server.");
         if (execution.EndedAt is not null)
             throw Guard.Conflict("L'esecuzione è già conclusa.");
 

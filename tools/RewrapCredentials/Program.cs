@@ -43,7 +43,7 @@ await using (var connection = new MySqlConnection(connectionString))
 {
     await connection.OpenAsync();
     await using var select = new MySqlCommand(
-        "SELECT Id, EncryptedSecret, EncryptedPassphrase, KeyVersion FROM ServerCredentials", connection);
+        "SELECT Id, EncryptedSecret, EncryptedPassphrase, KeyVersion, EncryptedSudoSecret, SudoKeyVersion FROM ServerCredentials", connection);
     await using var reader = await select.ExecuteReaderAsync();
     while (await reader.ReadAsync())
     {
@@ -51,7 +51,9 @@ await using (var connection = new MySqlConnection(connectionString))
             reader.GetInt32(0),
             reader.GetString(1),
             reader.IsDBNull(2) ? null : reader.GetString(2),
-            reader.GetInt32(3)));
+            reader.GetInt32(3),
+            reader.IsDBNull(4) ? null : reader.GetString(4),
+            reader.IsDBNull(5) ? null : reader.GetInt32(5)));
     }
 
     var updates = new List<Row>();
@@ -74,12 +76,29 @@ await using (var connection = new MySqlConnection(connectionString))
 
         try
         {
+            var sudoKey = row.SudoSecret is null
+                ? null
+                : keys.GetValueOrDefault(
+                    (row.SudoKeyVersion ?? row.KeyVersion).ToString());
+            if (row.SudoSecret is not null && sudoKey is null)
+            {
+                Console.Error.WriteLine(
+                    $"  id {row.Id}: chiave sudo {row.SudoKeyVersion ?? row.KeyVersion} mancante");
+                failed++;
+                continue;
+            }
             updates.Add(row with
             {
                 Secret = Rewrap(row.Secret, oldKey, currentKey),
                 Passphrase = string.IsNullOrEmpty(row.Passphrase)
                     ? row.Passphrase
                     : Rewrap(row.Passphrase, oldKey, currentKey),
+                SudoSecret = row.SudoSecret is null
+                    ? null
+                    : Rewrap(row.SudoSecret, sudoKey!, currentKey),
+                SudoKeyVersion = row.SudoSecret is null
+                    ? null
+                    : currentVersion.Value,
                 KeyVersion = currentVersion.Value
             });
         }
@@ -100,10 +119,13 @@ await using (var connection = new MySqlConnection(connectionString))
         {
             await using var update = new MySqlCommand(
                 "UPDATE ServerCredentials SET EncryptedSecret = @secret, EncryptedPassphrase = @passphrase, " +
-                "KeyVersion = @version WHERE Id = @id", connection, (MySqlTransaction)transaction);
+                "KeyVersion = @version, EncryptedSudoSecret = @sudo, SudoKeyVersion = @sudoversion " +
+                "WHERE Id = @id", connection, (MySqlTransaction)transaction);
             update.Parameters.AddWithValue("@secret", row.Secret);
             update.Parameters.AddWithValue("@passphrase", (object?)row.Passphrase ?? DBNull.Value);
             update.Parameters.AddWithValue("@version", row.KeyVersion);
+            update.Parameters.AddWithValue("@sudo", (object?)row.SudoSecret ?? DBNull.Value);
+            update.Parameters.AddWithValue("@sudoversion", (object?)row.SudoKeyVersion ?? DBNull.Value);
             update.Parameters.AddWithValue("@id", row.Id);
             await update.ExecuteNonQueryAsync();
         }
@@ -183,4 +205,10 @@ static int SelfCheck()
     return 0;
 }
 
-internal sealed record Row(int Id, string Secret, string? Passphrase, int KeyVersion);
+internal sealed record Row(
+    int Id,
+    string Secret,
+    string? Passphrase,
+    int KeyVersion,
+    string? SudoSecret,
+    int? SudoKeyVersion);

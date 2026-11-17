@@ -10,6 +10,7 @@ public sealed class CommandExecution
     public string Kind { get; set; } = "Action";
     public string Label { get; set; } = "";
     public string Script { get; set; } = "";
+    public bool RequiresSudo { get; set; }
     public int? ExitCode { get; set; }
     public string Output { get; set; } = "";
     public DateTime StartedAt { get; set; }

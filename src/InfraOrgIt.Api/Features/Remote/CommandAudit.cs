@@ -17,7 +17,8 @@ public static class CommandAudit
         DateTime startedAt,
         SshCommandResult? result,
         ServerAccessOptions options,
-        string? idempotencyKey = null)
+        string? idempotencyKey = null,
+        bool requiresSudo = false)
     {
         var output = result?.Output ?? "";
         var execution = new CommandExecution
@@ -28,6 +29,7 @@ public static class CommandAudit
             Kind = kind,
             Label = label,
             Script = script,
+            RequiresSudo = requiresSudo,
             ExitCode = result?.ExitCode,
             Output = output.Length > options.MaxAuditOutputBytes
                 ? output[^options.MaxAuditOutputBytes..]
@@ -48,7 +50,8 @@ public static class CommandAudit
         string label,
         string script,
         DateTime startedAt,
-        string? idempotencyKey = null) =>
+        string? idempotencyKey = null,
+        bool requiresSudo = false) =>
         new()
         {
             Username = username,
@@ -57,6 +60,7 @@ public static class CommandAudit
             Kind = kind,
             Label = label,
             Script = script,
+            RequiresSudo = requiresSudo,
             ExitCode = null,
             Output = "",
             StartedAt = startedAt,
