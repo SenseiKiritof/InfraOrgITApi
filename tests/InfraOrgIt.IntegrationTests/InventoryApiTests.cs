@@ -139,6 +139,56 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Applications_round_trip_translations()
+    {
+        using var admin = await ClientForAsync("app.i18n", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        var created = await SendAsync(admin, HttpMethod.Post, "/api/applications", new
+        {
+            name = "Catalog " + suffix,
+            description = "Base description",
+            basePath = "/catalog-" + suffix,
+            listeningOnPort = 8081,
+            type = "Backend",
+            translations = new
+            {
+                it = new { name = "Catalogo " + suffix, description = "Descrizione" },
+                fr = new { name = "Catalogue " + suffix, description = "" }
+            }
+        });
+        var application = await ReadAsync(created);
+        var id = application.GetProperty("id").GetInt32();
+        var translations = application.GetProperty("translations");
+        Assert.Equal("Catalogo " + suffix,
+            translations.GetProperty("it").GetProperty("name").GetString());
+        Assert.Equal("Descrizione",
+            translations.GetProperty("it").GetProperty("description").GetString());
+
+        var detail = await ReadAsync(await admin.GetAsync($"/api/applications/{id}"));
+        Assert.Equal("Catalogue " + suffix,
+            detail.GetProperty("translations").GetProperty("fr").GetProperty("name").GetString());
+
+        // Updating one language leaves the others alone; an empty value clears it.
+        var update = await SendAsync(admin, HttpMethod.Put, $"/api/applications/{id}", new
+        {
+            name = "Catalog " + suffix,
+            description = "Base description",
+            basePath = "/catalog-" + suffix,
+            listeningOnPort = 8081,
+            type = "Backend",
+            translations = new { it = new { name = "", description = "" } }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
+
+        var cleared = await ReadAsync(await admin.GetAsync($"/api/applications/{id}"));
+        var clearedTranslations = cleared.GetProperty("translations");
+        Assert.False(clearedTranslations.TryGetProperty("it", out _));
+        Assert.Equal("Catalogue " + suffix,
+            clearedTranslations.GetProperty("fr").GetProperty("name").GetString());
+    }
+
+    [Fact]
     public async Task Api_call_history_never_stores_query_api_keys()
     {
         using var admin = await ClientForAsync("call.secret", systemAdmin: true);
