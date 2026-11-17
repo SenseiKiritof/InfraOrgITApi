@@ -633,7 +633,9 @@ public sealed class McpApiTests : IAsyncLifetime
         var operate = await SendAsync(userSession, HttpMethod.Post,
             "/api/api-tokens",
             new { name = "action", scopes = "mcp:read mcp:operate" });
-        var operateToken = (await ReadAsync(operate)).GetProperty("token").GetString()!;
+        var operateDto = await ReadAsync(operate);
+        var operateToken = operateDto.GetProperty("token").GetString()!;
+        var operateTokenId = operateDto.GetProperty("id").GetInt32();
         using var mcp = McpClientFor(operateToken);
 
         var noConfirm = await CallTool(mcp, "run_reachability_tests",
@@ -794,7 +796,7 @@ public sealed class McpApiTests : IAsyncLifetime
         Assert.Equal("permission_required",
             ToolPayload(afterDeny).GetProperty("status").GetString());
 
-        // Denying the agent blocks every action, even with a legacy grant.
+        // Denying the agent revokes the personal token, even with a legacy grant.
         using var admin = await SessionClientAsync("mcp.admin", systemAdmin: true);
         await SendAsync(admin, HttpMethod.Post, "/api/mcp/grants",
             new
@@ -806,12 +808,24 @@ public sealed class McpApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK,
             (await SendAsync(userSession, HttpMethod.Post,
                 $"/api/mcp/agents/{agentId}/deny")).StatusCode);
-        var deniedAgent = await CallTool(mcp, "run_reachability_tests",
-            new { serverId = seeded.Id, confirm = true });
-        Assert.Equal("agent_approval_required",
-            ToolPayload(deniedAgent).GetProperty("status").GetString());
-        Assert.Equal("Denied",
-            ToolPayload(deniedAgent).GetProperty("agentStatus").GetString());
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var token = await db.ApiTokens.SingleAsync(x => x.Id == operateTokenId);
+            Assert.NotNull(token.RevokedAt);
+        }
+        var deniedCall = await mcp.PostAsJsonAsync("/mcp", new
+        {
+            jsonrpc = "2.0",
+            id = 99,
+            method = "tools/call",
+            @params = new
+            {
+                name = "run_reachability_tests",
+                arguments = new { serverId = seeded.Id, confirm = true }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, deniedCall.StatusCode);
 
         var readOnly = await SendAsync(userSession, HttpMethod.Post,
             "/api/api-tokens",
