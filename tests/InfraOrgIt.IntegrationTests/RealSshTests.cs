@@ -52,8 +52,6 @@ public sealed class RealSshTests : IAsyncLifetime
             builder.UseSetting("ServerAccess:CommandTimeoutMinutes", "1");
         });
 
-        using var scope = _factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>().Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()
