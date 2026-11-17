@@ -14,11 +14,6 @@ public sealed class LegacyImportTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _connectionString = await TestMySql.CreateDatabaseAsync("LegacyImportTests");
-        var options = new DbContextOptionsBuilder<InfraOrgItDbContext>()
-            .UseMySQL(_connectionString)
-            .Options;
-        await using var db = new InfraOrgItDbContext(options);
-        await db.Database.MigrateAsync();
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

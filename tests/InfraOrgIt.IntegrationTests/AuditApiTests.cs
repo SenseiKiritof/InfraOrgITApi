@@ -40,9 +40,6 @@ public sealed class AuditApiTests : IAsyncLifetime
                 Convert.ToBase64String(Enumerable.Range(0, 32).Select(x => (byte)x).ToArray()));
         });
 
-        using var scope = _factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>()
-            .Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()
