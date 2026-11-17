@@ -7730,6 +7730,7 @@
           "host",
           "sshPort",
           "username",
+          "clientAuth",
           "jumps",
           "hostKeyFingerprint",
           "fileTransferProtocol"
@@ -7760,6 +7761,9 @@
           },
           "username": {
             "type": "string"
+          },
+          "clientAuth": {
+            "type": "boolean"
           },
           "jumps": {
             "type": "array",
@@ -8736,6 +8740,7 @@
           "sshHost",
           "sshPort",
           "username",
+          "clientAuth",
           "jump",
           "jumps",
           "targets",
@@ -8770,6 +8775,9 @@
           },
           "username": {
             "type": "string"
+          },
+          "clientAuth": {
+            "type": "boolean"
           },
           "jump": {
             "oneOf": [

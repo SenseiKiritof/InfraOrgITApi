@@ -64,6 +64,7 @@ public sealed class RemoteClientApiTests : IAsyncLifetime
         var target = await ReadAsync(targetResponse);
         Assert.Equal("10.40.0.10", target.GetProperty("host").GetString());
         Assert.Equal("deploy", target.GetProperty("username").GetString());
+        Assert.False(target.GetProperty("clientAuth").GetBoolean());
         Assert.Equal("10.40.0.9", target.GetProperty("jumps")[0]
             .GetProperty("host").GetString());
         Assert.Equal("SHA256:test", target.GetProperty("hostKeyFingerprint").GetString());

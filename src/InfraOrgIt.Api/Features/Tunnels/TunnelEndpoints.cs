@@ -72,6 +72,7 @@ public static class TunnelEndpoints
                 x.SshPort,
                 x.ProviderEnvironmentId,
                 Username = x.Credential!.Username,
+                AuthType = x.Credential!.AuthType,
                 x.JumpServerId,
                 EnvironmentLabel = x.ProviderEnvironment!.Provider!.Name + " / " +
                                    x.ProviderEnvironment!.EnvironmentDefinition!.Name,
@@ -116,7 +117,8 @@ public static class TunnelEndpoints
                 x.JumpServerId,
                 string.IsNullOrWhiteSpace(x.IpAddress) ? x.Hostname : x.IpAddress,
                 x.SshPort,
-                x.Credential != null ? x.Credential.Username : null))
+                x.Credential != null ? x.Credential.Username : null,
+                x.Credential != null ? x.Credential.AuthType : null))
             .ToDictionaryAsync(x => x.Id, ct);
 
         var items = rows.Select(x =>
@@ -129,6 +131,10 @@ public static class TunnelEndpoints
                                 x.ProviderEnvironmentId))
                 .ToList();
 
+            var clientAuth =
+                string.Equals(x.AuthType, "Key", StringComparison.OrdinalIgnoreCase) &&
+                JumpChainUsesKey(x.JumpServerId, jumpLinks);
+
             return new TunnelTargetDto(
                 x.Id,
                 x.Name,
@@ -136,6 +142,7 @@ public static class TunnelEndpoints
                 string.IsNullOrWhiteSpace(x.IpAddress) ? x.Hostname : x.IpAddress,
                 x.SshPort,
                 x.Username,
+                clientAuth,
                 jumps.FirstOrDefault(),
                 jumps,
                 x.Targets.Select(t => new TunnelEndpointDto(
@@ -175,12 +182,31 @@ public static class TunnelEndpoints
         return jumps;
     }
 
+    private static bool JumpChainUsesKey(
+        int? jumpServerId,
+        IReadOnlyDictionary<int, JumpLink> links)
+    {
+        var seen = new HashSet<int>();
+        var current = jumpServerId;
+        while (current is int id && seen.Add(id))
+        {
+            if (!links.TryGetValue(id, out var link))
+                break;
+            if (!string.Equals(
+                    link.AuthType, "Key", StringComparison.OrdinalIgnoreCase))
+                return false;
+            current = link.JumpServerId;
+        }
+        return true;
+    }
+
     private sealed record JumpLink(
         int Id,
         int? JumpServerId,
         string Host,
         int Port,
-        string? Username);
+        string? Username,
+        string? AuthType);
 
     private static async Task<IResult> RecordEventAsync(
         TunnelEventInput input,
@@ -822,6 +848,7 @@ public sealed record TunnelTargetDto(
     string SshHost,
     int SshPort,
     string Username,
+    bool ClientAuth,
     TunnelJumpDto? Jump,
     IReadOnlyList<TunnelJumpDto> Jumps,
     IReadOnlyList<TunnelEndpointDto> Targets,
