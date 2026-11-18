@@ -72,6 +72,7 @@ public sealed class TunnelApiTests : IAsyncLifetime
         Assert.Equal(seeded.ServerId, server.GetProperty("serverId").GetInt32());
         Assert.Equal("deploy", server.GetProperty("username").GetString());
         Assert.False(server.GetProperty("clientAuth").GetBoolean());
+        Assert.True(server.GetProperty("credentialId").GetInt32() > 0);
         Assert.Equal("10.40.0.10", server.GetProperty("sshHost").GetString());
         Assert.Equal("10.40.0.9", server.GetProperty("jump").GetProperty("host").GetString());
         Assert.Equal("jump-user",
