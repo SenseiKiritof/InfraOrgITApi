@@ -45,6 +45,9 @@ public sealed class StandaloneDataTransferTests : IAsyncLifetime
     {
         using var source = _factory.CreateClient();
         await LocalLoginAsync(source);
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await source.GetAsync("/health/ready")).StatusCode);
 
         using (var scope = _factory.Services.CreateScope())
         {
