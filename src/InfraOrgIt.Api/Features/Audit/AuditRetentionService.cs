@@ -46,6 +46,7 @@ public sealed class AuditRetentionService(
         var days = Math.Clamp(options.Value.RetentionDays, 1, 3650);
         var cutoff = DateTime.UtcNow.AddDays(-days);
         var total = 0;
+        var clientTotal = 0;
 
         try
         {
@@ -68,6 +69,23 @@ public sealed class AuditRetentionService(
                 if (ids.Count < BatchSize)
                     break;
             }
+            while (!ct.IsCancellationRequested)
+            {
+                var ids = await db.ClientEvents.AsNoTracking()
+                    .Where(x => x.OccurredAt < cutoff)
+                    .OrderBy(x => x.Id)
+                    .Select(x => x.Id)
+                    .Take(BatchSize)
+                    .ToListAsync(ct);
+                if (ids.Count == 0)
+                    break;
+
+                clientTotal += await db.ClientEvents
+                    .Where(x => ids.Contains(x.Id))
+                    .ExecuteDeleteAsync(ct);
+                if (ids.Count < BatchSize)
+                    break;
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -81,14 +99,14 @@ public sealed class AuditRetentionService(
             return total;
         }
 
-        if (total > 0)
+        if (total > 0 || clientTotal > 0)
             logger.LogInformation(
-                "Pulizia audit: eliminate {Count} righe più vecchie di {Days} giorni.",
-                total, days);
+                "Pulizia audit: eliminate {Count} righe e {ClientCount} eventi client più vecchi di {Days} giorni.",
+                total, clientTotal, days);
         else
             logger.LogDebug(
                 "Pulizia audit: nessuna riga da eliminare (retention {Days} giorni).", days);
 
-        return total;
+        return total + clientTotal;
     }
 }
