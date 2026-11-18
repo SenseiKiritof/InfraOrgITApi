@@ -232,10 +232,11 @@ public sealed class InventoryApiTests : IAsyncLifetime
         await AssignEnvironmentRoleAsync(
             admin, sharedEnv.ProviderEnvironmentId, "cred.owner",
             "ServerOperator", owner);
+        var sharedName = "shared-" + Guid.NewGuid().ToString("N")[..8];
         var shared = await ReadAsync(await SendAsync(
             admin, HttpMethod.Post, "/api/server-credentials", new
             {
-                name = "shared-" + Guid.NewGuid().ToString("N")[..8],
+                name = sharedName,
                 username = "deploy",
                 authType = "Password",
                 secret = "shared-secret",
@@ -264,6 +265,18 @@ public sealed class InventoryApiTests : IAsyncLifetime
             $"/api/server-credentials/{sharedId}/download",
             new { deviceId });
         Assert.Equal(HttpStatusCode.NotFound, sharedDenied.StatusCode);
+
+        var convert = await SendAsync(
+            admin, HttpMethod.Put, $"/api/server-credentials/{sharedId}", new
+            {
+                name = sharedName,
+                username = "deploy",
+                authType = "Password",
+                secret = (string?)null,
+                ownerUserId = ownerId,
+                allowOffline = false
+            });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, convert.StatusCode);
 
         var revoked = await SendAsync(
             owner, HttpMethod.Delete, $"/api/devices/{deviceId}");

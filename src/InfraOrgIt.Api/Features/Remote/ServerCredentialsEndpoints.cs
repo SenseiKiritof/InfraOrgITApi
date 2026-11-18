@@ -160,6 +160,11 @@ public static class ServerCredentialsEndpoints
 
         await EnsureUniqueAsync(db, name, id, ct);
         await ValidateOwnerAsync(db, input.OwnerUserId, ct);
+        if (input.OwnerUserId is not null &&
+            await db.Servers.AnyAsync(
+                x => x.CredentialId == id || x.FileTransferCredentialId == id, ct))
+            throw Guard.Unprocessable(
+                "Rimuovi le assegnazioni ai server prima di rendere la credenziale personale.");
         if (authType != entity.AuthType && string.IsNullOrWhiteSpace(input.Secret))
             throw Guard.Unprocessable("Cambiando AuthType va reinserito il segreto.");
 
