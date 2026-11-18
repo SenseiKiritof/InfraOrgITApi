@@ -137,6 +137,62 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Client_events_are_idempotent_and_audited()
+    {
+        using var admin = await ClientForAsync("client.events", systemAdmin: true);
+        var eventId = Guid.NewGuid().ToString("N");
+        var body = new
+        {
+            events = new object[]
+            {
+                new
+                {
+                    eventId,
+                    kind = "check.tcp",
+                    occurredAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+                    outcome = "Ok",
+                    targetHost = "127.0.0.1",
+                    targetPort = 443,
+                    durationMs = 12,
+                    detail = "TCP OK"
+                },
+                new
+                {
+                    eventId = Guid.NewGuid().ToString("N"),
+                    kind = "check.http",
+                    occurredAt = DateTimeOffset.UtcNow,
+                    outcome = "Error",
+                    targetHost = "example.com",
+                    targetPort = 443,
+                    durationMs = 500,
+                    errorCode = "ECONNREFUSED",
+                    detail = "Connection refused"
+                }
+            }
+        };
+
+        var first = await ReadAsync(await SendAsync(
+            admin, HttpMethod.Post, "/api/client-events", body));
+        Assert.Equal(2, first.GetProperty("accepted").GetArrayLength());
+        Assert.Equal(0, first.GetProperty("duplicates").GetArrayLength());
+
+        var second = await ReadAsync(await SendAsync(
+            admin, HttpMethod.Post, "/api/client-events", body));
+        Assert.Equal(0, second.GetProperty("accepted").GetArrayLength());
+        Assert.Equal(2, second.GetProperty("duplicates").GetArrayLength());
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+        Assert.Equal(2, await db.ClientEvents.CountAsync(
+            x => x.Username == "client.events"));
+        var audit = await db.AuditEvents.AsNoTracking()
+            .SingleAsync(x => x.CorrelationId == eventId);
+        Assert.Equal("ClientCheck", audit.Kind);
+        Assert.Equal("check.tcp", audit.Action);
+        Assert.Contains("Desktop", audit.DetailJson);
+    }
+
+    [Fact]
     public async Task Applications_round_trip_translations()
     {
         using var admin = await ClientForAsync("app.i18n", systemAdmin: true);

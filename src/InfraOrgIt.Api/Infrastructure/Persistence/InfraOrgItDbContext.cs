@@ -41,6 +41,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<CommandExecution> CommandExecutions => Set<CommandExecution>();
     public DbSet<SessionRecord> Sessions => Set<SessionRecord>();
     public DbSet<DownloadTicket> DownloadTickets => Set<DownloadTicket>();
+    public DbSet<ClientEvent> ClientEvents => Set<ClientEvent>();
     public DbSet<Translation> Translations => Set<Translation>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
@@ -428,7 +429,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.ToTable(t =>
             {
                 t.HasCheckConstraint("CK_AuditEvents_Kind",
-                    "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','FileTransfer','AdminChange')");
+                    "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','ClientCheck','FileTransfer','AdminChange')");
                 t.HasCheckConstraint("CK_AuditEvents_Outcome",
                     "`Outcome` IN ('Ok','Error','Denied')");
                 t.HasCheckConstraint("CK_AuditEvents_Hash",
@@ -595,6 +596,22 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.CreatedAt).HasColumnType("datetime(6)");
             e.HasIndex(x => x.Username);
             e.HasIndex(x => x.ExpiresAt);
+        });
+
+        modelBuilder.Entity<ClientEvent>(e =>
+        {
+            e.Property(x => x.EventId).HasMaxLength(100);
+            e.Property(x => x.Username).HasMaxLength(100);
+            e.Property(x => x.Kind).HasMaxLength(50);
+            e.Property(x => x.Outcome).HasMaxLength(20);
+            e.Property(x => x.TargetHost).HasMaxLength(255);
+            e.Property(x => x.ErrorCode).HasMaxLength(100);
+            e.Property(x => x.OccurredAt).HasColumnType("datetime(6)");
+            e.Property(x => x.ReceivedAt).HasColumnType("datetime(6)");
+            e.Property(x => x.DetailJson).HasMaxLength(4000);
+            e.HasIndex(x => new { x.Username, x.EventId }).IsUnique();
+            e.HasIndex(x => x.OccurredAt);
+            e.HasIndex(x => x.ServerId);
         });
 
         modelBuilder.Entity<DownloadTicket>(e =>
