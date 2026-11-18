@@ -16,9 +16,12 @@ public sealed class EnvironmentAccessService(InfraOrgItDbContext db)
     public const string AdminRole = "ServerAdmin";
     public const string OperatorRole = "ServerOperator";
 
-    public async Task<EnvironmentAccess> GetAsync(ClaimsPrincipal user, CancellationToken ct)
+    public Task<EnvironmentAccess> GetAsync(ClaimsPrincipal user, CancellationToken ct) =>
+        GetForUsernameAsync(user.Identity?.Name ?? "", ct);
+
+    public async Task<EnvironmentAccess> GetForUsernameAsync(
+        string username, CancellationToken ct)
     {
-        var username = user.Identity?.Name ?? "";
         var rows = await (
                 from u in db.Users.AsNoTracking()
                 join gu in db.GroupUsers.AsNoTracking() on u.Id equals gu.UsersId
