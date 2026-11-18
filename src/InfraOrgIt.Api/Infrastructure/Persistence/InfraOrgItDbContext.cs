@@ -42,6 +42,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
     public DbSet<SessionRecord> Sessions => Set<SessionRecord>();
     public DbSet<DownloadTicket> DownloadTickets => Set<DownloadTicket>();
     public DbSet<ClientEvent> ClientEvents => Set<ClientEvent>();
+    public DbSet<DesktopDevice> DesktopDevices => Set<DesktopDevice>();
     public DbSet<Translation> Translations => Set<Translation>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
@@ -358,8 +359,25 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.Property(x => x.EncryptedSecret).HasColumnType("longtext");
             e.Property(x => x.EncryptedPassphrase).HasColumnType("longtext");
             e.HasIndex(x => x.Name).IsUnique();
+            e.HasIndex(x => x.OwnerUserId);
             e.ToTable(t => t.HasCheckConstraint("CK_ServerCredentials_AuthType",
                 "`AuthType` IN ('Password','PrivateKey')"));
+            e.HasOne(x => x.Owner).WithMany()
+                .HasForeignKey(x => x.OwnerUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DesktopDevice>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Fingerprint).HasMaxLength(64);
+            e.Property(x => x.PublicKeyPem).HasColumnType("longtext");
+            e.Property(x => x.LastSeenAt).HasColumnType("datetime(6)");
+            e.Property(x => x.RevokedAt).HasColumnType("datetime(6)");
+            e.HasIndex(x => new { x.UserId, x.Fingerprint }).IsUnique();
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<CommandTemplate>(e =>
@@ -429,7 +447,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
             e.ToTable(t =>
             {
                 t.HasCheckConstraint("CK_AuditEvents_Kind",
-                    "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','ClientCheck','FileTransfer','AdminChange')");
+                    "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','ClientCheck','CredentialDownload','FileTransfer','AdminChange')");
                 t.HasCheckConstraint("CK_AuditEvents_Outcome",
                     "`Outcome` IN ('Ok','Error','Denied')");
                 t.HasCheckConstraint("CK_AuditEvents_Hash",

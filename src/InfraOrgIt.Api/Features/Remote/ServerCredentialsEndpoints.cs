@@ -1,13 +1,17 @@
 using System.Security.Claims;
 using System.Text;
+using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
+using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Security;
 using InfraOrgIt.Api.BuildingBlocks.Validation;
+using InfraOrgIt.Api.Features.Devices;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
 using Renci.SshNet;
+using System.Text.Json;
 
 namespace InfraOrgIt.Api.Features.Remote;
 
@@ -21,6 +25,9 @@ public static class ServerCredentialsEndpoints
         credentials.MapPost("", CreateAsync);
         credentials.MapPut("/{id:int}", UpdateAsync);
         credentials.MapDelete("/{id:int}", DeleteAsync);
+        credentials.MapGet("/downloadable", ListDownloadableAsync);
+        credentials.MapPost("/{id:int}/download", DownloadAsync)
+            .RequireRateLimiting("tunnels");
 
         var servers = app.MapGroup("/api/servers").RequireAuthorization();
         servers.MapPut("/{id:int}/ssh", AssignSshAsync);
@@ -49,7 +56,11 @@ public static class ServerCredentialsEndpoints
             .Select(x => new ServerCredentialDto(
                 x.Id, x.Name, x.Username, x.AuthType,
                 x.EncryptedSecret != "", x.EncryptedSudoSecret != null,
-                x.Servers.Count, x.NeedsReauth))
+                x.Servers.Count, x.NeedsReauth,
+                x.OwnerUserId,
+                x.Owner != null ? x.Owner.Username : null,
+                x.AllowOffline,
+                x.Version))
             .ToListAsync(ct);
 
         return Results.Ok(new PagedResult<ServerCredentialDto>(
@@ -68,7 +79,11 @@ public static class ServerCredentialsEndpoints
             .Select(x => new ServerCredentialDto(
                 x.Id, x.Name, x.Username, x.AuthType,
                 x.EncryptedSecret != "", x.EncryptedSudoSecret != null,
-                x.Servers.Count, x.NeedsReauth))
+                x.Servers.Count, x.NeedsReauth,
+                x.OwnerUserId,
+                x.Owner != null ? x.Owner.Username : null,
+                x.AllowOffline,
+                x.Version))
             .SingleOrDefaultAsync(ct);
         return dto is null ? throw Guard.NotFound("Credenziale", id) : Results.Ok(dto);
     }
@@ -88,6 +103,7 @@ public static class ServerCredentialsEndpoints
 
         await EnsureUniqueAsync(db, name, null, ct);
         ValidatePrivateKey(authType, secret, input.Passphrase);
+        await ValidateOwnerAsync(db, input.OwnerUserId, ct);
 
         var (ciphertext, keyVersion) = cipher.Encrypt(secret);
         string? sudoCiphertext = null;
@@ -109,14 +125,21 @@ public static class ServerCredentialsEndpoints
                 : cipher.Encrypt(input.Passphrase).Ciphertext,
             EncryptedSudoSecret = sudoCiphertext,
             SudoKeyVersion = sudoKeyVersion,
-            KeyVersion = keyVersion
+            KeyVersion = keyVersion,
+            OwnerUserId = input.OwnerUserId,
+            AllowOffline = input.AllowOffline
         };
         db.ServerCredentials.Add(entity);
         await db.SaveChangesAsync(ct);
 
+        var owner = entity.OwnerUserId is null
+            ? null
+            : await db.Users.Where(x => x.Id == entity.OwnerUserId)
+                .Select(x => x.Username).SingleOrDefaultAsync(ct);
         return Results.Ok(new ServerCredentialDto(
             entity.Id, entity.Name, entity.Username, entity.AuthType,
-            true, entity.EncryptedSudoSecret != null, 0, entity.NeedsReauth));
+            true, entity.EncryptedSudoSecret != null, 0, entity.NeedsReauth,
+            entity.OwnerUserId, owner, entity.AllowOffline, entity.Version));
     }
 
     private static async Task<IResult> UpdateAsync(
@@ -136,6 +159,7 @@ public static class ServerCredentialsEndpoints
         var authType = Guard.Enum<CredentialAuthType>(input.AuthType, "AuthType");
 
         await EnsureUniqueAsync(db, name, id, ct);
+        await ValidateOwnerAsync(db, input.OwnerUserId, ct);
         if (authType != entity.AuthType && string.IsNullOrWhiteSpace(input.Secret))
             throw Guard.Unprocessable("Cambiando AuthType va reinserito il segreto.");
 
@@ -169,8 +193,151 @@ public static class ServerCredentialsEndpoints
         entity.Username = username;
         entity.AuthType = authType;
         entity.NeedsReauth = false;
+        entity.OwnerUserId = input.OwnerUserId;
+        entity.AllowOffline = input.AllowOffline;
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
+    }
+
+    private static async Task<IResult> ListDownloadableAsync(
+        ClaimsPrincipal user,
+        InfraOrgItDbContext db,
+        EnvironmentAccessService access,
+        CancellationToken ct)
+    {
+        var actor = await ActorResolver.ResolveAsync(user, db, ct);
+        var environmentAccess = await access.GetAsync(user, ct);
+        var sharedIds = new List<int>();
+        if (environmentAccess.OperatorEnvironmentIds.Count > 0)
+        {
+            var assignments = await db.Servers.AsNoTracking()
+                .Where(x => environmentAccess.OperatorEnvironmentIds.Contains(
+                    x.ProviderEnvironmentId))
+                .Select(x => new
+                {
+                    x.CredentialId,
+                    x.FileTransferCredentialId
+                })
+                .ToListAsync(ct);
+            sharedIds = assignments
+                .SelectMany(x => new int?[]
+                {
+                    x.CredentialId,
+                    x.FileTransferCredentialId
+                })
+                .Where(x => x is not null)
+                .Select(x => x!.Value)
+                .Distinct()
+                .ToList();
+        }
+
+        var items = await db.ServerCredentials.AsNoTracking()
+            .Where(x => x.OwnerUserId == actor.Id ||
+                        (x.OwnerUserId == null && sharedIds.Contains(x.Id)))
+            .OrderBy(x => x.Name)
+            .Select(x => new DownloadableCredentialDto(
+                x.Id, x.Name, x.Username, x.AuthType,
+                x.OwnerUserId, x.Owner != null ? x.Owner.Username : null,
+                x.AllowOffline, x.Servers.Count, x.Version))
+            .ToListAsync(ct);
+        return Results.Ok(items);
+    }
+
+    private static async Task<IResult> DownloadAsync(
+        int id,
+        CredentialDownloadInput input,
+        ClaimsPrincipal user,
+        InfraOrgItDbContext db,
+        CredentialCipher cipher,
+        EnvironmentAccessService access,
+        IAuditService audit,
+        CancellationToken ct)
+    {
+        var actor = await ActorResolver.ResolveAsync(user, db, ct);
+        var credential = await db.ServerCredentials.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Credenziale", id);
+        var device = await db.DesktopDevices
+            .SingleOrDefaultAsync(
+                x => x.Id == input.DeviceId && x.UserId == actor.Id, ct)
+            ?? throw Guard.NotFound("Dispositivo", input.DeviceId);
+        if (device.RevokedAt is not null)
+            throw Guard.Forbidden("Dispositivo revocato: registra una nuova chiave.");
+
+        if (!await CanDownloadAsync(credential, actor, db, access, ct))
+            throw Guard.Forbidden("Credenziale non accessibile a questo utente.");
+
+        var secret = cipher.Decrypt(credential.EncryptedSecret, credential.KeyVersion);
+        var passphrase = string.IsNullOrWhiteSpace(credential.EncryptedPassphrase)
+            ? null
+            : cipher.Decrypt(credential.EncryptedPassphrase, credential.KeyVersion);
+        var now = DateTimeOffset.UtcNow;
+        var payload = JsonSerializer.Serialize(new
+        {
+            version = 1,
+            credentialId = credential.Id,
+            deviceId = device.Id,
+            name = credential.Name,
+            username = credential.Username,
+            authType = credential.AuthType,
+            secret,
+            passphrase,
+            owner = credential.OwnerUserId is null ? "shared" : "personal",
+            allowOffline = credential.AllowOffline,
+            credentialVersion = credential.Version,
+            downloadedAt = now,
+            expiresAt = now.AddMinutes(5)
+        });
+        var aad = $"infraorgit-credential:{credential.Id}:{device.Id}:{credential.KeyVersion}";
+        var encrypted = DeviceCipher.Encrypt(device.PublicKeyPem, payload, aad);
+
+        device.LastSeenAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(new AuditEntry(
+            "CredentialDownload",
+            "credential.download",
+            "Ok",
+            ActorUserId: actor.Id,
+            ActorUsername: actor.Username,
+            ClientId: $"device:{device.Id}",
+            TargetType: "ServerCredential",
+            TargetId: credential.Id,
+            Detail: new
+            {
+                deviceId = device.Id,
+                deviceName = device.Name,
+                owner = credential.OwnerUserId is null ? "shared" : "personal"
+            }), ct);
+
+        return Results.Ok(new DeviceSecretDto(
+            1, credential.Id, device.Id, credential.KeyVersion,
+            now.AddMinutes(5), encrypted));
+    }
+
+    private static async Task<bool> CanDownloadAsync(
+        ServerCredential credential,
+        InfraOrgIt.Api.Infrastructure.Persistence.Entities.User actor,
+        InfraOrgItDbContext db,
+        EnvironmentAccessService access,
+        CancellationToken ct)
+    {
+        if (credential.OwnerUserId is int owner) return owner == actor.Id;
+        var environmentAccess = await access.GetForUsernameAsync(
+            actor.Username, ct);
+        if (environmentAccess.OperatorEnvironmentIds.Count == 0) return false;
+        return await db.Servers.AsNoTracking().AnyAsync(
+            x => environmentAccess.OperatorEnvironmentIds.Contains(
+                     x.ProviderEnvironmentId) &&
+                 (x.CredentialId == credential.Id ||
+                  x.FileTransferCredentialId == credential.Id), ct);
+    }
+
+    private static async Task ValidateOwnerAsync(
+        InfraOrgItDbContext db, int? ownerUserId, CancellationToken ct)
+    {
+        if (ownerUserId is null) return;
+        if (!await db.Users.AnyAsync(x => x.Id == ownerUserId, ct))
+            throw Guard.Unprocessable("Utente proprietario non valido.");
     }
 
     private static async Task<IResult> DeleteAsync(
@@ -204,9 +371,15 @@ public static class ServerCredentialsEndpoints
         var server = await db.Servers.SingleOrDefaultAsync(x => x.Id == id, ct)
                      ?? throw Guard.NotFound("Server", id);
 
-        if (input.CredentialId is not null &&
-            !await db.ServerCredentials.AnyAsync(x => x.Id == input.CredentialId, ct))
-            throw Guard.NotFound("Credenziale", input.CredentialId.Value);
+        if (input.CredentialId is not null)
+        {
+            var credential = await db.ServerCredentials.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == input.CredentialId, ct)
+                ?? throw Guard.NotFound("Credenziale", input.CredentialId.Value);
+            if (credential.OwnerUserId is not null)
+                throw Guard.Unprocessable(
+                    "Una credenziale personale non può essere assegnata a un server: usa una condivisa.");
+        }
 
         server.CredentialId = input.CredentialId;
         server.SshPort = Guard.Port(input.SshPort, "SshPort");
@@ -268,7 +441,9 @@ public sealed record ServerCredentialInput(
     string? AuthType,
     string? Secret,
     string? Passphrase,
-    string? SudoPassword);
+    string? SudoPassword,
+    int? OwnerUserId = null,
+    bool AllowOffline = false);
 
 public sealed record ServerCredentialDto(
     int Id,
@@ -278,6 +453,31 @@ public sealed record ServerCredentialDto(
     bool HasSecret,
     bool HasSudoPassword,
     int ServersCount,
-    bool NeedsReauth);
+    bool NeedsReauth,
+    int? OwnerUserId,
+    string? OwnerUsername,
+    bool AllowOffline,
+    int Version);
+
+public sealed record DownloadableCredentialDto(
+    int Id,
+    string Name,
+    string Username,
+    string AuthType,
+    int? OwnerUserId,
+    string? OwnerUsername,
+    bool AllowOffline,
+    int ServersCount,
+    int Version);
+
+public sealed record CredentialDownloadInput(int DeviceId);
+
+public sealed record DeviceSecretDto(
+    int Version,
+    int CredentialId,
+    int DeviceId,
+    int KeyVersion,
+    DateTimeOffset ExpiresAt,
+    DeviceCipherResult Payload);
 
 public sealed record ServerSshInput(int? CredentialId, int SshPort);

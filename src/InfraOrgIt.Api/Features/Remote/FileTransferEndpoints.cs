@@ -69,9 +69,15 @@ public static class FileTransferEndpoints
             ? DefaultPort(protocol)
             : Guard.Port(input.Port.Value, "Port");
 
-        if (input.CredentialId is not null &&
-            !await db.ServerCredentials.AnyAsync(x => x.Id == input.CredentialId, ct))
-            throw Guard.NotFound("Credenziale", input.CredentialId.Value);
+        if (input.CredentialId is not null)
+        {
+            var credential = await db.ServerCredentials.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == input.CredentialId, ct)
+                ?? throw Guard.NotFound("Credenziale", input.CredentialId.Value);
+            if (credential.OwnerUserId is not null)
+                throw Guard.Unprocessable(
+                    "Una credenziale personale non può essere assegnata al file transfer: usa una condivisa.");
+        }
 
         server.FileTransferProtocol = protocol.ToString();
         server.FileTransferPort = port;

@@ -2,6 +2,7 @@ using System.IO.Pipelines;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
@@ -134,6 +135,145 @@ public sealed class InventoryApiTests : IAsyncLifetime
             .Select(x => x.GetProperty("name").GetString())
             .ToList();
         Assert.Contains("Ambienti", italianNames);
+    }
+
+    [Fact]
+    public async Task Credentials_download_to_an_enrolled_device_only()
+    {
+        using var admin = await ClientForAsync("cred.admin", systemAdmin: true);
+        using var owner = await ClientForAsync("cred.owner");
+        using var other = await ClientForAsync("cred.other");
+
+        int ownerId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            ownerId = await db.Users.Where(x => x.Username == "cred.owner")
+                .Select(x => x.Id).SingleAsync();
+        }
+
+        using var rsa = RSA.Create(3072);
+        var publicKey = rsa.ExportSubjectPublicKeyInfoPem();
+        var fingerprint = Convert.ToBase64String(
+                SHA256.HashData(rsa.ExportSubjectPublicKeyInfo()))
+            .TrimEnd('=');
+        var registered = await ReadAsync(await SendAsync(
+            owner, HttpMethod.Post, "/api/devices",
+            new { name = "test-desktop", publicKeyPem = publicKey, fingerprint }));
+        var deviceId = registered.GetProperty("id").GetInt32();
+        Assert.Equal(fingerprint, registered.GetProperty("fingerprint").GetString());
+
+        var created = await ReadAsync(await SendAsync(
+            admin, HttpMethod.Post, "/api/server-credentials", new
+            {
+                name = "cred-" + Guid.NewGuid().ToString("N")[..8],
+                username = "deploy",
+                authType = "Password",
+                secret = "s3cret-value",
+                ownerUserId = ownerId,
+                allowOffline = true
+            }));
+        var credentialId = created.GetProperty("id").GetInt32();
+        Assert.Equal("cred.owner", created.GetProperty("ownerUsername").GetString());
+        Assert.True(created.GetProperty("allowOffline").GetBoolean());
+        Assert.Equal(ownerId, created.GetProperty("ownerUserId").GetInt32());
+
+        var ownerList = await ReadAsync(
+            await owner.GetAsync("/api/server-credentials/downloadable"));
+        Assert.Contains(
+            ownerList.EnumerateArray(),
+            item => item.GetProperty("id").GetInt32() == credentialId);
+        var otherList = await ReadAsync(
+            await other.GetAsync("/api/server-credentials/downloadable"));
+        Assert.DoesNotContain(
+            otherList.EnumerateArray(),
+            item => item.GetProperty("id").GetInt32() == credentialId);
+
+        var denied = await SendAsync(
+            other, HttpMethod.Post,
+            $"/api/server-credentials/{credentialId}/download",
+            new { deviceId });
+        Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+
+        var download = await ReadAsync(await SendAsync(
+            owner, HttpMethod.Post,
+            $"/api/server-credentials/{credentialId}/download",
+            new { deviceId }));
+        var payload = download.GetProperty("payload");
+        var key = rsa.Decrypt(
+            Convert.FromBase64String(payload.GetProperty("wrappedKey").GetString()!),
+            RSAEncryptionPadding.OaepSHA256);
+        var nonce = Convert.FromBase64String(payload.GetProperty("nonce").GetString()!);
+        var ciphertext = Convert.FromBase64String(
+            payload.GetProperty("ciphertext").GetString()!);
+        var tag = Convert.FromBase64String(payload.GetProperty("tag").GetString()!);
+        var aad = Encoding.UTF8.GetBytes(payload.GetProperty("aad").GetString()!);
+        var plaintext = new byte[ciphertext.Length];
+        using (var aes = new AesGcm(key, tag.Length))
+            aes.Decrypt(nonce, ciphertext, tag, plaintext, aad);
+        using var secret = JsonDocument.Parse(plaintext);
+        Assert.Equal("s3cret-value", secret.RootElement.GetProperty("secret").GetString());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            Assert.True(await db.AuditEvents.AnyAsync(
+                x => x.Kind == "CredentialDownload" &&
+                     x.TargetId == credentialId));
+        }
+
+        var seeded = await SeedEnvironmentAsync("cred-assign");
+        var assignment = await SendAsync(
+            admin, HttpMethod.Put, $"/api/servers/{seeded.ServerId}/ssh",
+            new { credentialId, sshPort = 22 });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, assignment.StatusCode);
+
+        var sharedEnv = await SeedEnvironmentAsync("cred-shared");
+        await AssignEnvironmentRoleAsync(
+            admin, sharedEnv.ProviderEnvironmentId, "cred.owner",
+            "ServerOperator", owner);
+        var shared = await ReadAsync(await SendAsync(
+            admin, HttpMethod.Post, "/api/server-credentials", new
+            {
+                name = "shared-" + Guid.NewGuid().ToString("N")[..8],
+                username = "deploy",
+                authType = "Password",
+                secret = "shared-secret",
+                ownerUserId = (int?)null,
+                allowOffline = false
+            }));
+        var sharedId = shared.GetProperty("id").GetInt32();
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(
+            admin, HttpMethod.Put, $"/api/servers/{sharedEnv.ServerId}/ssh",
+            new { credentialId = sharedId, sshPort = 22 })).StatusCode);
+
+        var sharedList = await ReadAsync(
+            await owner.GetAsync("/api/server-credentials/downloadable"));
+        Assert.Contains(
+            sharedList.EnumerateArray(),
+            item => item.GetProperty("id").GetInt32() == sharedId);
+        var sharedDownload = await SendAsync(
+            owner, HttpMethod.Post,
+            $"/api/server-credentials/{sharedId}/download",
+            new { deviceId });
+        Assert.True(
+            sharedDownload.IsSuccessStatusCode,
+            await sharedDownload.Content.ReadAsStringAsync());
+        var sharedDenied = await SendAsync(
+            other, HttpMethod.Post,
+            $"/api/server-credentials/{sharedId}/download",
+            new { deviceId });
+        Assert.Equal(HttpStatusCode.NotFound, sharedDenied.StatusCode);
+
+        var revoked = await SendAsync(
+            owner, HttpMethod.Delete, $"/api/devices/{deviceId}");
+        Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);
+        var afterRevoke = await SendAsync(
+            owner, HttpMethod.Post,
+            $"/api/server-credentials/{credentialId}/download",
+            new { deviceId });
+        Assert.Equal(HttpStatusCode.Forbidden, afterRevoke.StatusCode);
+
     }
 
     [Fact]

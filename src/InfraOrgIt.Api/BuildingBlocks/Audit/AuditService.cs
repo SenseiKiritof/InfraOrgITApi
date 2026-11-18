@@ -77,7 +77,7 @@ public sealed class AuditService(InfraOrgItDbContext db) : IAuditService
     private static readonly string[] Kinds =
     [
         "McpToolCall", "TunnelStart", "TunnelStop", "TunnelError",
-        "ClientCheck", "FileTransfer", "AdminChange"
+        "ClientCheck", "CredentialDownload", "FileTransfer", "AdminChange"
     ];
     private static readonly string[] Outcomes = ["Ok", "Error", "Denied"];
     private static readonly JsonSerializerOptions JsonOptions =

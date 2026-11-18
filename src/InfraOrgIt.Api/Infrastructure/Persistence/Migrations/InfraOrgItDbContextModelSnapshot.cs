@@ -564,7 +564,7 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_AuditEvents_Hash", "`Hash` IS NULL OR CHAR_LENGTH(`Hash`) = 64");
 
-                            t.HasCheckConstraint("CK_AuditEvents_Kind", "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','ClientCheck','FileTransfer','AdminChange')");
+                            t.HasCheckConstraint("CK_AuditEvents_Kind", "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','ClientCheck','CredentialDownload','FileTransfer','AdminChange')");
 
                             t.HasCheckConstraint("CK_AuditEvents_Outcome", "`Outcome` IN ('Ok','Error','Denied')");
                         });
@@ -802,6 +802,53 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                             UpdatedBy = "",
                             Version = 0
                         });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.DesktopDevice", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("PublicKeyPem")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Fingerprint")
+                        .IsUnique();
+
+                    b.ToTable("DesktopDevices");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", b =>
@@ -2226,6 +2273,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int");
 
+                    b.Property<bool>("AllowOffline")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<string>("AuthType")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -2255,6 +2305,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<bool>("NeedsReauth")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("SudoKeyVersion")
                         .HasColumnType("int");
 
@@ -2274,6 +2327,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Name")
                         .IsUnique();
+
+                    b.HasIndex("OwnerUserId");
 
                     b.ToTable("ServerCredentials", t =>
                         {
@@ -2721,6 +2776,17 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("ApplicationVersion");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.DesktopDevice", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.DiagramEdge", b =>
                 {
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Diagram", "Diagram")
@@ -3081,6 +3147,16 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("ProxyRoute");
 
                     b.Navigation("Server");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerCredential", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.User", "Owner")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Owner");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.TunnelService", b =>
