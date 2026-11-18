@@ -8,6 +8,7 @@ using InfraOrgIt.Api.Features.Settings;
 using InfraOrgIt.Api.Features.Audit;
 using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Features.Catalog;
+using InfraOrgIt.Api.Features.Data;
 using InfraOrgIt.Api.Features.Devices;
 using InfraOrgIt.Api.Features.Inventory;
 using InfraOrgIt.Api.Features.Mcp;
@@ -444,6 +445,7 @@ builder.Services.AddAuthorization(options =>
             .RequireAuthenticatedUser();
     });
 });
+builder.Services.AddMemoryCache();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 
@@ -457,7 +459,7 @@ if (args.Contains("migrate", StringComparer.Ordinal))
     return;
 }
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || localMode)
 {
     using var scope = app.Services.CreateScope();
     scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>().Database.Migrate();
@@ -620,6 +622,7 @@ CommandExecutionEndpoints.Map(app);
 AuditEventsEndpoints.Map(app);
 ClientEventsEndpoints.Map(app);
 DesktopDevicesEndpoints.Map(app);
+DataTransferEndpoints.Map(app);
 ConsoleEndpoints.Map(app);
 FileTransferEndpoints.Map(app);
 DesktopDownloadEndpoints.Map(app);
