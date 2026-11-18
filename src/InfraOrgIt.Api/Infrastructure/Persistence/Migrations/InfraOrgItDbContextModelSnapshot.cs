@@ -564,10 +564,88 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_AuditEvents_Hash", "`Hash` IS NULL OR CHAR_LENGTH(`Hash`) = 64");
 
-                            t.HasCheckConstraint("CK_AuditEvents_Kind", "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','FileTransfer','AdminChange')");
+                            t.HasCheckConstraint("CK_AuditEvents_Kind", "`Kind` IN ('McpToolCall','TunnelStart','TunnelStop','TunnelError','ClientCheck','FileTransfer','AdminChange')");
 
                             t.HasCheckConstraint("CK_AuditEvents_Outcome", "`Outcome` IN ('Ok','Error','Denied')");
                         });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ClientEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("DetailJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("varchar(4000)");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<int?>("LocalPort")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("ServerId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TargetHost")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<int?>("TargetPort")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OccurredAt");
+
+                    b.HasIndex("ServerId");
+
+                    b.HasIndex("Username", "EventId")
+                        .IsUnique();
+
+                    b.ToTable("ClientEvents");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.CommandExecution", b =>
