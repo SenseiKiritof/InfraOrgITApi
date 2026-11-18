@@ -24,15 +24,24 @@ use fictitious demo data.
 - **Desktop tunnels**: the tunnel API accepts the authenticated BFF session as
   well as a personal token with `tunnels:operate`, so the desktop reuses the
   Web login.
+- **Credential distribution**: server credentials are shared
+  (installation-wide) or owned by one user, with optional offline use. Each
+  desktop enrolls an RSA device key (`/api/devices`) and downloads credentials
+  encrypted for that device only (`/api/server-credentials/{id}/download`);
+  downloads are audited as `CredentialDownload`, cached copies are invalidated
+  by the credential version, and revoking a device drops them. Personal
+  credentials are download-only and cannot be assigned to servers or the file
+  transfer credential.
 - **Connection policy**: a per-installation `Server`/`Client`/`Auto` row in
   MySQL, default `Auto`; `Server` keeps console/files/actions on the API and
   relays allowlisted Local tunnels and deployments, while `Auto` uses the
-  client when the first SSH hop is reachable and falls back to the server
-  otherwise. `Client` uses the desktop agent for all four. The row is shared by
-  every API node in a cluster. `GET /api/connection-policy` accepts the BFF
-  session or a `tunnels:operate` token; `PUT` is SystemAdmin-only. Direct
-  console/actions are projected to `CommandExecutions`, file operations to the
-  `FileTransfer` audit kind.
+  client when the first SSH hop is reachable and the desktop has a key-based
+  agent or a downloaded credential, and falls back to the server otherwise.
+  `Client` uses the desktop agent or downloaded credential for all four. The
+  row is shared by every API node in a cluster. `GET
+  /api/connection-policy` accepts the BFF session or a `tunnels:operate` token;
+  `PUT` is SystemAdmin-only. Direct console/actions are projected to
+  `CommandExecutions`, file operations to the `FileTransfer` audit kind.
 - **Agent approval**: each MCP client is approved once by its owner with
   individual permissions; action calls then need no per-call decision.
 - **Audit**: MCP calls, console sessions, actions, tests and tunnel events,
@@ -90,6 +99,31 @@ sequenceDiagram
 `get_mcp_agent` returns status, approved permissions and pending requests.
 `request_mcp_permission` creates one Pending request per agent, action and
 environment; the owner approves or denies it from the web UI.
+
+## Credential distribution
+
+Server credentials stay encrypted at rest with the API key
+(`ServerAccess:CredentialKeys:*`). The desktop never asks the API for the
+plaintext credential directly:
+
+1. the desktop creates an RSA key pair per machine and keeps the private key in
+   Electron `safeStorage`;
+2. `POST /api/devices` registers the public key (`RSA 2048..4096`, desktop uses
+   3072) and its SHA-256 fingerprint; each user can have at most 10 active
+   devices;
+3. `GET /api/server-credentials/downloadable` lists shared credentials assigned
+   to an environment where the user is an operator, plus the user's own
+   personal credentials;
+4. `POST /api/server-credentials/{id}/download` with `{ "deviceId": … }`
+   decrypts the stored secret server-side, encrypts an AES-256-GCM payload with
+   RSA-OAEP for that device (AAD binds credential, device and key version),
+   expires it after five minutes and records `CredentialDownload`;
+5. the desktop decrypts it in memory and stores it in its vault only when
+   `AllowOffline` is set. A version change invalidates the cached copy;
+   `DELETE /api/devices/{id}` revokes the device and the next enrollment clears
+   its secrets.
+
+![Credential owners, offline flag and enrolled desktop devices](docs/screenshots/credentials.png)
 
 ## Desktop sign-in
 
