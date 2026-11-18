@@ -399,6 +399,29 @@ public static class DataTransferEndpoints
                 !data.Servers.Any(s => s.Id == x.ServerId) ||
                 !data.ApplicationVersions.Any(v => v.Id == x.ApplicationVersionId)))
             throw Guard.Unprocessable("Deployment con riferimenti mancanti nel file di import.");
+        if (data.ApplicationProjects.Any(x =>
+                !data.Applications.Any(a => a.Id == x.ApplicationsId) ||
+                !data.Projects.Any(p => p.Id == x.ProjectsId)))
+            throw Guard.Unprocessable("Collegamento progetto-applicazione non valido.");
+        if (data.ProxyConnections.Any(x =>
+                !data.Servers.Any(s => s.Id == x.SourceServerId) ||
+                !data.Servers.Any(s => s.Id == x.TargetServerId)))
+            throw Guard.Unprocessable("Connessione proxy con server mancante.");
+        if (data.ProxyRoutes.Any(x =>
+                !data.ProxyConnections.Any(c => c.Id == x.ProxyConnectionId) ||
+                (x.TargetServerApplicationId is int appId &&
+                 !data.ServerApplications.Any(a => a.Id == appId)) ||
+                (x.TargetProxyConnectionId is int connectionId &&
+                 !data.ProxyConnections.Any(c => c.Id == connectionId))))
+            throw Guard.Unprocessable("Route proxy con riferimenti mancanti.");
+        if (data.DiagramScopeItems.Any(x =>
+                !data.Diagrams.Any(d => d.Id == x.DiagramId)) ||
+            data.DiagramNodes.Any(x =>
+                !data.Diagrams.Any(d => d.Id == x.DiagramId)) ||
+            data.DiagramEdges.Any(x =>
+                !data.Diagrams.Any(d => d.Id == x.DiagramId) ||
+                !data.ProxyConnections.Any(c => c.Id == x.ProxyConnectionId)))
+            throw Guard.Unprocessable("Diagramma con riferimenti mancanti.");
     }
 
     private static int Counts(InventoryData data, IReadOnlyList<CredentialRef> refs) =>
