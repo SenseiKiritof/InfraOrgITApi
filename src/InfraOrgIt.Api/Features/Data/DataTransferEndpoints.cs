@@ -395,6 +395,26 @@ public static class DataTransferEndpoints
             throw Guard.Unprocessable("Provider non validi nel file di import.");
         if (data.Servers.Any(x => x.Id <= 0 || string.IsNullOrWhiteSpace(x.Name)))
             throw Guard.Unprocessable("Server non validi nel file di import.");
+        if (data.Servers.Any(x =>
+                x.JumpServerId is int jumpId && !data.Servers.Any(s => s.Id == jumpId)))
+            throw Guard.Unprocessable("Jump host mancante nel file di import.");
+        if (data.TunnelServices.Any(x => !data.Servers.Any(s => s.Id == x.ServerId)))
+            throw Guard.Unprocessable("Servizio tunnel con server mancante.");
+        if (data.ApplicationVersionApis.Any(x =>
+                !data.ApplicationVersions.Any(v => v.Id == x.ApplicationVersionId)))
+            throw Guard.Unprocessable("API applicazione con versione mancante.");
+        if (data.ApplicationApiQueryParams.Any(x =>
+                !data.ApplicationVersionApis.Any(a => a.Id == x.ApplicationApiId)))
+            throw Guard.Unprocessable("Query param con API mancante.");
+        if (data.ApplicationEnvironments.Any(x =>
+                !data.Applications.Any(a => a.Id == x.ApplicationId) ||
+                !data.EnvironmentDefinitions.Any(e => e.Id == x.EnvironmentDefinitionId)))
+            throw Guard.Unprocessable("Ambiente applicazione con riferimenti mancanti.");
+        if (data.ApplicationActions.Any(x =>
+                !data.Applications.Any(a => a.Id == x.ApplicationId) ||
+                (x.CommandTemplateId is int templateId &&
+                 !data.CommandTemplates.Any(t => t.Id == templateId))))
+            throw Guard.Unprocessable("Azione applicazione con riferimenti mancanti.");
         if (data.ServerApplications.Any(x =>
                 !data.Servers.Any(s => s.Id == x.ServerId) ||
                 !data.ApplicationVersions.Any(v => v.Id == x.ApplicationVersionId)))
