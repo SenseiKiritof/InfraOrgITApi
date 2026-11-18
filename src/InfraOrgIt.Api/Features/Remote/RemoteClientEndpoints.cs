@@ -81,6 +81,7 @@ public static class RemoteClientEndpoints
             server.SshPort,
             username,
             clientAuth,
+            server.CredentialId,
             jumps,
             server.HostKeyFingerprint,
             server.FileTransferProtocol));
@@ -294,6 +295,7 @@ public sealed record RemoteTargetDto(
     int SshPort,
     string Username,
     bool ClientAuth,
+    int? CredentialId,
     IReadOnlyList<RemoteJumpDto> Jumps,
     string? HostKeyFingerprint,
     string? FileTransferProtocol);

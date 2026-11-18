@@ -8133,6 +8133,7 @@
           "sshPort",
           "username",
           "clientAuth",
+          "credentialId",
           "jumps",
           "hostKeyFingerprint",
           "fileTransferProtocol"
@@ -8166,6 +8167,15 @@
           },
           "clientAuth": {
             "type": "boolean"
+          },
+          "credentialId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           },
           "jumps": {
             "type": "array",
@@ -9163,6 +9173,8 @@
           "sshPort",
           "username",
           "clientAuth",
+          "credentialId",
+          "hostKeyFingerprint",
           "jump",
           "jumps",
           "targets",
@@ -9200,6 +9212,21 @@
           },
           "clientAuth": {
             "type": "boolean"
+          },
+          "credentialId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "hostKeyFingerprint": {
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "jump": {
             "oneOf": [
