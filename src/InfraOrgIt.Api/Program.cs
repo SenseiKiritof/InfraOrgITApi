@@ -577,6 +577,7 @@ ApplicationActionsEndpoints.Map(app);
 ReachabilityEndpoints.Map(app);
 CommandExecutionEndpoints.Map(app);
 AuditEventsEndpoints.Map(app);
+ClientEventsEndpoints.Map(app);
 ConsoleEndpoints.Map(app);
 FileTransferEndpoints.Map(app);
 DesktopDownloadEndpoints.Map(app);
