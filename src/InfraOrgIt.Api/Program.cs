@@ -72,6 +72,18 @@ if (!builder.Environment.IsDevelopment())
 }
 
 var localMode = builder.Configuration.GetValue("Local:Enabled", false);
+if (localMode)
+{
+    // Local mode never talks to Keycloak. Keep the OIDC options valid for the
+    // shared services without requiring dummy environment variables.
+    builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["Oidc:Issuer"] = "https://localhost.invalid/realms/infraorgit",
+        ["Oidc:ClientId"] = "infraorgit",
+        ["Oidc:DesktopClientId"] = "infraorgit-mcp-desktop",
+        ["Oidc:RedirectUri"] = "http://127.0.0.1/auth/callback",
+    });
+}
 var databaseProvider = builder.Configuration["Database:Provider"]
                        ?? (localMode ? "Sqlite" : "MySql");
 if (string.Equals(databaseProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
@@ -169,10 +181,11 @@ builder.Services.AddOpenApi(options =>
         return Task.CompletedTask;
     });
 });
-builder.Services
+var healthChecks = builder.Services
     .AddHealthChecks()
-    .AddDbContextCheck<InfraOrgItDbContext>("mysql", tags: ["ready"])
-    .AddCheck<KeycloakHealthCheck>("keycloak", tags: ["ready"]);
+    .AddDbContextCheck<InfraOrgItDbContext>("mysql", tags: ["ready"]);
+if (!localMode)
+    healthChecks.AddCheck<KeycloakHealthCheck>("keycloak", tags: ["ready"]);
 
 if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
 {

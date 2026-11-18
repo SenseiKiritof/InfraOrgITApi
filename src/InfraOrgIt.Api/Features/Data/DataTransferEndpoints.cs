@@ -196,6 +196,8 @@ public static class DataTransferEndpoints
                 extensions: new Dictionary<string, object?> { ["code"] = "import_invalid" });
         }
 
+        if (document.Data is null || document.CredentialRefs is null)
+            throw Guard.Unprocessable("Il file non contiene dati di inventario validi.");
         if (!string.Equals(document.Format, Format, StringComparison.Ordinal) ||
             document.FormatVersion != FormatVersion)
             throw Guard.Unprocessable("Formato o versione di import non supportati.");
@@ -306,7 +308,7 @@ public static class DataTransferEndpoints
         Directory.CreateDirectory(directory);
         var target = Path.Combine(
             directory,
-            $"infraorgit-before-import-{DateTime.UtcNow:yyyyMMdd-HHmmss}.db");
+            $"infraorgit-before-import-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}.db");
         var source = (SqliteConnection)db.Database.GetDbConnection();
         var wasOpen = source.State == System.Data.ConnectionState.Open;
         if (!wasOpen) await source.OpenAsync(ct);
@@ -416,12 +418,22 @@ public static class DataTransferEndpoints
         await db.Servers.CountAsync(ct) +
         await db.Applications.CountAsync(ct) +
         await db.ApplicationVersions.CountAsync(ct) +
+        await db.ApplicationVersionApis.CountAsync(ct) +
+        await db.ApplicationApiQueryParams.CountAsync(ct) +
         await db.ServerApplications.CountAsync(ct) +
         await db.Projects.CountAsync(ct) +
+        await db.Set<ApplicationProject>().CountAsync(ct) +
         await db.ProxyConnections.CountAsync(ct) +
+        await db.ProxyRoutes.CountAsync(ct) +
         await db.TunnelServices.CountAsync(ct) +
         await db.CommandTemplates.CountAsync(ct) +
-        await db.Diagrams.CountAsync(ct);
+        await db.ApplicationActions.CountAsync(ct) +
+        await db.ApplicationEnvironments.CountAsync(ct) +
+        await db.Diagrams.CountAsync(ct) +
+        await db.DiagramScopeItems.CountAsync(ct) +
+        await db.DiagramNodes.CountAsync(ct) +
+        await db.DiagramEdges.CountAsync(ct) +
+        await db.Translations.CountAsync(ct);
 
     private static string Checksum(
         InventoryData data,
