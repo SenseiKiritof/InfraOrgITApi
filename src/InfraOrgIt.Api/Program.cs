@@ -183,7 +183,8 @@ builder.Services.AddOpenApi(options =>
 });
 var healthChecks = builder.Services
     .AddHealthChecks()
-    .AddDbContextCheck<InfraOrgItDbContext>("mysql", tags: ["ready"]);
+    .AddDbContextCheck<InfraOrgItDbContext>(
+        localMode ? "database" : "mysql", tags: ["ready"]);
 if (!localMode)
     healthChecks.AddCheck<KeycloakHealthCheck>("keycloak", tags: ["ready"]);
 
