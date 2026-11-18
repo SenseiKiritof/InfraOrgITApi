@@ -158,6 +158,8 @@ public sealed class AuditApiTests : IAsyncLifetime
     {
         int oldId;
         int recentId;
+        int oldClientId;
+        int recentClientId;
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
@@ -177,23 +179,46 @@ public sealed class AuditApiTests : IAsyncLifetime
                 Action = "list_servers",
                 Outcome = "Ok"
             };
+            var oldClient = new ClientEvent
+            {
+                EventId = Guid.NewGuid().ToString("N"),
+                Username = "old",
+                Kind = "check.tcp",
+                OccurredAt = new DateTime(2020, 1, 1, 10, 0, 0, DateTimeKind.Utc),
+                ReceivedAt = new DateTime(2020, 1, 1, 10, 0, 0, DateTimeKind.Utc),
+                Outcome = "Ok"
+            };
+            var recentClient = new ClientEvent
+            {
+                EventId = Guid.NewGuid().ToString("N"),
+                Username = "recent",
+                Kind = "check.tcp",
+                OccurredAt = DateTime.UtcNow,
+                ReceivedAt = DateTime.UtcNow,
+                Outcome = "Ok"
+            };
             db.AuditEvents.AddRange(old, recent);
+            db.ClientEvents.AddRange(oldClient, recentClient);
             await db.SaveChangesAsync();
             oldId = old.Id;
             recentId = recent.Id;
+            oldClientId = oldClient.Id;
+            recentClientId = recentClient.Id;
         }
 
         var service = _factory.Services.GetServices<IHostedService>()
             .OfType<AuditRetentionService>()
             .Single();
         var deleted = await service.PurgeAsync(CancellationToken.None);
-        Assert.Equal(1, deleted);
+        Assert.Equal(2, deleted);
 
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
             Assert.False(await db.AuditEvents.AnyAsync(x => x.Id == oldId));
             Assert.True(await db.AuditEvents.AnyAsync(x => x.Id == recentId));
+            Assert.False(await db.ClientEvents.AnyAsync(x => x.Id == oldClientId));
+            Assert.True(await db.ClientEvents.AnyAsync(x => x.Id == recentClientId));
         }
     }
 
