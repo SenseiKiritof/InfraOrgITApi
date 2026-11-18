@@ -31,7 +31,6 @@ public static class DataTransferEndpoints
         var group = app.MapGroup("/api/data").RequireAuthorization();
         group.MapGet("/export", ExportAsync).RequireRateLimiting("files");
         group.MapPost("/import", PreviewAsync)
-            .DisableAntiforgery()
             .RequireRateLimiting("files");
         group.MapPost("/import/confirm", ConfirmAsync)
             .RequireRateLimiting("files");
@@ -331,12 +330,15 @@ public static class DataTransferEndpoints
     {
         var routeByApplication = data.ServerApplications
             .ToDictionary(x => x.Id, x => x.ProxyRouteId);
+        var jumpByServer = data.Servers
+            .ToDictionary(x => x.Id, x => x.JumpServerId);
         foreach (var application in data.ServerApplications)
             application.ProxyRouteId = null;
         foreach (var server in data.Servers)
         {
             server.CredentialId = null;
             server.FileTransferCredentialId = null;
+            server.JumpServerId = null;
         }
         db.Providers.AddRange(data.Providers);
         db.EnvironmentDefinitions.AddRange(data.EnvironmentDefinitions);
@@ -351,8 +353,7 @@ public static class DataTransferEndpoints
 
         foreach (var server in data.Servers)
         {
-            var source = data.Servers.First(x => x.Id == server.Id);
-            if (source.JumpServerId is int jumpId)
+            if (jumpByServer[server.Id] is int jumpId)
                 server.JumpServerId = jumpId;
         }
         db.ServerApplications.AddRange(data.ServerApplications);
@@ -409,8 +410,17 @@ public static class DataTransferEndpoints
     private static async Task<int> InventoryCountAsync(
         InfraOrgItDbContext db,
         CancellationToken ct) =>
-        await db.Providers.CountAsync(ct) + await db.Servers.CountAsync(ct) +
-        await db.Applications.CountAsync(ct) + await db.Projects.CountAsync(ct) +
+        await db.Providers.CountAsync(ct) +
+        await db.EnvironmentDefinitions.CountAsync(ct) +
+        await db.ProviderEnvironments.CountAsync(ct) +
+        await db.Servers.CountAsync(ct) +
+        await db.Applications.CountAsync(ct) +
+        await db.ApplicationVersions.CountAsync(ct) +
+        await db.ServerApplications.CountAsync(ct) +
+        await db.Projects.CountAsync(ct) +
+        await db.ProxyConnections.CountAsync(ct) +
+        await db.TunnelServices.CountAsync(ct) +
+        await db.CommandTemplates.CountAsync(ct) +
         await db.Diagrams.CountAsync(ct);
 
     private static string Checksum(
