@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace InfraOrgIt.Api.Infrastructure.Persistence;
 
-public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> options) : DbContext(options)
+public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
 {
     private static readonly DateTime SeedDate = new(2026, 10, 25, 0, 0, 0, DateTimeKind.Utc);
 
@@ -56,6 +56,8 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        var sqlite = Database.ProviderName?.Contains(
+            "Sqlite", StringComparison.OrdinalIgnoreCase) == true;
         modelBuilder.Entity<User>(e =>
         {
             e.Property(x => x.Name).HasMaxLength(100);
@@ -451,7 +453,7 @@ public sealed class InfraOrgItDbContext(DbContextOptions<InfraOrgItDbContext> op
                 t.HasCheckConstraint("CK_AuditEvents_Outcome",
                     "`Outcome` IN ('Ok','Error','Denied')");
                 t.HasCheckConstraint("CK_AuditEvents_Hash",
-                    "`Hash` IS NULL OR CHAR_LENGTH(`Hash`) = 64");
+                    $"`Hash` IS NULL OR {(sqlite ? "length" : "CHAR_LENGTH")}(`Hash`) = 64");
             });
         });
 

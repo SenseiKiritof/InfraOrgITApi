@@ -31,6 +31,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -69,11 +70,28 @@ if (!builder.Environment.IsDevelopment())
     builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 }
 
-var connectionString = builder.Configuration.GetConnectionString("MySql")
-                       ?? throw new InvalidOperationException(
-                           "ConnectionStrings:MySql non configurata. Usare env ConnectionStrings__MySql o user-secrets.");
-
-builder.Services.AddDbContext<InfraOrgItDbContext>(options => options.UseMySQL(connectionString));
+var localMode = builder.Configuration.GetValue("Local:Enabled", false);
+var databaseProvider = builder.Configuration["Database:Provider"]
+                       ?? (localMode ? "Sqlite" : "MySql");
+if (string.Equals(databaseProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+{
+    var sqliteConnection =
+        builder.Configuration.GetConnectionString("Sqlite")
+        ?? throw new InvalidOperationException(
+            "ConnectionStrings:Sqlite non configurata per la modalità locale.");
+    builder.Services.AddDbContext<SqliteInfraOrgItDbContext>(
+        options => options.UseSqlite(sqliteConnection));
+    builder.Services.AddScoped<InfraOrgItDbContext>(
+        provider => provider.GetRequiredService<SqliteInfraOrgItDbContext>());
+}
+else
+{
+    var connectionString = builder.Configuration.GetConnectionString("MySql")
+                           ?? throw new InvalidOperationException(
+                               "ConnectionStrings:MySql non configurata. Usare env ConnectionStrings__MySql o user-secrets.");
+    builder.Services.AddDbContext<InfraOrgItDbContext>(
+        options => options.UseMySQL(connectionString));
+}
 builder.Services.AddOpenApi(options =>
 {
     options.AddDocumentTransformer((document, _, _) =>
@@ -174,7 +192,10 @@ var dataProtection = builder.Services.AddDataProtection().SetApplicationName("In
 if (builder.Configuration["DataProtection:KeysPath"] is { Length: > 0 } keysPath)
     dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysPath));
 
-builder.Services.AddScoped<ISessionStore, MySqlSessionStore>();
+if (string.Equals(databaseProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddScoped<ISessionStore, LocalSessionStore>();
+else
+    builder.Services.AddScoped<ISessionStore, MySqlSessionStore>();
 builder.Services.AddOptions<SessionStoreOptions>()
     .Bind(builder.Configuration.GetSection(SessionStoreOptions.SectionName))
     .Validate(o => o.MaxSessionsPerUser is >= 1 and <= 100, "MaxSessionsPerUser tra 1 e 100.")
@@ -284,6 +305,11 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 builder.Services.AddOptions<AuthOptions>()
     .Bind(builder.Configuration.GetSection("Auth"))
     .Validate(o => o.DesktopSessionDays is >= 1 and <= 90, "Auth:DesktopSessionDays tra 1 e 90.")
+    .ValidateOnStart();
+builder.Services.AddOptions<LocalOptions>()
+    .Bind(builder.Configuration.GetSection("Local"))
+    .Validate(o => !o.Enabled || o.BootstrapSecret.Length >= 16,
+        "Local:BootstrapSecret deve avere almeno 16 caratteri.")
     .ValidateOnStart();
 builder.Services.AddOptions<OidcOptions>()
     .Bind(builder.Configuration.GetSection("Oidc"))
@@ -472,12 +498,21 @@ app.Use(async (context, next) =>
     await next(context);
 });
 
+var localWebRoot = localMode ? builder.Configuration["Local:WebRoot"] : null;
+var servesLocalSpa = !string.IsNullOrWhiteSpace(localWebRoot);
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
     context.Response.Headers["X-Frame-Options"] = "DENY";
-    context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+    var spaRequest = servesLocalSpa &&
+                     !context.Request.Path.StartsWithSegments("/api") &&
+                     !context.Request.Path.StartsWithSegments("/auth") &&
+                     !context.Request.Path.StartsWithSegments("/mcp") &&
+                     !context.Request.Path.StartsWithSegments("/health");
+    context.Response.Headers["Content-Security-Policy"] = spaRequest
+        ? "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
     if (context.Request.IsHttps)
         context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
 
@@ -519,12 +554,15 @@ app.UseRateLimiter();
 app.UseMiddleware<CsrfMiddleware>();
 app.UseAuthorization();
 
-app.MapGet("/", () => Results.Ok(new
+if (!servesLocalSpa)
 {
-    name = "InfraOrgIT API",
-    status = "ok",
-    version = Environment.GetEnvironmentVariable("APP_VERSION") ?? "dev"
-})).AllowAnonymous();
+    app.MapGet("/", () => Results.Ok(new
+    {
+        name = "InfraOrgIT API",
+        status = "ok",
+        version = Environment.GetEnvironmentVariable("APP_VERSION") ?? "dev"
+    })).AllowAnonymous();
+}
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
@@ -551,6 +589,8 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 }).AllowAnonymous();
 
 AuthEndpoints.Map(app);
+if (localMode)
+    LocalAuthEndpoints.Map(app);
 SessionEndpoints.Map(app);
 MenuEndpoints.Map(app);
 ServerAccessEndpoints.Map(app);
@@ -608,6 +648,18 @@ if (builder.Configuration.GetValue("Mcp:Enabled", true))
     app.MapMcp("/mcp")
         .RequireAuthorization("Mcp")
         .RequireRateLimiting("mcp");
+
+if (servesLocalSpa)
+{
+    var webRoot = Path.GetFullPath(localWebRoot!);
+    var fileProvider = new PhysicalFileProvider(webRoot);
+    app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
+    app.MapFallbackToFile("index.html", new StaticFileOptions
+    {
+        FileProvider = fileProvider,
+    });
+}
 
 app.Run();
 
