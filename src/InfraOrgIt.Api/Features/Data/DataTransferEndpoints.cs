@@ -54,6 +54,8 @@ public static class DataTransferEndpoints
             ProviderEnvironments = await db.ProviderEnvironments.AsNoTracking()
                 .OrderBy(x => x.Id).ToListAsync(ct),
             Servers = await db.Servers.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct),
+            ApplicationTypes = await db.ApplicationTypes.AsNoTracking()
+                .OrderBy(x => x.SortOrder).ThenBy(x => x.Name).ToListAsync(ct),
             Applications = await db.Applications.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct),
             ApplicationVersions = await db.ApplicationVersions.AsNoTracking()
                 .OrderBy(x => x.Id).ToListAsync(ct),
@@ -205,6 +207,18 @@ public static class DataTransferEndpoints
                 StringComparison.Ordinal))
             throw Guard.Unprocessable("Checksum del file non valido.");
         Validate(data: document.Data);
+        if (document.Data.ApplicationTypes.Count == 0)
+        {
+            var types = await db.ApplicationTypes.AsNoTracking()
+                .Select(x => x.Name).ToListAsync(ct);
+            var missing = document.Data.Applications
+                .Select(x => x.Type)
+                .FirstOrDefault(type => !types.Any(t =>
+                    string.Equals(t, type, StringComparison.OrdinalIgnoreCase)));
+            if (missing is not null)
+                throw Guard.Unprocessable(
+                    $"Il file usa il tipo applicazione {missing}, non configurato in questa istanza.");
+        }
 
         var existing = await InventoryCountAsync(db, ct);
         var canApply = existing == 0;
@@ -342,6 +356,42 @@ public static class DataTransferEndpoints
             server.FileTransferCredentialId = null;
             server.JumpServerId = null;
         }
+        var existingTypes = await db.ApplicationTypes.ToListAsync(ct);
+        foreach (var existing in existingTypes)
+            if (!data.ApplicationTypes.Any(t =>
+                    string.Equals(t.Name, existing.Name, StringComparison.OrdinalIgnoreCase)))
+                db.ApplicationTypes.Remove(existing);
+        foreach (var incoming in data.ApplicationTypes)
+        {
+            var current = existingTypes.FirstOrDefault(t =>
+                string.Equals(t.Name, incoming.Name, StringComparison.OrdinalIgnoreCase));
+            if (current is null)
+                db.ApplicationTypes.Add(new ApplicationType
+                {
+                    Name = incoming.Name,
+                    Label = incoming.Label,
+                    SortOrder = incoming.SortOrder
+                });
+            else
+            {
+                current.Label = incoming.Label;
+                current.SortOrder = incoming.SortOrder;
+            }
+        }
+        if (data.ApplicationTypes.Count > 0)
+            await db.SaveChangesAsync(ct);
+
+        var typeNames = await db.ApplicationTypes.AsNoTracking()
+            .Select(x => x.Name).ToListAsync(ct);
+        foreach (var application in data.Applications)
+        {
+            var canonical = typeNames.FirstOrDefault(t =>
+                string.Equals(t, application.Type, StringComparison.OrdinalIgnoreCase))
+                ?? throw Guard.Unprocessable(
+                    $"Tipo applicazione {application.Type} non configurato nell'istanza di destinazione.");
+            application.Type = canonical;
+        }
+
         db.Providers.AddRange(data.Providers);
         db.EnvironmentDefinitions.AddRange(data.EnvironmentDefinitions);
         db.ProviderEnvironments.AddRange(data.ProviderEnvironments);
@@ -393,6 +443,13 @@ public static class DataTransferEndpoints
             throw Guard.Unprocessable("ID duplicati nel file di import.");
         if (data.Providers.Any(x => x.Id <= 0 || string.IsNullOrWhiteSpace(x.Name)))
             throw Guard.Unprocessable("Provider non validi nel file di import.");
+        if (data.ApplicationTypes.Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
+            data.ApplicationTypes.Count)
+            throw Guard.Unprocessable("Tipi applicazione duplicati nel file di import.");
+        if (data.Applications.Any(x =>
+                !data.ApplicationTypes.Any(t =>
+                    string.Equals(t.Name, x.Type, StringComparison.OrdinalIgnoreCase))))
+            throw Guard.Unprocessable("Applicazione con tipo non presente nel file di import.");
         if (data.Servers.Any(x => x.Id <= 0 || string.IsNullOrWhiteSpace(x.Name)))
             throw Guard.Unprocessable("Server non validi nel file di import.");
         if (data.Servers.Any(x =>
@@ -446,6 +503,7 @@ public static class DataTransferEndpoints
 
     private static int Counts(InventoryData data, IReadOnlyList<CredentialRef> refs) =>
         data.Providers.Count + data.EnvironmentDefinitions.Count +
+        data.ApplicationTypes.Count +
         data.ProviderEnvironments.Count + data.Servers.Count +
         data.Applications.Count + data.ApplicationVersions.Count +
         data.ServerApplications.Count + data.Projects.Count +
@@ -500,6 +558,7 @@ public sealed class InventoryData
     public List<EnvironmentDefinition> EnvironmentDefinitions { get; set; } = [];
     public List<ProviderEnvironment> ProviderEnvironments { get; set; } = [];
     public List<Server> Servers { get; set; } = [];
+    public List<ApplicationType> ApplicationTypes { get; set; } = [];
     public List<Application> Applications { get; set; } = [];
     public List<ApplicationVersion> ApplicationVersions { get; set; } = [];
     public List<ApplicationVersionApi> ApplicationVersionApis { get; set; } = [];
