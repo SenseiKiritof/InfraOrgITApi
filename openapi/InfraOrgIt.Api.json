@@ -4601,6 +4601,69 @@
         ]
       }
     },
+    "/api/data/export": {
+      "get": {
+        "tags": [
+          "DataTransferEndpoints"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/data/import": {
+      "post": {
+        "tags": [
+          "DataTransferEndpoints"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/data/import/confirm": {
+      "post": {
+        "tags": [
+          "DataTransferEndpoints"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportConfirmInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
     "/api/servers/{id}/file-transfer": {
       "put": {
         "tags": [
@@ -7503,6 +7566,27 @@
           }
         }
       },
+      "ImportConfirmInput": {
+        "required": [
+          "token",
+          "mode"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "McpAgentDecisionInput": {
         "type": "object",
         "properties": {
@@ -9439,6 +9523,9 @@
     },
     {
       "name": "DesktopDevicesEndpoints"
+    },
+    {
+      "name": "DataTransferEndpoints"
     },
     {
       "name": "FileTransferEndpoints"
