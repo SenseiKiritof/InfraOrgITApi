@@ -203,7 +203,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
             e.Property(x => x.Type).HasMaxLength(20);
             e.ToTable(t => t.HasCheckConstraint(
                 "CK_Applications_Type",
-                "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka','MySql','MongoDb','Redis')"));
+                "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka','MySql','MongoDb','Redis','HAProxy')"));
             e.HasIndex(x => x.Name).IsUnique();
             e.HasMany(x => x.Projects).WithMany(x => x.Applications)
                 .UsingEntity<ApplicationProject>(

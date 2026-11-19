@@ -109,7 +109,7 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
 
                     b.ToTable("Applications", t =>
                         {
-                            t.HasCheckConstraint("CK_Applications_Type", "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka','MySql','MongoDb','Redis')");
+                            t.HasCheckConstraint("CK_Applications_Type", "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka','MySql','MongoDb','Redis','HAProxy')");
                         });
                 });
 

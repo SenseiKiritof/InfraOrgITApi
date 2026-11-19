@@ -205,7 +205,7 @@ public static class ApplicationsEndpoints
     private static readonly string[] ApplicationTypes =
     [
         "Backend", "Frontend", "Sftp", "RabbitMq", "Nginx", "Elastic", "Kibana", "Kafka",
-        "MySql", "MongoDb", "Redis"
+        "MySql", "MongoDb", "Redis", "HAProxy"
     ];
 
     private static string ApplicationType(string? value)
