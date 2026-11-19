@@ -21,6 +21,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<Server> Servers => Set<Server>();
     public DbSet<ServerApplication> ServerApplications => Set<ServerApplication>();
     public DbSet<Application> Applications => Set<Application>();
+    public DbSet<ApplicationType> ApplicationTypes => Set<ApplicationType>();
     public DbSet<ApplicationVersion> ApplicationVersions => Set<ApplicationVersion>();
     public DbSet<ApplicationVersionApi> ApplicationVersionApis => Set<ApplicationVersionApi>();
     public DbSet<ApplicationApiQueryParam> ApplicationApiQueryParams => Set<ApplicationApiQueryParam>();
@@ -195,15 +196,23 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
                 .HasForeignKey(x => x.ProxyRouteId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<ApplicationType>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(20);
+            e.Property(x => x.Label).HasMaxLength(50);
+            e.HasIndex(x => x.Name).IsUnique();
+        });
+
         modelBuilder.Entity<Application>(e =>
         {
             e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.Description).HasMaxLength(200);
             e.Property(x => x.BasePath).HasMaxLength(50);
             e.Property(x => x.Type).HasMaxLength(20);
-            e.ToTable(t => t.HasCheckConstraint(
-                "CK_Applications_Type",
-                "`Type` IN ('Backend','Frontend','Sftp','RabbitMq','Nginx','Elastic','Kibana','Kafka','MySql','MongoDb','Redis')"));
+            e.HasOne<ApplicationType>().WithMany(x => x.Applications)
+                .HasForeignKey(x => x.Type)
+                .HasPrincipalKey(x => x.Name)
+                .OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.Name).IsUnique();
             e.HasMany(x => x.Projects).WithMany(x => x.Applications)
                 .UsingEntity<ApplicationProject>(
@@ -681,6 +690,20 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
             new Role { Id = 2, Name = "ServerOperator", Label = "Operatore server", ScopeEnum = "Environment", CreatedAt = SeedDate, UpdatedAt = SeedDate },
             new Role { Id = 3, Name = "SystemAdmin", Label = "Amministratore di sistema", ScopeEnum = "System", CreatedAt = SeedDate, UpdatedAt = SeedDate });
 
+        modelBuilder.Entity<ApplicationType>().HasData(
+            ApplicationType(1, "Backend", "Backend", 10),
+            ApplicationType(2, "Frontend", "Frontend", 20),
+            ApplicationType(3, "Sftp", "SFTP", 30),
+            ApplicationType(4, "RabbitMq", "RabbitMQ", 40),
+            ApplicationType(5, "Nginx", "NGINX", 50),
+            ApplicationType(6, "HAProxy", "HAProxy", 60),
+            ApplicationType(7, "Elastic", "Elastic", 70),
+            ApplicationType(8, "Kibana", "Kibana", 80),
+            ApplicationType(9, "Kafka", "Kafka", 90),
+            ApplicationType(10, "MySql", "MySQL/MariaDB", 100),
+            ApplicationType(11, "MongoDb", "MongoDB", 110),
+            ApplicationType(12, "Redis", "Redis", 120));
+
         modelBuilder.Entity<Menu>().HasData(
             Menu(1, "Home", "/", true, true, true, 0, null),
             Menu(2, "Ambienti", "/environments", true, true, true, 1, null),
@@ -729,6 +752,16 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
         IsVisible = isVisible,
         Order = order,
         ParentId = parentId,
+        CreatedAt = SeedDate,
+        UpdatedAt = SeedDate
+    };
+
+    private static ApplicationType ApplicationType(int id, string name, string label, int sortOrder) => new()
+    {
+        Id = id,
+        Name = name,
+        Label = label,
+        SortOrder = sortOrder,
         CreatedAt = SeedDate,
         UpdatedAt = SeedDate
     };

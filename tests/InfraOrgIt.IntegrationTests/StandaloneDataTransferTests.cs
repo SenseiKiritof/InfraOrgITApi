@@ -76,6 +76,20 @@ public sealed class StandaloneDataTransferTests : IAsyncLifetime
                 Hostname = "prd-app-01.acme.example",
                 SshPort = 22,
             });
+            db.ApplicationTypes.Add(new ApplicationType
+            {
+                Name = "Apache",
+                Label = "Apache HTTP Server",
+                SortOrder = 130,
+            });
+            await db.SaveChangesAsync();
+            db.Applications.Add(new Application
+            {
+                Name = "edge-proxy",
+                BasePath = "/edge",
+                ListeningOnPort = 80,
+                Type = "Apache",
+            });
             await db.SaveChangesAsync();
         }
 
@@ -117,6 +131,9 @@ public sealed class StandaloneDataTransferTests : IAsyncLifetime
         Assert.Equal(1, await targetDb.Providers.CountAsync());
         Assert.Equal(1, await targetDb.Servers.CountAsync());
         Assert.Equal("prd-app-01", (await targetDb.Servers.SingleAsync()).Name);
+        Assert.Equal(13, await targetDb.ApplicationTypes.CountAsync());
+        Assert.True(await targetDb.ApplicationTypes.AnyAsync(x => x.Name == "Apache"));
+        Assert.Equal("Apache", (await targetDb.Applications.SingleAsync()).Type);
     }
 
     [Fact]

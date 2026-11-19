@@ -617,6 +617,7 @@ ServersEndpoints.Map(app);
 TunnelServiceEndpoints.Map(app);
 ServerApplicationsEndpoints.Map(app);
 ApplicationsEndpoints.Map(app);
+ApplicationTypesEndpoints.Map(app);
 ApplicationEnvironmentsEndpoints.Map(app);
 ApplicationApiKeysEndpoints.Map(app);
 ApplicationApiCallEndpoints.Map(app);

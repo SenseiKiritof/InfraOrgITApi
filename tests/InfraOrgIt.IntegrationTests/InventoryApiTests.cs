@@ -2060,7 +2060,7 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         foreach (var (type, expected) in new[]
                  {
-                     ("MongoDb", "MongoDb"), ("mysql", "MySql"), ("Redis", "Redis")
+                     ("MongoDb", "MongoDb"), ("mysql", "MySql"), ("Redis", "Redis"), ("haproxy", "HAProxy")
                  })
         {
             var created = await SendAsync(admin, HttpMethod.Post, "/api/applications", new
