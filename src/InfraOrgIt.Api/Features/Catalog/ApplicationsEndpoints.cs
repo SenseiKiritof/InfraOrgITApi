@@ -82,7 +82,7 @@ public static class ApplicationsEndpoints
             Description = Guard.Text(input.Description, "Description", 200, required: false),
             BasePath = Guard.Text(input.BasePath, "BasePath", 50),
             ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort"),
-            Type = ApplicationType(input.Type)
+            Type = await ResolveApplicationTypeAsync(db, input.Type, ct)
         };
 
         await EnsureUniqueAsync(db, entity.Name, null, ct);
@@ -115,7 +115,7 @@ public static class ApplicationsEndpoints
         entity.Description = Guard.Text(input.Description, "Description", 200, required: false);
         entity.BasePath = Guard.Text(input.BasePath, "BasePath", 50);
         entity.ListeningOnPort = Guard.Port(input.ListeningOnPort, "ListeningOnPort");
-        entity.Type = ApplicationType(input.Type);
+        entity.Type = await ResolveApplicationTypeAsync(db, input.Type, ct);
         await db.SaveChangesAsync(ct);
         await UpsertTranslationsAsync(db, id, input.Translations, ct);
         await audit.RecordAsync(AuditEntries.Change(
@@ -202,22 +202,26 @@ public static class ApplicationsEndpoints
         return Results.Ok(await ApplicationVersionsEndpoints.LoadAsync(db, entity.Id, ct));
     }
 
-    private static readonly string[] ApplicationTypes =
-    [
-        "Backend", "Frontend", "Sftp", "RabbitMq", "Nginx", "Elastic", "Kibana", "Kafka",
-        "MySql", "MongoDb", "Redis", "HAProxy"
-    ];
-
-    private static string ApplicationType(string? value)
+    internal static async Task<string> ResolveApplicationTypeAsync(
+        InfraOrgItDbContext db, string? value, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(value))
-            return "Backend";
+        var types = await db.ApplicationTypes.AsNoTracking()
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
+            .Select(x => x.Name)
+            .ToListAsync(ct);
+        if (types.Count == 0)
+            throw Guard.Unprocessable("Nessun tipo applicazione configurato.");
 
-        var match = ApplicationTypes.FirstOrDefault(
+        if (string.IsNullOrWhiteSpace(value))
+            return types.FirstOrDefault(
+                       type => string.Equals(type, "Backend", StringComparison.OrdinalIgnoreCase))
+                   ?? throw Guard.Unprocessable("Il tipo applicazione predefinito Backend non è configurato.");
+
+        var match = types.FirstOrDefault(
             type => string.Equals(type, value.Trim(), StringComparison.OrdinalIgnoreCase));
         return match
                ?? throw Guard.Unprocessable(
-                   $"Il campo Type ammette: {string.Join(", ", ApplicationTypes)}.");
+                   $"Il campo Type ammette: {string.Join(", ", types)}.");
     }
 
     internal static async Task EnsureUniqueAsync(
