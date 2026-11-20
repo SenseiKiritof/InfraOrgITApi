@@ -13,6 +13,16 @@ public sealed class Server : EntityBase
     public int? MemoryGb { get; set; }
     public int? DiskGb { get; set; }
     public string? OperatingSystem { get; set; }
+    public string? OsName { get; set; }
+    public string? OsVersion { get; set; }
+    public string? OsUpdateTarget { get; set; }
+    public bool? OsUpdateTargetLts { get; set; }
+    public DateTime? OsEolDate { get; set; }
+    public string? OsUpdateStatus { get; set; }
+    public string? OsUpdateDetail { get; set; }
+    public DateTime? OsUpdateCheckedAt { get; set; }
+    /// <summary>null eredita il default globale; true solo LTS; false anche non-LTS.</summary>
+    public bool? OsUpdateLtsOnly { get; set; }
     public string? HaNode { get; set; }
     public string? ManagedBy { get; set; }
 

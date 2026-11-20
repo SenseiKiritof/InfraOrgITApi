@@ -54,6 +54,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<TunnelSession> TunnelSessions => Set<TunnelSession>();
     public DbSet<TunnelService> TunnelServices => Set<TunnelService>();
     public DbSet<ConnectionPolicy> ConnectionPolicies => Set<ConnectionPolicy>();
+    public DbSet<ServerUpdatePolicy> ServerUpdatePolicies => Set<ServerUpdatePolicy>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -151,6 +152,11 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
             e.Property(x => x.HostKeyFingerprint).HasMaxLength(100);
             e.Property(x => x.PublicIpAddress).HasMaxLength(45);
             e.Property(x => x.OperatingSystem).HasMaxLength(100);
+            e.Property(x => x.OsName).HasMaxLength(100);
+            e.Property(x => x.OsVersion).HasMaxLength(50);
+            e.Property(x => x.OsUpdateTarget).HasMaxLength(50);
+            e.Property(x => x.OsUpdateStatus).HasMaxLength(20);
+            e.Property(x => x.OsUpdateDetail).HasMaxLength(300);
             e.Property(x => x.HaNode).HasMaxLength(20);
             e.Property(x => x.ManagedBy).HasMaxLength(100);
             e.Property(x => x.SshPort).HasDefaultValue(22);
@@ -738,6 +744,16 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
         {
             Id = 1,
             Mode = "Auto",
+            UpdatedBy = "",
+            CreatedAt = SeedDate,
+            UpdatedAt = SeedDate
+        });
+
+        modelBuilder.Entity<ServerUpdatePolicy>().HasData(new ServerUpdatePolicy
+        {
+            Id = 1,
+            Enabled = true,
+            LtsOnly = true,
             UpdatedBy = "",
             CreatedAt = SeedDate,
             UpdatedAt = SeedDate
