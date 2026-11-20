@@ -2350,6 +2350,38 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("OsEolDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OsName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("OsUpdateCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OsUpdateDetail")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("OsUpdateLtsOnly")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OsUpdateStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OsUpdateTarget")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("OsUpdateTargetLts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OsVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("ProviderEnvironmentId")
                         .HasColumnType("INTEGER");
 
@@ -2519,6 +2551,49 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
                     b.ToTable("ServerCredentials", t =>
                         {
                             t.HasCheckConstraint("CK_ServerCredentials_AuthType", "`AuthType` IN ('Password','PrivateKey')");
+                        });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerUpdatePolicy", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("LtsOnly")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ServerUpdatePolicies");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Enabled = true,
+                            LtsOnly = true,
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            UpdatedBy = "",
+                            Version = 0
                         });
                 });
 

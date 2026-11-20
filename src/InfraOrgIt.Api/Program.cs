@@ -260,6 +260,14 @@ builder.Services.AddScoped<DiagramService>();
 builder.Services.AddHttpClient<OidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient<DesktopOidcClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("application-api", client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient("endoflife", client =>
+{
+    client.BaseAddress = new Uri("https://endoflife.date/api/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+builder.Services.AddSingleton<IEndOfLifeCatalog, EndOfLifeCatalog>();
+builder.Services.AddScoped<ServerOsUpdateChecker>();
+builder.Services.AddHostedService<ServerOsUpdateService>();
 builder.Services.AddHttpClient("application-api-insecure")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
@@ -614,6 +622,7 @@ ProvidersEndpoints.Map(app);
 EnvironmentDefinitionsEndpoints.Map(app);
 ProviderEnvironmentsEndpoints.Map(app);
 ServersEndpoints.Map(app);
+ServerUpdatePolicyEndpoints.Map(app);
 TunnelServiceEndpoints.Map(app);
 ServerApplicationsEndpoints.Map(app);
 ApplicationsEndpoints.Map(app);

@@ -22,6 +22,7 @@ public static class ServersEndpoints
         group.MapPut("/{id:int}", UpdateAsync);
         group.MapDelete("/{id:int}", DeleteAsync);
         group.MapPut("/{id:int}/provider-environment/{providerEnvironmentId:int}", MoveAsync);
+        group.MapPut("/{id:int}/os-update-policy", UpdateOsPolicyAsync);
         group.MapGet("/{id:int}/applications", ListApplicationsAsync);
         group.MapPost("/{id:int}/applications", CreateApplicationAsync);
     }
@@ -240,6 +241,26 @@ public static class ServersEndpoints
         return Results.NoContent();
     }
 
+    private static async Task<IResult> UpdateOsPolicyAsync(
+        int id,
+        ServerOsPolicyInput input,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        IAuditService audit,
+        CancellationToken ct)
+    {
+        await access.RequireSystemAdminAsync(user, ct);
+        var server = await db.Servers.SingleOrDefaultAsync(x => x.Id == id, ct)
+                     ?? throw Guard.NotFound("Server", id);
+        server.OsUpdateLtsOnly = input.LtsOnly;
+        await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "server.os-policy", "Server", id,
+            detail: new { ltsOnly = input.LtsOnly }), ct);
+        return Results.NoContent();
+    }
+
     private static async Task<IResult> ListApplicationsAsync(
         int id,
         InfraOrgItDbContext db,
@@ -391,7 +412,16 @@ public static class ServersEndpoints
         x.DiskGb,
         x.OperatingSystem,
         x.HaNode,
-        x.ManagedBy);
+        x.ManagedBy,
+        x.OsName,
+        x.OsVersion,
+        x.OsUpdateTarget,
+        x.OsUpdateTargetLts,
+        x.OsEolDate,
+        x.OsUpdateStatus,
+        x.OsUpdateDetail,
+        x.OsUpdateCheckedAt,
+        x.OsUpdateLtsOnly);
 }
 
 public sealed record ServerInput(
@@ -408,6 +438,8 @@ public sealed record ServerInput(
     string? OperatingSystem = null,
     string? HaNode = null,
     string? ManagedBy = null);
+
+public sealed record ServerOsPolicyInput(bool? LtsOnly);
 
 public sealed record ServerApplicationDeployInput(
     int ApplicationVersionId,
@@ -446,4 +478,13 @@ public sealed record ServerDto(
     int? DiskGb,
     string? OperatingSystem,
     string? HaNode,
-    string? ManagedBy);
+    string? ManagedBy,
+    string? OsName,
+    string? OsVersion,
+    string? OsUpdateTarget,
+    bool? OsUpdateTargetLts,
+    DateTime? OsEolDate,
+    string? OsUpdateStatus,
+    string? OsUpdateDetail,
+    DateTime? OsUpdateCheckedAt,
+    bool? OsUpdateLtsOnly);
