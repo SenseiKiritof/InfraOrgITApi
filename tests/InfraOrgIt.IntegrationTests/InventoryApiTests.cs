@@ -960,6 +960,34 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Server_os_update_policy_and_override()
+    {
+        using var admin = await ClientForAsync("os.policy", systemAdmin: true);
+        var initial = await ReadAsync(await admin.GetAsync("/api/server-update-policy"));
+        Assert.True(initial.GetProperty("enabled").GetBoolean());
+        Assert.True(initial.GetProperty("ltsOnly").GetBoolean());
+
+        var update = await SendAsync(admin, HttpMethod.Put, "/api/server-update-policy",
+            new { enabled = true, ltsOnly = false });
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        var overridePolicy = await SendAsync(admin, HttpMethod.Put,
+            $"/api/servers/{seeded.ServerId}/os-update-policy",
+            new { ltsOnly = false });
+        Assert.Equal(HttpStatusCode.NoContent, overridePolicy.StatusCode);
+
+        var server = await ReadAsync(
+            await admin.GetAsync($"/api/servers/{seeded.ServerId}"));
+        Assert.False(server.GetProperty("osUpdateLtsOnly").GetBoolean());
+        Assert.True(server.TryGetProperty("osUpdateStatus", out _));
+        Assert.True(server.TryGetProperty("osEolDate", out _));
+
+        await SendAsync(admin, HttpMethod.Put, "/api/server-update-policy",
+            new { enabled = true, ltsOnly = true });
+    }
+
+    [Fact]
     public async Task Database_query_runs_read_only_and_is_audited()
     {
         using var admin = await ClientForAsync("query.admin", systemAdmin: true);
