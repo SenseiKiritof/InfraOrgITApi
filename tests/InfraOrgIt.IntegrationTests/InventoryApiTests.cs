@@ -960,6 +960,54 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Database_query_runs_read_only_and_is_audited()
+    {
+        using var admin = await ClientForAsync("query.admin", systemAdmin: true);
+        using var operatorUser = await ClientForAsync("query.operator");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        var catalog = await SeedCatalogAsync(seeded.ServerId, suffix);
+        await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
+            "query.operator", "ServerOperator", operatorUser);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var application = await db.Applications.SingleAsync(
+                x => x.Id == catalog.ApplicationId);
+            application.Type = "MySql";
+            await db.SaveChangesAsync();
+        }
+
+        _ssh.Result = new SshCommandResult(0, "1");
+        var run = await SendAsync(operatorUser, HttpMethod.Post,
+            $"/api/server-applications/{catalog.DeployId}/query",
+            new { query = "SELECT 1", database = "app" });
+        var runText = await run.Content.ReadAsStringAsync();
+        Assert.True(run.StatusCode == HttpStatusCode.OK, runText);
+        var body = await ReadAsync(run);
+        Assert.Equal("MySql", body.GetProperty("engine").GetString());
+        Assert.Equal("1", body.GetProperty("output").GetString());
+        var script = _ssh.Scripts[^1];
+        Assert.Contains("mysql --batch", script);
+        var encoded = script.Split('\'')[1];
+        var payload = System.Text.Encoding.UTF8.GetString(
+            Convert.FromBase64String(encoded));
+        Assert.StartsWith("START TRANSACTION READ ONLY;", payload);
+
+        var calls = _ssh.Scripts.Count;
+        var write = await SendAsync(operatorUser, HttpMethod.Post,
+            $"/api/server-applications/{catalog.DeployId}/query",
+            new { query = "DELETE FROM users" });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, write.StatusCode);
+        Assert.Equal(calls, _ssh.Scripts.Count);
+
+        var audits = (await ReadAsync(await admin.GetAsync(
+                $"/api/command-executions?q=Topo%20App%20{suffix}")))
+            .GetProperty("items");
+        Assert.Equal("Query", audits[0].GetProperty("kind").GetString());
+    }
+
+    [Fact]
     public async Task Command_executions_page_and_sort_server_side()
     {
         using var admin = await ClientForAsync("exec.page", systemAdmin: true);
@@ -2060,7 +2108,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         foreach (var (type, expected) in new[]
                  {
-                     ("MongoDb", "MongoDb"), ("mysql", "MySql"), ("Redis", "Redis"), ("haproxy", "HAProxy")
+                     ("MongoDb", "MongoDb"), ("mysql", "MySql"), ("Redis", "Redis"), ("haproxy", "HAProxy"),
+                     ("postgresql", "PostgreSql"), ("sqlserver", "SqlServer"), ("oracle", "Oracle")
                  })
         {
             var created = await SendAsync(admin, HttpMethod.Post, "/api/applications", new
@@ -2078,11 +2127,11 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         var invalid = await SendAsync(admin, HttpMethod.Post, "/api/applications", new
         {
-            name = "Type Oracle " + suffix,
+            name = "Type Dbase " + suffix,
             description = "",
             basePath = "/types",
             listeningOnPort = 8080,
-            type = "Oracle"
+            type = "Dbase"
         });
         Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
     }

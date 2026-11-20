@@ -632,6 +632,7 @@ ServerCredentialsEndpoints.Map(app);
 CommandTemplateEndpoints.Map(app);
 RemoteClientEndpoints.Map(app);
 ApplicationActionsEndpoints.Map(app);
+DatabaseQueryEndpoints.Map(app);
 ReachabilityEndpoints.Map(app);
 CommandExecutionEndpoints.Map(app);
 AuditEventsEndpoints.Map(app);

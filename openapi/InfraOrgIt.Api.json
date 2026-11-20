@@ -427,6 +427,46 @@
         ]
       }
     },
+    "/api/server-applications/{id}/query": {
+      "post": {
+        "tags": [
+          "DatabaseQueryEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatabaseQueryInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
     "/api/command-executions": {
       "get": {
         "tags": [
@@ -7344,6 +7384,27 @@
           }
         }
       },
+      "DatabaseQueryInput": {
+        "required": [
+          "query",
+          "database"
+        ],
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "database": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "DesktopDeviceInput": {
         "required": [
           "name",
@@ -9592,6 +9653,9 @@
     },
     {
       "name": "ApplicationApiCallEndpoints"
+    },
+    {
+      "name": "DatabaseQueryEndpoints"
     },
     {
       "name": "ClientEventsEndpoints"
