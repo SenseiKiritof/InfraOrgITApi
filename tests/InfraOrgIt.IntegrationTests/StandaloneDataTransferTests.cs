@@ -131,7 +131,7 @@ public sealed class StandaloneDataTransferTests : IAsyncLifetime
         Assert.Equal(1, await targetDb.Providers.CountAsync());
         Assert.Equal(1, await targetDb.Servers.CountAsync());
         Assert.Equal("prd-app-01", (await targetDb.Servers.SingleAsync()).Name);
-        Assert.Equal(13, await targetDb.ApplicationTypes.CountAsync());
+        Assert.Equal(16, await targetDb.ApplicationTypes.CountAsync());
         Assert.True(await targetDb.ApplicationTypes.AnyAsync(x => x.Name == "Apache"));
         Assert.Equal("Apache", (await targetDb.Applications.SingleAsync()).Type);
     }

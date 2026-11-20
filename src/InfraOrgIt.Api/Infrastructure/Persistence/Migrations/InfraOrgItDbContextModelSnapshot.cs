@@ -550,6 +550,36 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                             SortOrder = 120,
                             UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
                             Version = 0
+                        },
+                        new
+                        {
+                            Id = 13,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Label = "PostgreSQL",
+                            Name = "PostgreSql",
+                            SortOrder = 130,
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Version = 0
+                        },
+                        new
+                        {
+                            Id = 14,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Label = "SQL Server",
+                            Name = "SqlServer",
+                            SortOrder = 140,
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Version = 0
+                        },
+                        new
+                        {
+                            Id = 15,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Label = "Oracle",
+                            Name = "Oracle",
+                            SortOrder = 150,
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Version = 0
                         });
                 });
 
@@ -870,7 +900,7 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.ToTable("CommandExecutions", t =>
                         {
-                            t.HasCheckConstraint("CK_CommandExecutions_Kind", "`Kind` IN ('Action','Reachability','Console')");
+                            t.HasCheckConstraint("CK_CommandExecutions_Kind", "`Kind` IN ('Action','Reachability','Console','Query')");
                         });
                 });
 

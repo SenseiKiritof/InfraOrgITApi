@@ -435,7 +435,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
             e.HasIndex(x => x.StartedAt);
             e.HasIndex(x => x.IdempotencyKey).IsUnique();
             e.ToTable(t => t.HasCheckConstraint("CK_CommandExecutions_Kind",
-                "`Kind` IN ('Action','Reachability','Console')"));
+                "`Kind` IN ('Action','Reachability','Console','Query')"));
         });
 
         modelBuilder.Entity<AuditEvent>(e =>
@@ -702,7 +702,10 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
             ApplicationType(9, "Kafka", "Kafka", 90),
             ApplicationType(10, "MySql", "MySQL/MariaDB", 100),
             ApplicationType(11, "MongoDb", "MongoDB", 110),
-            ApplicationType(12, "Redis", "Redis", 120));
+            ApplicationType(12, "Redis", "Redis", 120),
+            ApplicationType(13, "PostgreSql", "PostgreSQL", 130),
+            ApplicationType(14, "SqlServer", "SQL Server", 140),
+            ApplicationType(15, "Oracle", "Oracle", 150));
 
         modelBuilder.Entity<Menu>().HasData(
             Menu(1, "Home", "/", true, true, true, 0, null),
