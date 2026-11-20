@@ -44,7 +44,7 @@ public sealed class ApplicationTypesApiTests : IAsyncLifetime
         var csrf = await CsrfAsync(client);
 
         var defaults = await client.GetFromJsonAsync<JsonElement>("/api/application-types");
-        Assert.Equal(12, defaults.GetArrayLength());
+        Assert.Equal(15, defaults.GetArrayLength());
         Assert.Contains(
             defaults.EnumerateArray(),
             item => item.GetProperty("name").GetString() == "HAProxy");
