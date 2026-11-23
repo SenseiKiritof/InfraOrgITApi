@@ -11,8 +11,9 @@ using Microsoft.Extensions.Options;
 
 namespace InfraOrgIt.Api.Features.Remote;
 
-/// Console SSH staccabili: la shell resta viva dopo la chiusura del WebSocket
-/// per ConsoleResumeMinutes, così un refresh del browser può riagganciarla.
+/// Console SSH staccabili: la shell resta viva finché il browser è collegato e,
+/// dopo la chiusura del WebSocket, per ConsoleResumeMinutes, così un refresh
+/// può riagganciarla. Non c'è un timeout di inattività dell'input.
 public sealed class ConsoleSessionRegistry(
     IOptions<ServerAccessOptions> options,
     IServiceScopeFactory scopes,
@@ -142,25 +143,7 @@ public sealed class ConsoleSession : IAsyncDisposable
         ServerId == serverId &&
         string.Equals(Username, username, StringComparison.OrdinalIgnoreCase);
 
-    internal void Start()
-    {
-        _ = Task.Run(PumpAsync);
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(
-                    TimeSpan.FromMinutes(options.ConsoleMaxMinutes),
-                    lifetime.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-
-            await TerminateAsync("durata massima della console raggiunta");
-        });
-    }
+    internal void Start() => _ = Task.Run(PumpAsync);
 
     public async Task AttachAsync(
         WebSocket webSocket,
