@@ -5,6 +5,33 @@ namespace InfraOrgIt.UnitTests;
 public sealed class HaproxyStatsCsvTests
 {
     [Fact]
+    public void Parses_stats_rows_with_status_and_weight()
+    {
+        const string csv = """
+            # pxname,svname,status,check_status,addr,stot,req_tot,hrsp_4xx,weight
+            web,FRONTEND,OPEN,,,100,90,3,
+            app,webserver1,UP,L7OK,10.0.0.1:8080,50,45,2,10
+            """;
+
+        var rows = HaproxyStatsCsv.ParseStats(csv);
+
+        Assert.Equal(2, rows.Count);
+        var frontend = rows[0];
+        Assert.Equal("frontend", frontend.Kind);
+        Assert.Equal("web", frontend.Proxy);
+        Assert.Equal("OPEN", frontend.Status);
+        Assert.Equal(90, frontend.ReqTot);
+        var server = rows[1];
+        Assert.Equal("server", server.Kind);
+        Assert.Equal("app", server.Proxy);
+        Assert.Equal("webserver1", server.Server);
+        Assert.Equal("UP", server.Status);
+        Assert.Equal("L7OK", server.CheckStatus);
+        Assert.Equal("10.0.0.1:8080", server.Address);
+        Assert.Equal(10, server.Weight);
+    }
+
+    [Fact]
     public void Parses_protocol_metrics_and_aggregates_errors()
     {
         const string csv = """

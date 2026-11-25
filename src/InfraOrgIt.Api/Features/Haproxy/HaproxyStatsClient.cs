@@ -35,7 +35,7 @@ public sealed record HaproxyProtocolRow(
     long QpackDecoderErrors,
     long SslFailedHandshake);
 
-/// <summary>Reads the HAProxy stats page in CSV form for protocol counters.</summary>
+/// <summary>Reads the HAProxy stats page in CSV form and applies server actions.</summary>
 public sealed class HaproxyStatsClient(
     HttpClient http,
     ISshSession? ssh) : IAsyncDisposable
@@ -47,6 +47,27 @@ public sealed class HaproxyStatsClient(
             throw new HttpRequestException(
                 $"Stats HAProxy HTTP {(int)response.StatusCode}.");
         return await response.Content.ReadAsStringAsync(ct);
+    }
+
+    public async Task SetServerStateAsync(
+        string backend,
+        string server,
+        string state,
+        CancellationToken ct)
+    {
+        using var content = new FormUrlEncodedContent(
+        [
+            new("s", server),
+            new("action", state),
+            new("b", backend)
+        ]);
+        using var response = await http.PostAsync("", content, ct);
+        var result = response.Headers.Location?.OriginalString
+            .Split(";st=").ElementAtOrDefault(1);
+        if (result != "DONE")
+            throw new HttpRequestException(
+                "Pagina stats HAProxy: esito " +
+                (result ?? ((int)response.StatusCode).ToString()) + ".");
     }
 
     public async ValueTask DisposeAsync()
@@ -149,81 +170,145 @@ public sealed class HaproxyStatsClientFactory(
 
 public static class HaproxyStatsCsv
 {
-    public static IReadOnlyList<HaproxyProtocolRow> ParseProtocol(string text)
+    public static IReadOnlyList<HaproxyStatsRow> ParseStats(string text) =>
+        ParseRows(text)
+            .Select(row => new HaproxyStatsRow(
+                row.Kind,
+                row.Proxy,
+                row.Server,
+                Trim(row.Text("status"), 50),
+                Trim(row.Text("check_status"), 50),
+                Trim(row.Text("addr"), 300),
+                row.Number("stot"),
+                row.Number("req_tot"),
+                row.Number("hrsp_1xx"),
+                row.Number("hrsp_2xx"),
+                row.Number("hrsp_3xx"),
+                row.Number("hrsp_4xx"),
+                row.Number("hrsp_5xx"),
+                row.Number("hrsp_other"),
+                row.Number("bin"),
+                row.Number("bout"),
+                row.Number("econ"),
+                row.Number("eresp"),
+                row.Number("dreq"),
+                row.Number("dresp"),
+                row.Number("cli_abrt"),
+                row.Number("srv_abrt"),
+                row.Number("conn_tot"),
+                row.Number("dcon"),
+                row.Number("dses"),
+                row.Number("lbtot"),
+                row.Number("wretr"),
+                row.Number("wredis"),
+                row.Number("scur"),
+                row.Number("smax"),
+                row.Number("slim"),
+                row.Number("qcur"),
+                row.Number("qmax"),
+                row.Number("rate"),
+                row.Number("rate_max"),
+                row.Number("req_rate"),
+                row.Number("req_rate_max"),
+                row.Number("conn_rate"),
+                row.Number("conn_rate_max"),
+                row.Number("rtime"),
+                row.Number("ctime"),
+                row.Number("ttime"),
+                row.Number("qtime"),
+                row.Number("downtime"),
+                row.Number("lastsess"),
+                row.Number("weight"),
+                row.Number("check_health"),
+                row.Number("chkfail"),
+                row.Number("chkdown")))
+            .ToList();
+
+    public static IReadOnlyList<HaproxyProtocolRow> ParseProtocol(string text) =>
+        ParseRows(text)
+            .Select(row => new HaproxyProtocolRow(
+                row.Kind,
+                row.Proxy,
+                row.Server,
+                row.Number("h2req"),
+                row.Number("h2sess"),
+                row.Number("h3req"),
+                row.Number("h3sess"),
+                row.Number("h2_open_connections"),
+                row.Number("h2_backend_open_streams"),
+                row.Number("h2_detected_conn_protocol_errors"),
+                row.Number("h2_detected_strm_protocol_errors"),
+                row.Number("quic_hdshk_fail"),
+                row.Number("quic_dropped_pkt"),
+                row.Number("quic_lost_pkt"),
+                row.Number("quic_sent_pkt"),
+                row.Number("quic_retry_error"),
+                row.Number("quic_too_short_dgram"),
+                row.Number("quic_rxbuf_full"),
+                row.Number("quic_socket_full"),
+                row.Number("h3_version_fallback"),
+                row.Sum("h3_", "h3req", "h3sess", "h3_data", "h3_headers",
+                    "h3_settings", "h3_max_push_id", "h3_push_promise",
+                    "h3_goaway", "h3_cancel_push", "h3_version_fallback"),
+                row.Sum("quic_transp_err_"),
+                row.Number("qpack_encoder_stream_error"),
+                row.Number("qpack_decoder_stream_error"),
+                row.Number("ssl_failed_handshake")))
+            .ToList();
+
+    private sealed record Row(
+        string Kind,
+        string Proxy,
+        string Server,
+        IReadOnlyDictionary<string, string> Fields)
+    {
+        public string Text(string name) =>
+            Fields.TryGetValue(name, out var value) ? value : "";
+
+        public long Number(string name) =>
+            long.TryParse(Text(name), out var value) ? value : 0;
+
+        public long Sum(string prefix, params string[] excluded)
+        {
+            var skip = new HashSet<string>(excluded,
+                StringComparer.OrdinalIgnoreCase);
+            long total = 0;
+            foreach (var (name, text) in Fields)
+                if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                    !skip.Contains(name) &&
+                    long.TryParse(text, out var value))
+                    total += value;
+            return total;
+        }
+    }
+
+    private static List<Row> ParseRows(string text)
     {
         var lines = text.Replace("\r\n", "\n").Split('\n');
         if (lines.Length < 2) return [];
         var header = Split(lines[0].TrimStart('#', ' '));
-        var index = header
-            .Select((name, position) => (name: name.Trim(), position))
-            .GroupBy(x => x.name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(x => x.Key, x => x.First().position,
-                StringComparer.OrdinalIgnoreCase);
-        var rows = new List<HaproxyProtocolRow>();
+        var rows = new List<Row>();
         foreach (var line in lines.Skip(1))
         {
             if (line.Length == 0 || line.StartsWith('#')) continue;
             var values = Split(line);
-            string Value(string name) =>
-                index.TryGetValue(name, out var position) &&
-                position < values.Count ? values[position].Trim() : "";
-            long Number(string name) =>
-                long.TryParse(Value(name), out var value) ? value : 0;
-            var proxy = Value("pxname");
-            var name = Value("svname");
+            var fields = new Dictionary<string, string>(
+                StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < header.Count && i < values.Count; i++)
+                fields[header[i].Trim()] = values[i].Trim();
+            var proxy = fields.GetValueOrDefault("pxname", "");
+            var name = fields.GetValueOrDefault("svname", "");
             if (proxy.Length == 0 || name.Length == 0) continue;
             var kind = name == "FRONTEND" ? "frontend"
                 : name == "BACKEND" ? "backend"
                 : "server";
-            rows.Add(new HaproxyProtocolRow(
+            rows.Add(new Row(
                 kind,
                 Trim(proxy, 100),
                 kind == "server" ? Trim(name, 200) : "",
-                Number("h2req"),
-                Number("h2sess"),
-                Number("h3req"),
-                Number("h3sess"),
-                Number("h2_open_connections"),
-                Number("h2_backend_open_streams"),
-                Number("h2_detected_conn_protocol_errors"),
-                Number("h2_detected_strm_protocol_errors"),
-                Number("quic_hdshk_fail"),
-                Number("quic_dropped_pkt"),
-                Number("quic_lost_pkt"),
-                Number("quic_sent_pkt"),
-                Number("quic_retry_error"),
-                Number("quic_too_short_dgram"),
-                Number("quic_rxbuf_full"),
-                Number("quic_socket_full"),
-                Number("h3_version_fallback"),
-                Sum(index, values, "h3_", "h3req", "h3sess", "h3_data",
-                    "h3_headers", "h3_settings", "h3_max_push_id",
-                    "h3_push_promise", "h3_goaway", "h3_cancel_push",
-                    "h3_version_fallback"),
-                Sum(index, values, "quic_transp_err_"),
-                Number("qpack_encoder_stream_error"),
-                Number("qpack_decoder_stream_error"),
-                Number("ssl_failed_handshake")));
+                fields));
         }
         return rows;
-    }
-
-    private static long Sum(
-        IReadOnlyDictionary<string, int> index,
-        IReadOnlyList<string> values,
-        string prefix,
-        params string[] excluded)
-    {
-        var skip = new HashSet<string>(excluded, StringComparer.OrdinalIgnoreCase);
-        long total = 0;
-        foreach (var (name, position) in index)
-        {
-            if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-                skip.Contains(name) || position >= values.Count)
-                continue;
-            if (long.TryParse(values[position], out var value)) total += value;
-        }
-        return total;
     }
 
     private static List<string> Split(string line)

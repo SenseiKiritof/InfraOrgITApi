@@ -60,16 +60,20 @@ public sealed class HaproxyMetricsRunner(
     IServiceScopeFactory scopes,
     HaproxyClientCache clients,
     HaproxyMetricsCache cache,
+    IConfiguration configuration,
     ILogger<HaproxyMetricsRunner> logger)
 {
     private sealed class Saved
     {
+        public DateTime LastPoll { get; set; }
         public DateTime LastMinute { get; set; }
         public DateTime LastFiveMinutes { get; set; }
         public DateTime LastPrune { get; set; }
     }
 
     private readonly ConcurrentDictionary<int, Saved> saved = new();
+    private readonly TimeSpan statsOnlyInterval = TimeSpan.FromSeconds(
+        configuration.GetValue("Haproxy:StatsOnlyIntervalSeconds", 15));
 
     public async Task TickAsync(CancellationToken ct)
     {
@@ -77,8 +81,10 @@ public sealed class HaproxyMetricsRunner(
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
         var ids = await db.HaproxyInstances.AsNoTracking()
             .Where(x => x.MonitoringChoice == "Enabled" &&
-                        x.EncryptedPassword != null &&
-                        x.Username != null)
+                        (x.ApiVersion == "stats"
+                            ? x.StatsBaseUrl != null
+                            : x.EncryptedPassword != null &&
+                              x.Username != null))
             .Select(x => x.Id)
             .ToListAsync(ct);
         foreach (var id in ids)
@@ -104,10 +110,30 @@ public sealed class HaproxyMetricsRunner(
             .SingleOrDefaultAsync(x => x.Id == instanceId, ct);
         if (instance?.Server is null) return;
 
-        var client = await clients.GetAsync(instance, instance.Server, ct);
-        var stats = await client.StatsAsync(ct);
-        var process = await client.ProcessAsync(ct);
         var at = DateTime.UtcNow;
+        var state = saved.GetOrAdd(instanceId, _ => new Saved());
+        var statsOnly = instance.ApiVersion == "stats";
+        if (statsOnly && at - state.LastPoll < statsOnlyInterval) return;
+        state.LastPoll = at;
+
+        IReadOnlyList<HaproxyStatsRow> stats;
+        HaproxyProcessInfo? process = null;
+        if (statsOnly)
+        {
+            var factory = scope.ServiceProvider
+                .GetRequiredService<HaproxyStatsClientFactory>();
+            await using var statsClient = await factory.CreateAsync(
+                instance, instance.Server, ct);
+            stats = HaproxyStatsCsv.ParseStats(
+                await statsClient.GetCsvAsync(ct));
+        }
+        else
+        {
+            var client = await clients.GetAsync(instance, instance.Server, ct);
+            stats = await client.StatsAsync(ct);
+            process = await client.ProcessAsync(ct);
+        }
+
         cache.Set(instanceId, new HaproxyLiveSnapshot(
             at,
             stats.Select(row => new HaproxyLiveSeries(
@@ -115,18 +141,19 @@ public sealed class HaproxyMetricsRunner(
                 row.ReqTot, row.H4xx, row.H5xx, row.Scur, row.Qcur, row.Rate,
                 row.ReqRate, row.Rtime, row.Ctime, row.Ttime, row.Bin,
                 row.Bout)).ToList(),
-            new HaproxyLiveProcess(
-                process.Uptime, process.CurrConns, process.CumConns,
-                process.CurrSslConns, process.CumSslConns, process.MaxConn,
-                process.SessRate, process.ConnRate, process.Tasks,
-                process.RunQueue, process.IdlePct, process.Threads,
-                process.ActivePeers, process.ConnectedPeers)));
+            process is null
+                ? null
+                : new HaproxyLiveProcess(
+                    process.Uptime, process.CurrConns, process.CumConns,
+                    process.CurrSslConns, process.CumSslConns, process.MaxConn,
+                    process.SessRate, process.ConnRate, process.Tasks,
+                    process.RunQueue, process.IdlePct, process.Threads,
+                    process.ActivePeers, process.ConnectedPeers)));
 
         var minute = new DateTime(at.Year, at.Month, at.Day, at.Hour,
             at.Minute, 0, DateTimeKind.Utc);
         var five = new DateTime(at.Year, at.Month, at.Day, at.Hour,
             at.Minute / 5 * 5, 0, DateTimeKind.Utc);
-        var state = saved.GetOrAdd(instanceId, _ => new Saved());
         var wrote = false;
         if (state.LastMinute != minute)
         {
@@ -166,7 +193,7 @@ public sealed class HaproxyMetricsRunner(
         int resolution,
         DateTime bucket,
         IReadOnlyList<HaproxyStatsRow> stats,
-        HaproxyProcessInfo process,
+        HaproxyProcessInfo? process,
         CancellationToken ct)
     {
         var exists = await db.HaproxyMetricSamples.AnyAsync(
@@ -228,6 +255,7 @@ public sealed class HaproxyMetricsRunner(
                 Chkfail = row.Chkfail,
                 Chkdown = row.Chkdown
             });
+        if (process is null) return;
         db.HaproxyProcessMetricSamples.Add(new HaproxyProcessMetricSample
         {
             HaproxyInstanceId = instanceId,

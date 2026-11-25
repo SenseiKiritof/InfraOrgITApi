@@ -50,8 +50,8 @@ public sealed class HaproxyProtocolMetricsService(
         var ids = await db.HaproxyInstances.AsNoTracking()
             .Where(x => x.MonitoringChoice == "Enabled" &&
                         x.StatsBaseUrl != null &&
-                        x.StatsUsername != null &&
-                        x.EncryptedStatsPassword != null)
+                        (x.ApiVersion == "stats" ||
+                         x.EncryptedStatsPassword != null))
             .Select(x => x.Id)
             .ToListAsync(ct);
         foreach (var id in ids)

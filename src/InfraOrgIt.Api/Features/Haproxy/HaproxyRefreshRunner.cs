@@ -70,19 +70,44 @@ public sealed class HaproxyRefreshRunner(
             ?? throw new InvalidOperationException("Istanza HAProxy inesistente.");
         if (instance.Server is null)
             throw new InvalidOperationException("Server HAProxy inesistente.");
-        if (string.IsNullOrEmpty(instance.Username) ||
-            string.IsNullOrEmpty(instance.EncryptedPassword))
+        var statsOnly = instance.ApiVersion == "stats";
+        if (!statsOnly &&
+            (string.IsNullOrEmpty(instance.Username) ||
+             string.IsNullOrEmpty(instance.EncryptedPassword)))
             throw new InvalidOperationException(
                 "Credenziali Data Plane API non configurate.");
 
         var now = DateTime.UtcNow;
         try
         {
-            var clients = scope.ServiceProvider
-                .GetRequiredService<HaproxyClientFactory>();
-            await using var client = await clients.CreateAsync(
-                instance, instance.Server, ct);
-            var result = await client.RefreshAsync(ct);
+            HaproxyRefreshResult result;
+            if (statsOnly)
+            {
+                instance.EffectiveApiVersion = "stats";
+                var statsFactory = scope.ServiceProvider
+                    .GetRequiredService<HaproxyStatsClientFactory>();
+                await using var statsClient = await statsFactory.CreateAsync(
+                    instance, instance.Server, ct);
+                var rows = HaproxyStatsCsv.ParseStats(
+                    await statsClient.GetCsvAsync(ct));
+                result = new HaproxyRefreshResult(
+                    [],
+                    rows.Where(x => x.Kind == "server")
+                        .Select(x => new HaproxyServerResult(
+                            x.Proxy, x.Server, x.Address, x.Status,
+                            x.CheckStatus, (int)x.Weight))
+                        .ToList(),
+                    [],
+                    null);
+            }
+            else
+            {
+                var clients = scope.ServiceProvider
+                    .GetRequiredService<HaproxyClientFactory>();
+                await using var client = await clients.CreateAsync(
+                    instance, instance.Server, ct);
+                result = await client.RefreshAsync(ct);
+            }
 
             await using var transaction =
                 await db.Database.BeginTransactionAsync(ct);
@@ -211,8 +236,10 @@ public sealed class HaproxyRefreshService(
         var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
         var ids = await db.HaproxyInstances.AsNoTracking()
             .Where(x => x.MonitoringChoice == "Enabled" &&
-                        x.EncryptedPassword != null &&
-                        x.Username != null)
+                        (x.ApiVersion == "stats"
+                            ? x.StatsBaseUrl != null
+                            : x.EncryptedPassword != null &&
+                              x.Username != null))
             .Select(x => x.Id)
             .ToListAsync(ct);
         using var semaphore = new SemaphoreSlim(Concurrency);

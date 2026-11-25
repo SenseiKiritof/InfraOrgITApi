@@ -245,28 +245,24 @@ public static class HaproxyEndpoints
             user, [instance.Server!.ProviderEnvironmentId], ct);
 
         var name = Guard.Text(input.Name, "Name", 64);
-        var baseUrl = Guard.Text(input.BaseUrl, "BaseUrl", 300).TrimEnd('/');
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https"))
+        var apiVersion = input.ApiVersion?.Trim().ToLowerInvariant() ?? "auto";
+        if (apiVersion is not ("auto" or "v2" or "v3" or "stats"))
+            throw Guard.Unprocessable("ApiVersion ammessa: auto, v2, v3, stats.");
+        var statsOnly = apiVersion == "stats";
+        var baseUrl = (input.BaseUrl ?? "").Trim().TrimEnd('/');
+        if (baseUrl.Length > 300)
+            throw Guard.Unprocessable("BaseUrl troppo lungo (max 300).");
+        if (!statsOnly &&
+            (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) ||
+             uri.Scheme is not ("http" or "https")))
             throw Guard.Unprocessable("BaseUrl deve essere un URL http o https.");
         var transport = input.Transport?.Trim() ?? "SshForward";
         if (transport is not ("Direct" or "SshForward" or "DesktopRelay"))
             throw Guard.Unprocessable("Transport non valido.");
-        if (transport == "Direct" && uri.Scheme != "https")
-            throw Guard.Unprocessable("Direct richiede un BaseUrl https.");
-        if (transport == "SshForward" && uri.Scheme == "https" &&
-            string.IsNullOrWhiteSpace(instance.CaPem) &&
-            !instance.AllowSelfSigned &&
-            !(input.AllowSelfSigned ?? false))
+        var statsBaseUrl = OptionalUrl(input.StatsBaseUrl, "StatsBaseUrl");
+        if (statsOnly && statsBaseUrl is null)
             throw Guard.Unprocessable(
-                "Per https serve una CA oppure Accetta self-signed.");
-
-        var apiVersion = input.ApiVersion?.Trim().ToLowerInvariant() ?? "auto";
-        if (apiVersion is not ("auto" or "v2" or "v3" or "stats"))
-            throw Guard.Unprocessable("ApiVersion ammessa: auto, v2, v3, stats.");
-        var apiPort = input.ApiPort ?? instance.ApiPort;
-        if (apiPort is < 1 or > 65535)
-            throw Guard.Unprocessable("ApiPort non valida.");
+                "In modalità solo stats serve l'URL della pagina stats.");
         var caPem = Guard.OptionalText(input.CaPem, "CaPem", 200_000);
         if (!string.IsNullOrWhiteSpace(caPem))
         {
@@ -285,6 +281,21 @@ public static class HaproxyEndpoints
                     "CaPem non contiene certificati PEM validi.");
             }
         }
+
+        var tlsUrl = statsOnly ? statsBaseUrl! : baseUrl;
+        if (transport == "Direct" &&
+            !tlsUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            throw Guard.Unprocessable("Direct richiede un URL https.");
+        if (transport == "SshForward" &&
+            tlsUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+            string.IsNullOrWhiteSpace(caPem) &&
+            !(input.AllowSelfSigned ?? false))
+            throw Guard.Unprocessable(
+                "Per https serve una CA oppure Accetta self-signed.");
+
+        var apiPort = input.ApiPort ?? instance.ApiPort;
+        if (apiPort is < 1 or > 65535)
+            throw Guard.Unprocessable("ApiPort non valida.");
 
         if (input.ServerApplicationId is not null)
         {
@@ -314,12 +325,12 @@ public static class HaproxyEndpoints
         instance.Username = Guard.OptionalText(input.Username, "Username", 100);
         instance.StatsUsername = Guard.OptionalText(
             input.StatsUsername, "StatsUsername", 100);
-        instance.StatsBaseUrl = OptionalUrl(input.StatsBaseUrl, "StatsBaseUrl");
+        instance.StatsBaseUrl = statsBaseUrl;
         instance.CaPem = caPem;
         instance.AllowSelfSigned = input.AllowSelfSigned ?? false;
         instance.ServerApplicationId = input.ServerApplicationId;
         instance.ClusterId = input.ClusterId;
-        if (instance.EncryptedPassword is null)
+        if (instance.EncryptedPassword is null && !statsOnly)
             instance.DiscoveryStatus = "CredentialsRequired";
         await db.SaveChangesAsync(ct);
         await clientCache.InvalidateAsync(instance.Id);
@@ -368,9 +379,19 @@ public static class HaproxyEndpoints
             instance.StatsPasswordKeyVersion = encrypted.KeyVersion;
         }
 
-        instance.DiscoveryStatus = instance.EncryptedPassword is null
-            ? "CredentialsRequired"
-            : instance.MonitoringChoice == "Enabled" ? "Found" : instance.DiscoveryStatus;
+        if (instance.ApiVersion == "stats")
+        {
+            if (instance.MonitoringChoice == "Enabled")
+                instance.DiscoveryStatus = "Found";
+        }
+        else if (instance.EncryptedPassword is null)
+        {
+            instance.DiscoveryStatus = "CredentialsRequired";
+        }
+        else if (instance.MonitoringChoice == "Enabled")
+        {
+            instance.DiscoveryStatus = "Found";
+        }
         await db.SaveChangesAsync(ct);
         await clientCache.InvalidateAsync(instance.Id);
         await audit.RecordAsync(AuditEntries.Change(
@@ -409,26 +430,21 @@ public static class HaproxyEndpoints
         instance.MonitoringChoice = choice;
         instance.MonitoringChangedAt = DateTime.UtcNow;
         instance.MonitoringChangedBy = user.Identity?.Name ?? "";
+        var statsOnly = instance.ApiVersion == "stats";
+        var ready = statsOnly
+            ? instance.StatsBaseUrl is not null
+            : instance.Username is not null && instance.EncryptedPassword is not null;
         if (choice == "Enabled")
-        {
-            instance.DiscoveryStatus =
-                instance.Username is not null && instance.EncryptedPassword is not null
-                    ? "Found"
-                    : "CredentialsRequired";
-        }
+            instance.DiscoveryStatus = ready ? "Found" : "CredentialsRequired";
         else if (choice == "Disabled")
-        {
             instance.DiscoveryStatus = "Inactive";
-        }
 
         await db.SaveChangesAsync(ct);
         await clientCache.InvalidateAsync(instance.Id);
         await audit.RecordAsync(AuditEntries.Change(
             user, "haproxy.monitoring", "HaproxyInstance", instance.Id,
             detail: new { choice }), ct);
-        if (choice == "Enabled" &&
-            instance.Username is not null &&
-            instance.EncryptedPassword is not null)
+        if (choice == "Enabled" && ready)
             refresher.Start(instance.Id);
         return Results.NoContent();
     }
@@ -439,6 +455,7 @@ public static class HaproxyEndpoints
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
         HaproxyClientFactory clients,
+        HaproxyStatsClientFactory statsClients,
         IAuditService audit,
         CancellationToken ct)
     {
@@ -448,16 +465,38 @@ public static class HaproxyEndpoints
             ?? throw Guard.NotFound("Istanza HAProxy", id);
         await access.RequireAdminAsync(
             user, [instance.Server!.ProviderEnvironmentId], ct);
-        if (string.IsNullOrEmpty(instance.Username) ||
-            string.IsNullOrEmpty(instance.EncryptedPassword))
+        var statsOnly = instance.ApiVersion == "stats";
+        if (statsOnly && instance.StatsBaseUrl is null)
+            throw Guard.Unprocessable(
+                "URL della pagina stats non configurato.");
+        if (!statsOnly &&
+            (string.IsNullOrEmpty(instance.Username) ||
+             string.IsNullOrEmpty(instance.EncryptedPassword)))
             throw Guard.Unprocessable(
                 "Credenziali Data Plane API non configurate.");
 
         try
         {
-            await using var client = await clients.CreateAsync(
-                instance, instance.Server, ct);
-            var result = await client.TestAsync(ct);
+            HaproxyConnectionTest result;
+            if (statsOnly)
+            {
+                await using var statsClient = await statsClients.CreateAsync(
+                    instance, instance.Server, ct);
+                var rows = HaproxyStatsCsv.ParseStats(
+                    await statsClient.GetCsvAsync(ct));
+                instance.EffectiveApiVersion = "stats";
+                result = new HaproxyConnectionTest(
+                    "stats", null, rows.Count, DateTime.UtcNow);
+            }
+            else
+            {
+                await using var client = await clients.CreateAsync(
+                    instance, instance.Server, ct);
+                result = await client.TestAsync(ct);
+            }
+            instance.LastTestAt = result.At;
+            instance.LastTestStatus = "Ok";
+            instance.LastTestDetail = null;
             instance.DiscoveryStatus = "Ready";
             await db.SaveChangesAsync(ct);
             await audit.RecordAsync(AuditEntries.Change(
@@ -643,6 +682,7 @@ public static class HaproxyEndpoints
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
         HaproxyClientFactory clients,
+        HaproxyStatsClientFactory statsClients,
         IAuditService audit,
         CancellationToken ct)
     {
@@ -659,9 +699,19 @@ public static class HaproxyEndpoints
         var server = Guard.Text(input.Server, "Server", 200);
         try
         {
-            await using var client = await clients.CreateAsync(
-                instance, instance.Server, ct);
-            await client.SetServerStateAsync(backend, server, action, ct);
+            if (instance.ApiVersion == "stats")
+            {
+                await using var statsClient = await statsClients.CreateAsync(
+                    instance, instance.Server, ct);
+                await statsClient.SetServerStateAsync(
+                    backend, server, action, ct);
+            }
+            else
+            {
+                await using var client = await clients.CreateAsync(
+                    instance, instance.Server, ct);
+                await client.SetServerStateAsync(backend, server, action, ct);
+            }
             await audit.RecordAsync(AuditEntries.Change(
                 user, "haproxy.server-action", "HaproxyInstance", id,
                 detail: new { backend, server, action }), ct);
@@ -784,6 +834,9 @@ public static class HaproxyEndpoints
             ?? throw Guard.NotFound("Istanza HAProxy", id);
         await access.RequireAdminAsync(
             user, [instance.Server!.ProviderEnvironmentId], ct);
+        if (instance.ApiVersion == "stats")
+            throw Guard.Unprocessable(
+                "La gestione dei certificati richiede la Data Plane API.");
         if (string.IsNullOrEmpty(instance.Username) ||
             string.IsNullOrEmpty(instance.EncryptedPassword))
             throw Guard.Unprocessable("Credenziali Data Plane API non configurate.");
