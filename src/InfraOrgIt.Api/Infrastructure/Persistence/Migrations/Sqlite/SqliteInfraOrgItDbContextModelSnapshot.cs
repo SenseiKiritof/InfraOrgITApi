@@ -1564,6 +1564,278 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
                         });
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyMetricSample", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Bin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Bout")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("Bucket")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CheckHealth")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CheckStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Chkdown")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Chkfail")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CliAbrt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnRateMax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnTot")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("Ctime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Dcon")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Downtime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Dreq")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Dresp")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Dses")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Econ")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Eresp")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H1xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H2xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H3xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H4xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H5xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("HOther")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Lastsess")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Lbtot")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Proxy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Qcur")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Qmax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Qtime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Rate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("RateMax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Req")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ReqRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ReqRateMax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ResolutionMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Rtime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Scur")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Server")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Slim")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Smax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SrvAbrt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Ttime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Weight")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Wredis")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Wretr")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "Bucket");
+
+                    b.HasIndex("HaproxyInstanceId", "ResolutionMinutes", "Bucket", "Kind", "Proxy", "Server")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyMetricSamples");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyProcessMetricSample", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ActivePeers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("Bucket")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BytesOutRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnectedPeers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("CumConns")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CumSslConns")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CurrConns")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CurrSslConns")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("DroppedLogs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("FailedResolutions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("IdlePct")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("MaxConn")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("MaxMemoryMb")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ResolutionMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("RunQueue")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SessRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Tasks")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Threads")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("Uptime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "ResolutionMinutes", "Bucket")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyProcessMetricSamples");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyRouteSnapshot", b =>
                 {
                     b.Property<int>("Id")
@@ -3509,6 +3781,28 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
                     b.Navigation("Server");
 
                     b.Navigation("ServerApplication");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyMetricSample", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany()
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyProcessMetricSample", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany()
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyRouteSnapshot", b =>

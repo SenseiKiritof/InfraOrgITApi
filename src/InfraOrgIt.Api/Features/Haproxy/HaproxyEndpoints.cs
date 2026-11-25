@@ -31,6 +31,8 @@ public static class HaproxyEndpoints
             .RequireRateLimiting("remote-run");
         group.MapGet("/instances/{id:int}/routes", ListRoutesAsync);
         group.MapGet("/instances/{id:int}/servers", ListServersAsync);
+        group.MapGet("/instances/{id:int}/live", LiveAsync);
+        group.MapGet("/instances/{id:int}/metrics", MetricsAsync);
         group.MapPost("/discovery/run", RunDiscoveryAsync)
             .RequireRateLimiting("remote-run");
     }
@@ -101,6 +103,7 @@ public static class HaproxyEndpoints
         EnvironmentAccessService access,
         InfraOrgItDbContext db,
         IAuditService audit,
+        HaproxyClientCache clientCache,
         CancellationToken ct)
     {
         var instance = await db.HaproxyInstances
@@ -177,6 +180,7 @@ public static class HaproxyEndpoints
         if (instance.EncryptedPassword is null)
             instance.DiscoveryStatus = "CredentialsRequired";
         await db.SaveChangesAsync(ct);
+        await clientCache.InvalidateAsync(instance.Id);
         await audit.RecordAsync(AuditEntries.Change(
             user, "haproxy.instance", "HaproxyInstance", instance.Id,
             detail: new { instance.Name, instance.Transport, instance.ApiPort }), ct);
@@ -190,6 +194,7 @@ public static class HaproxyEndpoints
         InfraOrgItDbContext db,
         CredentialCipher cipher,
         IAuditService audit,
+        HaproxyClientCache clientCache,
         CancellationToken ct)
     {
         EnvironmentAccessService.RequireSystemAdmin(user);
@@ -225,6 +230,7 @@ public static class HaproxyEndpoints
             ? "CredentialsRequired"
             : instance.MonitoringChoice == "Enabled" ? "Found" : instance.DiscoveryStatus;
         await db.SaveChangesAsync(ct);
+        await clientCache.InvalidateAsync(instance.Id);
         await audit.RecordAsync(AuditEntries.Change(
             user, "haproxy.secrets", "HaproxyInstance", instance.Id,
             detail: new
@@ -243,6 +249,7 @@ public static class HaproxyEndpoints
         InfraOrgItDbContext db,
         IAuditService audit,
         HaproxyRefreshRunner refresher,
+        HaproxyClientCache clientCache,
         CancellationToken ct)
     {
         var instance = await db.HaproxyInstances
@@ -273,6 +280,7 @@ public static class HaproxyEndpoints
         }
 
         await db.SaveChangesAsync(ct);
+        await clientCache.InvalidateAsync(instance.Id);
         await audit.RecordAsync(AuditEntries.Change(
             user, "haproxy.monitoring", "HaproxyInstance", instance.Id,
             detail: new { choice }), ct);
@@ -404,6 +412,79 @@ public static class HaproxyEndpoints
         return Results.Ok(items);
     }
 
+    private static async Task<IResult> LiveAsync(
+        int id,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        HaproxyMetricsCache cache,
+        CancellationToken ct)
+    {
+        var instance = await db.HaproxyInstances.AsNoTracking()
+            .Include(x => x.Server)
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Istanza HAProxy", id);
+        await access.RequireOperatorAsync(
+            user, [instance.Server!.ProviderEnvironmentId], ct);
+        return Results.Ok(cache.Get(id));
+    }
+
+    private static async Task<IResult> MetricsAsync(
+        int id,
+        HttpContext http,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        CancellationToken ct)
+    {
+        var instance = await db.HaproxyInstances.AsNoTracking()
+            .Include(x => x.Server)
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Istanza HAProxy", id);
+        await access.RequireOperatorAsync(
+            user, [instance.Server!.ProviderEnvironmentId], ct);
+
+        var minutes = Math.Clamp(
+            PageRequest.IntQuery(http, "minutes") ?? 60, 5, 129_600);
+        var kind = (http.Request.Query["kind"].ToString() is { Length: > 0 } value
+            ? value
+            : "frontend").ToLowerInvariant();
+        if (kind is not ("frontend" or "backend" or "server"))
+            throw Guard.Unprocessable("Kind ammesso: frontend, backend, server.");
+        var proxy = http.Request.Query["proxy"].ToString();
+        var server = http.Request.Query["server"].ToString();
+        var resolution = minutes > 10_080 ? 5 : 1;
+        var since = DateTime.UtcNow.AddMinutes(-minutes);
+        var rows = await db.HaproxyMetricSamples.AsNoTracking()
+            .Where(x => x.HaproxyInstanceId == id &&
+                        x.ResolutionMinutes == resolution &&
+                        x.Kind == kind &&
+                        x.Bucket >= since &&
+                        (proxy == "" || x.Proxy == proxy) &&
+                        (server == "" || x.Server == server))
+            .OrderBy(x => x.Bucket)
+            .ThenBy(x => x.Proxy)
+            .ThenBy(x => x.Server)
+            .ToListAsync(ct);
+
+        var previous = new Dictionary<string, HaproxyMetricSample>();
+        var points = new Dictionary<DateTime, MetricAccumulator>();
+        foreach (var row in rows)
+        {
+            var key = $"{row.Kind}|{row.Proxy}|{row.Server}";
+            previous.TryGetValue(key, out var before);
+            previous[key] = row;
+            var point = points.TryGetValue(row.Bucket, out var current)
+                ? current
+                : points[row.Bucket] = new MetricAccumulator();
+            point.Add(row, before);
+        }
+
+        return Results.Ok(points.OrderBy(x => x.Key)
+            .Select(x => x.Value.ToDto(x.Key))
+            .ToList());
+    }
+
     private static async Task<IResult> RunDiscoveryAsync(
         int? serverId,
         ClaimsPrincipal user,
@@ -507,3 +588,68 @@ public sealed record HaproxyServerDto(
     string? CheckStatus,
     int? Weight,
     DateTime CollectedAt);
+
+public sealed record HaproxyMetricPointDto(
+    DateTime Timestamp,
+    long Req,
+    long H4xx,
+    long H5xx,
+    long Bin,
+    long Bout,
+    long Scur,
+    long Qcur,
+    long Rtime,
+    long Ctime,
+    long Ttime,
+    long Qtime);
+
+internal sealed class MetricAccumulator
+{
+    private long req;
+    private long h4xx;
+    private long h5xx;
+    private long bin;
+    private long bout;
+    private long scur;
+    private long qcur;
+    private long rtime;
+    private long ctime;
+    private long ttime;
+    private long qtime;
+    private int samples;
+
+    public void Add(HaproxyMetricSample row, HaproxyMetricSample? previous)
+    {
+        req += Delta(row.Req, previous?.Req);
+        h4xx += Delta(row.H4xx, previous?.H4xx);
+        h5xx += Delta(row.H5xx, previous?.H5xx);
+        bin += Delta(row.Bin, previous?.Bin);
+        bout += Delta(row.Bout, previous?.Bout);
+        scur += row.Scur;
+        qcur += row.Qcur;
+        rtime += row.Rtime;
+        ctime += row.Ctime;
+        ttime += row.Ttime;
+        qtime += row.Qtime;
+        samples++;
+    }
+
+    public HaproxyMetricPointDto ToDto(DateTime timestamp) =>
+        new(timestamp,
+            req,
+            h4xx,
+            h5xx,
+            bin,
+            bout,
+            scur,
+            qcur,
+            samples == 0 ? 0 : rtime / samples,
+            samples == 0 ? 0 : ctime / samples,
+            samples == 0 ? 0 : ttime / samples,
+            samples == 0 ? 0 : qtime / samples);
+
+    private static long Delta(long current, long? previous) =>
+        previous is null ? 0 : current >= previous.Value
+            ? current - previous.Value
+            : current;
+}

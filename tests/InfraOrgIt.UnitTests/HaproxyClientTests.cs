@@ -53,6 +53,45 @@ public sealed class HaproxyClientTests
         Assert.Equal(1, result.ConfigurationVersion);
     }
 
+    [Fact]
+    public async Task Reads_stats_and_process_metrics()
+    {
+        var handler = new FakeHandler(new Dictionary<string, string>
+        {
+            ["/v3/info"] = """{"api":{"version":"v3.0"}}""",
+            ["/v3/services/haproxy/stats/native"] = """
+                {"stats":[
+                  {"type":"frontend","name":"fe_https","stats":{"req_tot":10,"hrsp_5xx":2,"scur":1,"qcur":2,"rtime":12}},
+                  {"type":"server","backend_name":"be_shop","name":"web01","stats":{"req_tot":8,"status":"UP","check_status":"200","addr":"10.0.0.1:8080","bin":100,"bout":200}}
+                ]}
+                """,
+            ["/v3/services/haproxy/runtime/info"] = """
+                {"info":{"version":"2.8.30","uptime":100,"curr_conns":2,"cum_conns":20,"tasks":5,"nbthread":4}}
+                """
+        });
+        var http = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://haproxy.local/")
+        };
+        var instance = new HaproxyInstance { ApiVersion = "v3" };
+        await using var client = new HaproxyClient(http, instance);
+
+        var stats = await client.StatsAsync(CancellationToken.None);
+        var process = await client.ProcessAsync(CancellationToken.None);
+
+        Assert.Equal(2, stats.Count);
+        var frontend = Assert.Single(stats, x => x.Kind == "frontend");
+        Assert.Equal(10, frontend.ReqTot);
+        Assert.Equal(2, frontend.H5xx);
+        var server = Assert.Single(stats, x => x.Kind == "server");
+        Assert.Equal("be_shop", server.Proxy);
+        Assert.Equal("web01", server.Server);
+        Assert.Equal(100, server.Bin);
+        Assert.Equal("2.8.30", process.Version);
+        Assert.Equal(20, process.CumConns);
+        Assert.Equal(4, process.Threads);
+    }
+
     private sealed class FakeHandler(Dictionary<string, string> responses)
         : HttpMessageHandler
     {

@@ -39,6 +39,78 @@ public sealed record HaproxyRefreshResult(
     IReadOnlyList<HaproxyServerResult> Servers,
     int? ConfigurationVersion);
 
+public sealed record HaproxyStatsRow(
+    string Kind,
+    string Proxy,
+    string Server,
+    string Status,
+    string CheckStatus,
+    string Address,
+    long Stot,
+    long ReqTot,
+    long H1xx,
+    long H2xx,
+    long H3xx,
+    long H4xx,
+    long H5xx,
+    long HOther,
+    long Bin,
+    long Bout,
+    long Econ,
+    long Eresp,
+    long Dreq,
+    long Dresp,
+    long CliAbrt,
+    long SrvAbrt,
+    long ConnTot,
+    long Dcon,
+    long Dses,
+    long Lbtot,
+    long Wretr,
+    long Wredis,
+    long Scur,
+    long Smax,
+    long Slim,
+    long Qcur,
+    long Qmax,
+    long Rate,
+    long RateMax,
+    long ReqRate,
+    long ReqRateMax,
+    long ConnRate,
+    long ConnRateMax,
+    long Rtime,
+    long Ctime,
+    long Ttime,
+    long Qtime,
+    long Downtime,
+    long Lastsess,
+    long Weight,
+    long CheckHealth,
+    long Chkfail,
+    long Chkdown);
+
+public sealed record HaproxyProcessInfo(
+    string Version,
+    long Uptime,
+    long CurrConns,
+    long CumConns,
+    long CurrSslConns,
+    long CumSslConns,
+    long MaxConn,
+    long SessRate,
+    long ConnRate,
+    long Tasks,
+    long RunQueue,
+    long IdlePct,
+    long MaxMemoryMb,
+    long Threads,
+    long ActivePeers,
+    long ConnectedPeers,
+    long FailedResolutions,
+    long DroppedLogs,
+    long BytesOutRate);
+
 /// <summary>
 /// Per-instance HTTP client for the Data Plane API. Direct uses normal HTTPS;
 /// SshForward tunnels the HTTP connection through the server SSH session.
@@ -82,6 +154,122 @@ public sealed class HaproxyClient : IAsyncDisposable
         var routes = await RoutesAsync(version, configVersion, ct);
         var servers = await ServersAsync(version, ct);
         return new HaproxyRefreshResult(routes, servers, configVersion);
+    }
+
+    public async Task<IReadOnlyList<HaproxyStatsRow>> StatsAsync(
+        CancellationToken ct)
+    {
+        var version = await DetectVersionAsync(ct);
+        instance.EffectiveApiVersion = version;
+        var stats = await GetArrayAsync(version,
+            "services/haproxy/stats/native", ct);
+        var rows = new List<HaproxyStatsRow>();
+        foreach (var row in stats)
+        {
+            var kind = Text(row, "type").ToLowerInvariant();
+            if (kind is not ("frontend" or "backend" or "server")) continue;
+            if (!row.TryGetProperty("stats", out var values)) continue;
+            var proxy = kind == "server"
+                ? Text(row, "backend_name")
+                : Text(row, "name");
+            var server = kind == "server" ? Text(row, "name") : "";
+            if (proxy.Length == 0 && server.Length == 0) continue;
+            long L(string name) =>
+                values.TryGetProperty(name, out var value) &&
+                value.TryGetInt64(out var number)
+                    ? number
+                    : 0;
+            rows.Add(new HaproxyStatsRow(
+                kind,
+                Trim(proxy, 100),
+                Trim(server, 200),
+                Trim(Text(values, "status"), 50),
+                Trim(Text(values, "check_status"), 50),
+                Trim(Text(values, "addr"), 300),
+                L("stot"),
+                L("req_tot"),
+                L("hrsp_1xx"),
+                L("hrsp_2xx"),
+                L("hrsp_3xx"),
+                L("hrsp_4xx"),
+                L("hrsp_5xx"),
+                L("hrsp_other"),
+                L("bin"),
+                L("bout"),
+                L("econ"),
+                L("eresp"),
+                L("dreq"),
+                L("dresp"),
+                L("cli_abrt"),
+                L("srv_abrt"),
+                L("conn_tot"),
+                L("dcon"),
+                L("dses"),
+                L("lbtot"),
+                L("wretr"),
+                L("wredis"),
+                L("scur"),
+                L("smax"),
+                L("slim"),
+                L("qcur"),
+                L("qmax"),
+                L("rate"),
+                L("rate_max"),
+                L("req_rate"),
+                L("req_rate_max"),
+                L("conn_rate"),
+                L("conn_rate_max"),
+                L("rtime"),
+                L("ctime"),
+                L("ttime"),
+                L("qtime"),
+                L("downtime"),
+                L("lastsess"),
+                L("weight"),
+                L("check_health"),
+                L("chkfail"),
+                L("chkdown")));
+        }
+        return rows;
+    }
+
+    public async Task<HaproxyProcessInfo> ProcessAsync(CancellationToken ct)
+    {
+        var version = await DetectVersionAsync(ct);
+        var root = await GetJsonAsync(version,
+            "services/haproxy/runtime/info", ct);
+        if (root is null) throw new InvalidOperationException(
+            "runtime/info non disponibile.");
+        var info = root.Value;
+        if (info.ValueKind == JsonValueKind.Array && info.GetArrayLength() > 0)
+            info = info[0];
+        if (!info.TryGetProperty("info", out var details))
+            throw new InvalidOperationException("runtime/info senza info.");
+        long L(string name) =>
+            details.TryGetProperty(name, out var value) &&
+            value.TryGetInt64(out var number)
+                ? number
+                : 0;
+        return new HaproxyProcessInfo(
+            Text(details, "version"),
+            L("uptime"),
+            L("curr_conns"),
+            L("cum_conns"),
+            L("curr_ssl_conns"),
+            L("cum_ssl_conns"),
+            L("max_conn"),
+            L("sess_rate"),
+            L("conn_rate"),
+            L("tasks"),
+            L("run_queue"),
+            L("idle_pct"),
+            L("mem_max_mb"),
+            L("nbthread"),
+            L("active_peers"),
+            L("connected_peers"),
+            L("failed_resolutions"),
+            L("dropped_logs"),
+            L("bytes_out_rate"));
     }
 
     private async Task<string> DetectVersionAsync(CancellationToken ct)

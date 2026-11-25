@@ -273,6 +273,10 @@ builder.Services.AddHostedService<ServerOsUpdateService>();
 builder.Services.AddSingleton<HaproxyDiscoveryRunner>();
 builder.Services.AddHostedService<HaproxyDiscoveryService>();
 builder.Services.AddScoped<HaproxyClientFactory>();
+builder.Services.AddSingleton<HaproxyClientCache>();
+builder.Services.AddSingleton<HaproxyMetricsCache>();
+builder.Services.AddSingleton<HaproxyMetricsRunner>();
+builder.Services.AddHostedService<HaproxyMetricsService>();
 builder.Services.AddSingleton<HaproxyRefreshRunner>();
 builder.Services.AddHostedService<HaproxyRefreshService>();
 builder.Services.AddHttpClient("application-api-insecure")

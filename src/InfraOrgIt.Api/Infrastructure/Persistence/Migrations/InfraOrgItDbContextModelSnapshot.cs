@@ -1566,6 +1566,278 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyMetricSample", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<long>("Bin")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Bout")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("Bucket")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("CheckHealth")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CheckStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<long>("Chkdown")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Chkfail")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CliAbrt")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ConnRate")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ConnRateMax")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ConnTot")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("Ctime")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Dcon")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Downtime")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Dreq")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Dresp")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Dses")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Econ")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Eresp")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("H1xx")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("H2xx")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("H3xx")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("H4xx")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("H5xx")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("HOther")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<long>("Lastsess")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Lbtot")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Proxy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<long>("Qcur")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Qmax")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Qtime")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Rate")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("RateMax")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Req")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ReqRate")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ReqRateMax")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("ResolutionMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<long>("Rtime")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Scur")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Server")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<long>("Slim")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Smax")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("SrvAbrt")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<long>("Ttime")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.Property<long>("Weight")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Wredis")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Wretr")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "Bucket");
+
+                    b.HasIndex("HaproxyInstanceId", "ResolutionMinutes", "Bucket", "Kind", "Proxy", "Server")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyMetricSamples");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyProcessMetricSample", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<long>("ActivePeers")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("Bucket")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("BytesOutRate")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ConnRate")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ConnectedPeers")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("CumConns")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CumSslConns")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CurrConns")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CurrSslConns")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("DroppedLogs")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("FailedResolutions")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("IdlePct")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("MaxConn")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("MaxMemoryMb")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("ResolutionMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<long>("RunQueue")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("SessRate")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Tasks")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Threads")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("Uptime")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "ResolutionMinutes", "Bucket")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyProcessMetricSamples");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyRouteSnapshot", b =>
                 {
                     b.Property<int>("Id")
@@ -3511,6 +3783,28 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("Server");
 
                     b.Navigation("ServerApplication");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyMetricSample", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany()
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyProcessMetricSample", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany()
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyRouteSnapshot", b =>
