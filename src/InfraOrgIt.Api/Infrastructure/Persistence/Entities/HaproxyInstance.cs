@@ -9,6 +9,7 @@ public sealed class HaproxyInstance : EntityBase
 {
     public int ServerId { get; set; }
     public int? ServerApplicationId { get; set; }
+    public int? ClusterId { get; set; }
     public string Name { get; set; } = "";
     public string BaseUrl { get; set; } = "";
     /// <summary>Direct, SshForward or DesktopRelay.</summary>
@@ -47,6 +48,7 @@ public sealed class HaproxyInstance : EntityBase
 
     public Server? Server { get; set; }
     public ServerApplication? ServerApplication { get; set; }
+    public HaproxyCluster? Cluster { get; set; }
     public List<HaproxyRouteSnapshot> Routes { get; set; } = [];
     public List<HaproxyServerSnapshot> Servers { get; set; } = [];
     public List<HaproxyCertificateSnapshot> Certificates { get; set; } = [];

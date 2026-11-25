@@ -21,6 +21,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<Server> Servers => Set<Server>();
     public DbSet<ServerApplication> ServerApplications => Set<ServerApplication>();
     public DbSet<HaproxyInstance> HaproxyInstances => Set<HaproxyInstance>();
+    public DbSet<HaproxyCluster> HaproxyClusters => Set<HaproxyCluster>();
     public DbSet<HaproxyRouteSnapshot> HaproxyRouteSnapshots => Set<HaproxyRouteSnapshot>();
     public DbSet<HaproxyServerSnapshot> HaproxyServerSnapshots => Set<HaproxyServerSnapshot>();
     public DbSet<HaproxyCertificateSnapshot> HaproxyCertificateSnapshots => Set<HaproxyCertificateSnapshot>();
@@ -230,6 +231,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
             e.Property(x => x.LastTestDetail).HasMaxLength(500);
             e.HasIndex(x => x.ServerId).IsUnique();
             e.HasIndex(x => x.ServerApplicationId);
+            e.HasIndex(x => x.ClusterId);
             e.ToTable(t =>
             {
                 t.HasCheckConstraint("CK_HaproxyInstances_Transport",
@@ -247,6 +249,22 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
                 .HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.ServerApplication).WithMany()
                 .HasForeignKey(x => x.ServerApplicationId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Cluster).WithMany(x => x.Instances)
+                .HasForeignKey(x => x.ClusterId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<HaproxyCluster>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(64);
+            e.Property(x => x.Mode).HasMaxLength(20);
+            e.Property(x => x.Vip).HasMaxLength(200);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            e.HasIndex(x => new { x.ProviderEnvironmentId, x.Name }).IsUnique();
+            e.ToTable(t => t.HasCheckConstraint("CK_HaproxyClusters_Mode",
+                "`Mode` IN ('active-active','active-passive')"));
+            e.HasOne(x => x.ProviderEnvironment).WithMany()
+                .HasForeignKey(x => x.ProviderEnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<HaproxyRouteSnapshot>(e =>

@@ -20,6 +20,13 @@ public static class HaproxyEndpoints
         var group = app.MapGroup("/api/haproxy").RequireAuthorization();
 
         group.MapGet("/instances", ListAsync);
+        group.MapGet("/clusters", ListClustersAsync);
+        group.MapPost("/clusters", CreateClusterAsync)
+            .RequireRateLimiting("remote-run");
+        group.MapPut("/clusters/{id:int}", UpdateClusterAsync)
+            .RequireRateLimiting("remote-run");
+        group.MapDelete("/clusters/{id:int}", DeleteClusterAsync)
+            .RequireRateLimiting("remote-run");
         group.MapPut("/instances/{id:int}", UpdateAsync)
             .RequireRateLimiting("remote-run");
         group.MapPut("/instances/{id:int}/secrets", UpdateSecretsAsync)
@@ -74,6 +81,8 @@ public static class HaproxyEndpoints
                 x.Server.ProviderEnvironment!.Provider!.Name + " / " +
                 x.Server.ProviderEnvironment.EnvironmentDefinition!.Name,
                 x.ServerApplicationId,
+                x.ClusterId,
+                x.Cluster != null ? x.Cluster.Name : null,
                 x.Name,
                 x.BaseUrl,
                 x.Transport,
@@ -103,6 +112,115 @@ public static class HaproxyEndpoints
             .ToListAsync(ct);
 
         return Results.Ok(items);
+    }
+
+    private static async Task<IResult> ListClustersAsync(
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        CancellationToken ct)
+    {
+        var info = await access.GetAsync(user, ct);
+        if (info.AdminEnvironmentIds.Count == 0)
+            return Results.Ok(Array.Empty<HaproxyClusterDto>());
+        var ids = info.AdminEnvironmentIds.ToList();
+        var items = await db.HaproxyClusters.AsNoTracking()
+            .Where(x => ids.Contains(x.ProviderEnvironmentId))
+            .OrderBy(x => x.Name)
+            .Select(x => new HaproxyClusterDto(
+                x.Id, x.ProviderEnvironmentId, x.Name, x.Mode, x.Vip,
+                x.Notes, x.Instances.Count))
+            .ToListAsync(ct);
+        return Results.Ok(items);
+    }
+
+    private static async Task<IResult> CreateClusterAsync(
+        HaproxyClusterInput input,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        IAuditService audit,
+        CancellationToken ct)
+    {
+        var environmentId = input.ProviderEnvironmentId
+                            ?? throw Guard.Unprocessable(
+                                "ProviderEnvironmentId è obbligatorio.");
+        await access.RequireAdminAsync(user, [environmentId], ct);
+        var entity = new HaproxyCluster
+        {
+            ProviderEnvironmentId = environmentId,
+            Name = Guard.Text(input.Name, "Name", 64),
+            Mode = ClusterMode(input.Mode),
+            Vip = Guard.OptionalText(input.Vip, "Vip", 200),
+            Notes = Guard.OptionalText(input.Notes, "Notes", 500)
+        };
+        db.HaproxyClusters.Add(entity);
+        await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "haproxy.cluster", "HaproxyCluster", entity.Id,
+            detail: new { entity.Name, entity.Mode }), ct);
+        return Results.Ok(new HaproxyClusterDto(
+            entity.Id, entity.ProviderEnvironmentId, entity.Name,
+            entity.Mode, entity.Vip, entity.Notes, 0));
+    }
+
+    private static async Task<IResult> UpdateClusterAsync(
+        int id,
+        HaproxyClusterInput input,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        IAuditService audit,
+        CancellationToken ct)
+    {
+        var entity = await db.HaproxyClusters
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Cluster HAProxy", id);
+        await access.RequireAdminAsync(
+            user, [entity.ProviderEnvironmentId], ct);
+        if (input.ProviderEnvironmentId is not null &&
+            input.ProviderEnvironmentId != entity.ProviderEnvironmentId)
+            throw Guard.Unprocessable(
+                "Il cluster non può cambiare ambiente.");
+        entity.Name = Guard.Text(input.Name, "Name", 64);
+        entity.Mode = ClusterMode(input.Mode);
+        entity.Vip = Guard.OptionalText(input.Vip, "Vip", 200);
+        entity.Notes = Guard.OptionalText(input.Notes, "Notes", 500);
+        await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "haproxy.cluster", "HaproxyCluster", entity.Id,
+            detail: new { entity.Name, entity.Mode }), ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> DeleteClusterAsync(
+        int id,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        IAuditService audit,
+        CancellationToken ct)
+    {
+        var entity = await db.HaproxyClusters
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Cluster HAProxy", id);
+        await access.RequireAdminAsync(
+            user, [entity.ProviderEnvironmentId], ct);
+        db.HaproxyClusters.Remove(entity);
+        await db.SaveChangesAsync(ct);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "haproxy.cluster.delete", "HaproxyCluster", id,
+            detail: new { entity.Name }), ct);
+        return Results.NoContent();
+    }
+
+    private static string ClusterMode(string? value)
+    {
+        var mode = value?.Trim().ToLowerInvariant() ?? "active-active";
+        return mode is "active-active" or "active-passive"
+            ? mode
+            : throw Guard.Unprocessable(
+                "Mode ammesso: active-active, active-passive.");
     }
 
     private static async Task<IResult> UpdateAsync(
@@ -173,6 +291,15 @@ public static class HaproxyEndpoints
                 throw Guard.Unprocessable(
                     "Il deployment HAProxy non appartiene a questo server.");
         }
+        if (input.ClusterId is not null)
+        {
+            var cluster = await db.HaproxyClusters.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == input.ClusterId.Value, ct)
+                ?? throw Guard.NotFound("Cluster HAProxy", input.ClusterId.Value);
+            if (cluster.ProviderEnvironmentId != instance.Server.ProviderEnvironmentId)
+                throw Guard.Unprocessable(
+                    "Il cluster appartiene a un altro ambiente.");
+        }
 
         instance.Name = name;
         instance.BaseUrl = baseUrl;
@@ -186,6 +313,7 @@ public static class HaproxyEndpoints
         instance.CaPem = caPem;
         instance.AllowSelfSigned = input.AllowSelfSigned ?? false;
         instance.ServerApplicationId = input.ServerApplicationId;
+        instance.ClusterId = input.ClusterId;
         if (instance.EncryptedPassword is null)
             instance.DiscoveryStatus = "CredentialsRequired";
         await db.SaveChangesAsync(ct);
@@ -706,7 +834,15 @@ public sealed record HaproxySettingsInput(
     string? StatsUsername,
     string? CaPem,
     bool? AllowSelfSigned,
-    int? ServerApplicationId);
+    int? ServerApplicationId,
+    int? ClusterId = null);
+
+public sealed record HaproxyClusterInput(
+    int? ProviderEnvironmentId,
+    string? Name,
+    string? Mode,
+    string? Vip,
+    string? Notes);
 
 public sealed record HaproxySecretsInput(
     string? Password,
@@ -721,6 +857,8 @@ public sealed record HaproxyInstanceDto(
     int ProviderEnvironmentId,
     string EnvironmentLabel,
     int? ServerApplicationId,
+    int? ClusterId,
+    string? ClusterName,
     string Name,
     string BaseUrl,
     string Transport,
@@ -794,6 +932,15 @@ public sealed record HaproxyCertificateDto(
     DateTime? NotAfter,
     long Size,
     DateTime CollectedAt);
+
+public sealed record HaproxyClusterDto(
+    int Id,
+    int ProviderEnvironmentId,
+    string Name,
+    string Mode,
+    string? Vip,
+    string? Notes,
+    int InstanceCount);
 
 internal sealed class MetricAccumulator
 {

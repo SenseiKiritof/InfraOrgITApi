@@ -1407,6 +1407,54 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("HaproxyCertificateSnapshots");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCluster", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<int>("ProviderEnvironmentId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.Property<string>("Vip")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderEnvironmentId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyClusters", t =>
+                        {
+                            t.HasCheckConstraint("CK_HaproxyClusters_Mode", "`Mode` IN ('active-active','active-passive')");
+                        });
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", b =>
                 {
                     b.Property<int>("Id")
@@ -1436,6 +1484,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("CaPem")
                         .HasColumnType("longtext");
+
+                    b.Property<int?>("ClusterId")
+                        .HasColumnType("int");
 
                     b.Property<int?>("ConfigurationVersion")
                         .HasColumnType("int");
@@ -1546,6 +1597,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClusterId");
 
                     b.HasIndex("ServerApplicationId");
 
@@ -3767,8 +3820,24 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("HaproxyInstance");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCluster", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProviderEnvironment", "ProviderEnvironment")
+                        .WithMany()
+                        .HasForeignKey("ProviderEnvironmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProviderEnvironment");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", b =>
                 {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCluster", "Cluster")
+                        .WithMany("Instances")
+                        .HasForeignKey("ClusterId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerApplication", "ServerApplication")
                         .WithMany()
                         .HasForeignKey("ServerApplicationId")
@@ -3779,6 +3848,8 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ServerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Cluster");
 
                     b.Navigation("Server");
 
@@ -4189,6 +4260,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", b =>
                 {
                     b.Navigation("ProviderEnvironments");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCluster", b =>
+                {
+                    b.Navigation("Instances");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", b =>
