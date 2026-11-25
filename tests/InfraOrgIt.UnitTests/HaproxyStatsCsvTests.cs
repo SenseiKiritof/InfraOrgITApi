@@ -35,8 +35,8 @@ public sealed class HaproxyStatsCsvTests
     public void Parses_protocol_metrics_and_aggregates_errors()
     {
         const string csv = """
-            # pxname,svname,h2req,h2sess,h3req,h3sess,h2_open_connections,h2_backend_open_streams,h2_detected_conn_protocol_errors,h2_detected_strm_protocol_errors,quic_hdshk_fail,quic_dropped_pkt,quic_lost_pkt,quic_sent_pkt,quic_retry_error,quic_too_short_dgram,quic_rxbuf_full,quic_socket_full,h3_version_fallback,h3_request_cancelled,h3_general_protocol_error,quic_transp_err_connection_refused,quic_transp_err_crypto_error,qpack_encoder_stream_error,qpack_decoder_stream_error,ssl_failed_handshake
-            public,FRONTEND,10,2,20,3,4,5,1,2,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+            # pxname,svname,h2req,h2sess,h3req,h3sess,h2_open_connections,h2_backend_open_streams,h2_detected_conn_protocol_errors,h2_detected_strm_protocol_errors,quic_hdshk_fail,quic_dropped_pkt,quic_lost_pkt,quic_sent_pkt,quic_retry_error,quic_too_short_dgram,quic_rxbuf_full,quic_socket_full,h3_version_fallback,h3_request_cancelled,h3_general_protocol_error,h3_no_error,quic_transp_err_connection_refused,quic_transp_err_crypto_error,quic_transp_err_no_error,qpack_encoder_stream_error,qpack_decoder_stream_error,ssl_failed_handshake
+            public,FRONTEND,10,2,20,3,4,5,1,2,6,7,8,9,10,11,12,13,14,15,16,99,17,18,88,19,20,21
             """;
 
         var rows = HaproxyStatsCsv.ParseProtocol(csv);

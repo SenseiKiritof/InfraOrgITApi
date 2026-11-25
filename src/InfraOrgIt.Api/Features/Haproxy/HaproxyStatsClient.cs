@@ -249,8 +249,9 @@ public static class HaproxyStatsCsv
                 row.Number("h3_version_fallback"),
                 row.Sum("h3_", "h3req", "h3sess", "h3_data", "h3_headers",
                     "h3_settings", "h3_max_push_id", "h3_push_promise",
-                    "h3_goaway", "h3_cancel_push", "h3_version_fallback"),
-                row.Sum("quic_transp_err_"),
+                    "h3_goaway", "h3_cancel_push", "h3_version_fallback",
+                    "h3_no_error"),
+                row.Sum("quic_transp_err_", "quic_transp_err_no_error"),
                 row.Number("qpack_encoder_stream_error"),
                 row.Number("qpack_decoder_stream_error"),
                 row.Number("ssl_failed_handshake")))
