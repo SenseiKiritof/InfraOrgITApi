@@ -64,12 +64,12 @@ public static class HaproxyEndpoints
     {
         var serverId = PageRequest.IntQuery(http, "serverId");
         var accessInfo = await access.GetAsync(user, ct);
-        if (accessInfo.AdminEnvironmentIds.Count == 0)
+        if (accessInfo.OperatorEnvironmentIds.Count == 0)
             return Results.Ok(Array.Empty<HaproxyInstanceDto>());
 
-        var adminIds = accessInfo.AdminEnvironmentIds.ToList();
+        var operatorIds = accessInfo.OperatorEnvironmentIds.ToList();
         var query = db.HaproxyInstances.AsNoTracking()
-            .Where(x => adminIds.Contains(x.Server!.ProviderEnvironmentId));
+            .Where(x => operatorIds.Contains(x.Server!.ProviderEnvironmentId));
         if (serverId is not null)
             query = query.Where(x => x.ServerId == serverId.Value);
 
@@ -252,10 +252,7 @@ public static class HaproxyEndpoints
         var baseUrl = (input.BaseUrl ?? "").Trim().TrimEnd('/');
         if (baseUrl.Length > 300)
             throw Guard.Unprocessable("BaseUrl troppo lungo (max 300).");
-        if (!statsOnly &&
-            (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) ||
-             uri.Scheme is not ("http" or "https")))
-            throw Guard.Unprocessable("BaseUrl deve essere un URL http o https.");
+        var baseUri = statsOnly ? null : HaproxyUrlRules.Parse(baseUrl, "BaseUrl");
         var transport = input.Transport?.Trim() ?? "SshForward";
         if (transport is not ("Direct" or "SshForward" or "DesktopRelay"))
             throw Guard.Unprocessable("Transport non valido.");
@@ -263,6 +260,7 @@ public static class HaproxyEndpoints
         if (statsOnly && statsBaseUrl is null)
             throw Guard.Unprocessable(
                 "In modalità solo stats serve l'URL della pagina stats.");
+        var statsUri = statsBaseUrl is null ? null : new Uri(statsBaseUrl);
         var caPem = Guard.OptionalText(input.CaPem, "CaPem", 200_000);
         if (!string.IsNullOrWhiteSpace(caPem))
         {
@@ -292,6 +290,12 @@ public static class HaproxyEndpoints
             !(input.AllowSelfSigned ?? false))
             throw Guard.Unprocessable(
                 "Per https serve una CA oppure Accetta self-signed.");
+        if (transport == "Direct" &&
+            ((baseUri is not null &&
+              !HaproxyUrlRules.HostMatchesServer(baseUri, instance.Server!)) ||
+             (statsUri is not null &&
+              !HaproxyUrlRules.HostMatchesServer(statsUri, instance.Server!))))
+            EnvironmentAccessService.RequireSystemAdmin(user);
 
         var apiPort = input.ApiPort ?? instance.ApiPort;
         if (apiPort is < 1 or > 65535)
@@ -761,9 +765,17 @@ public static class HaproxyEndpoints
         var loaded = await LoadCertificateTargetAsync(
             id, user, access, db, ct);
         var (name, pem) = await ReadCertificateFormAsync(http, null, ct);
-        await using var client = await clients.CreateAsync(
-            loaded.Instance, loaded.Server, ct);
-        await client.UploadCertificateAsync(name, pem, false, ct);
+        try
+        {
+            await using var client = await clients.CreateAsync(
+                loaded.Instance, loaded.Server, ct);
+            await client.UploadCertificateAsync(name, pem, false, ct);
+        }
+        catch (Exception exception)
+        {
+            return Results.Json(
+                new { message = exception.Message }, statusCode: 502);
+        }
         await clientCache.InvalidateAsync(id);
         await audit.RecordAsync(AuditEntries.Change(
             user, "haproxy.certificate", "HaproxyInstance", id,
@@ -786,9 +798,17 @@ public static class HaproxyEndpoints
         var loaded = await LoadCertificateTargetAsync(
             id, user, access, db, ct);
         var (formName, pem) = await ReadCertificateFormAsync(http, name, ct);
-        await using var client = await clients.CreateAsync(
-            loaded.Instance, loaded.Server, ct);
-        await client.UploadCertificateAsync(formName, pem, true, ct);
+        try
+        {
+            await using var client = await clients.CreateAsync(
+                loaded.Instance, loaded.Server, ct);
+            await client.UploadCertificateAsync(formName, pem, true, ct);
+        }
+        catch (Exception exception)
+        {
+            return Results.Json(
+                new { message = exception.Message }, statusCode: 502);
+        }
         await clientCache.InvalidateAsync(id);
         await audit.RecordAsync(AuditEntries.Change(
             user, "haproxy.certificate", "HaproxyInstance", id,
@@ -810,9 +830,17 @@ public static class HaproxyEndpoints
         var loaded = await LoadCertificateTargetAsync(
             id, user, access, db, ct);
         var clean = SafeCertificateName(name);
-        await using var client = await clients.CreateAsync(
-            loaded.Instance, loaded.Server, ct);
-        await client.DeleteCertificateAsync(clean, ct);
+        try
+        {
+            await using var client = await clients.CreateAsync(
+                loaded.Instance, loaded.Server, ct);
+            await client.DeleteCertificateAsync(clean, ct);
+        }
+        catch (Exception exception)
+        {
+            return Results.Json(
+                new { message = exception.Message }, statusCode: 502);
+        }
         await clientCache.InvalidateAsync(id);
         await audit.RecordAsync(AuditEntries.Change(
             user, "haproxy.certificate", "HaproxyInstance", id,
@@ -1002,9 +1030,7 @@ public static class HaproxyEndpoints
     {
         var text = Guard.OptionalText(value, field, 300);
         if (text is null) return null;
-        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https"))
-            throw Guard.Unprocessable($"{field} deve essere un URL http o https.");
+        HaproxyUrlRules.Parse(text, field);
         return text.TrimEnd('/');
     }
 }

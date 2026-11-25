@@ -1058,7 +1058,9 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         var operatorList = await ReadAsync(await operatorUser.GetAsync(
             $"/api/haproxy/instances?serverId={seeded.ServerId}"));
-        Assert.Empty(operatorList.EnumerateArray());
+        var operatorListed = operatorList.EnumerateArray().Single();
+        Assert.Equal("Enabled",
+            operatorListed.GetProperty("monitoringChoice").GetString());
 
         var managerSecrets = await SendAsync(manager, HttpMethod.Put,
             $"/api/haproxy/instances/{instanceId}/secrets",

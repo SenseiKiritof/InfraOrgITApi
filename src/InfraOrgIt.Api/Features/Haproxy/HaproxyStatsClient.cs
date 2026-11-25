@@ -115,7 +115,8 @@ public sealed class HaproxyStatsClientFactory(
         var client = new HttpClient(handler)
         {
             BaseAddress = baseUri,
-            Timeout = TimeSpan.FromSeconds(10)
+            Timeout = TimeSpan.FromSeconds(10),
+            MaxResponseContentBufferSize = 16 * 1024 * 1024
         };
         var password = Decrypt(instance.EncryptedStatsPassword,
             instance.StatsPasswordKeyVersion);

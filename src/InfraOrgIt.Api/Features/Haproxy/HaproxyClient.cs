@@ -764,7 +764,8 @@ public sealed class HaproxyClientFactory(
         var client = new HttpClient(handler)
         {
             BaseAddress = new Uri(instance.BaseUrl.TrimEnd('/') + "/"),
-            Timeout = TimeSpan.FromSeconds(10)
+            Timeout = TimeSpan.FromSeconds(10),
+            MaxResponseContentBufferSize = 16 * 1024 * 1024
         };
         if (!string.IsNullOrEmpty(instance.Username) || password.Length > 0)
         {
