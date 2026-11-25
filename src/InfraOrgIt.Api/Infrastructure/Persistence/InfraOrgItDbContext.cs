@@ -20,6 +20,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<ProviderEnvironment> ProviderEnvironments => Set<ProviderEnvironment>();
     public DbSet<Server> Servers => Set<Server>();
     public DbSet<ServerApplication> ServerApplications => Set<ServerApplication>();
+    public DbSet<HaproxyInstance> HaproxyInstances => Set<HaproxyInstance>();
     public DbSet<Application> Applications => Set<Application>();
     public DbSet<ApplicationType> ApplicationTypes => Set<ApplicationType>();
     public DbSet<ApplicationVersion> ApplicationVersions => Set<ApplicationVersion>();
@@ -202,9 +203,46 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
                 .HasForeignKey(x => x.ProxyRouteId).OnDelete(DeleteBehavior.Restrict);
         });
 
-        modelBuilder.Entity<ApplicationType>(e =>
+        modelBuilder.Entity<HaproxyInstance>(e =>
         {
-            e.Property(x => x.Name).HasMaxLength(20);
+            e.Property(x => x.Name).HasMaxLength(64);
+            e.Property(x => x.BaseUrl).HasMaxLength(300);
+            e.Property(x => x.Transport).HasMaxLength(20);
+            e.Property(x => x.ApiHost).HasMaxLength(200);
+            e.Property(x => x.ApiVersion).HasMaxLength(10);
+            e.Property(x => x.Username).HasMaxLength(100);
+            e.Property(x => x.StatsUsername).HasMaxLength(100);
+            e.Property(x => x.MonitoringChoice).HasMaxLength(10);
+            e.Property(x => x.MonitoringChangedBy).HasMaxLength(100);
+            e.Property(x => x.DiscoverySource).HasMaxLength(10);
+            e.Property(x => x.DiscoveryStatus).HasMaxLength(20);
+            e.Property(x => x.DetectedVersion).HasMaxLength(200);
+            e.Property(x => x.DetectedConfigPath).HasMaxLength(300);
+            e.Property(x => x.LastTestStatus).HasMaxLength(20);
+            e.Property(x => x.LastTestDetail).HasMaxLength(500);
+            e.HasIndex(x => x.ServerId).IsUnique();
+            e.HasIndex(x => x.ServerApplicationId);
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_HaproxyInstances_Transport",
+                    "`Transport` IN ('Direct','SshForward','DesktopRelay')");
+                t.HasCheckConstraint("CK_HaproxyInstances_MonitoringChoice",
+                    "`MonitoringChoice` IN ('Undecided','Enabled','Disabled')");
+                t.HasCheckConstraint("CK_HaproxyInstances_DiscoverySource",
+                    "`DiscoverySource` IN ('Auto','Manual')");
+                t.HasCheckConstraint("CK_HaproxyInstances_DiscoveryStatus",
+                    "`DiscoveryStatus` IN ('Found','Inactive','CredentialsRequired','Unreachable','Ready')");
+                t.HasCheckConstraint("CK_HaproxyInstances_ApiVersion",
+                    "`ApiVersion` IN ('auto','v2','v3','stats')");
+            });
+            e.HasOne(x => x.Server).WithMany()
+                .HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.ServerApplication).WithMany()
+                .HasForeignKey(x => x.ServerApplicationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ApplicationType>(e =>
+        {            e.Property(x => x.Name).HasMaxLength(20);
             e.Property(x => x.Label).HasMaxLength(50);
             e.HasIndex(x => x.Name).IsUnique();
         });

@@ -991,6 +991,77 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Haproxy_monitoring_choice_is_scoped_to_server_admin()
+    {
+        using var system = await ClientForAsync("hap.system", systemAdmin: true);
+        using var manager = await ClientForAsync("hap.manager");
+        using var operatorUser = await ClientForAsync("hap.operator");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        await AssignEnvironmentRoleAsync(system, seeded.ProviderEnvironmentId,
+            "hap.manager", "ServerAdmin", manager);
+        await AssignEnvironmentRoleAsync(system, seeded.ProviderEnvironmentId,
+            "hap.operator", "ServerOperator", operatorUser);
+
+        int instanceId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var instance = new HaproxyInstance
+            {
+                ServerId = seeded.ServerId,
+                Name = "haproxy-" + suffix,
+                BaseUrl = "http://127.0.0.1:5555",
+                Transport = "SshForward",
+                ApiHost = "127.0.0.1",
+                ApiPort = 5555,
+                ApiVersion = "auto",
+                MonitoringChoice = "Undecided",
+                DiscoverySource = "Auto",
+                DiscoveryStatus = "Found"
+            };
+            db.HaproxyInstances.Add(instance);
+            await db.SaveChangesAsync();
+            instanceId = instance.Id;
+        }
+
+        var list = await ReadAsync(await manager.GetAsync(
+            $"/api/haproxy/instances?serverId={seeded.ServerId}"));
+        var listed = list.EnumerateArray().Single();
+        Assert.Equal("Undecided",
+            listed.GetProperty("monitoringChoice").GetString());
+
+        var denied = await SendAsync(system, HttpMethod.Put,
+            $"/api/haproxy/instances/{instanceId}/monitoring",
+            new { choice = "Enabled" });
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+        var operatorDenied = await SendAsync(operatorUser, HttpMethod.Put,
+            $"/api/haproxy/instances/{instanceId}/monitoring",
+            new { choice = "Enabled" });
+        Assert.Equal(HttpStatusCode.Forbidden, operatorDenied.StatusCode);
+
+        var update = await SendAsync(manager, HttpMethod.Put,
+            $"/api/haproxy/instances/{instanceId}/monitoring",
+            new { choice = "Enabled" });
+        Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var stored = await db.HaproxyInstances.SingleAsync(
+                x => x.Id == instanceId);
+            Assert.Equal("Enabled", stored.MonitoringChoice);
+            Assert.Equal("CredentialsRequired", stored.DiscoveryStatus);
+            Assert.Equal("hap.manager", stored.MonitoringChangedBy);
+        }
+
+        var operatorList = await ReadAsync(await operatorUser.GetAsync(
+            $"/api/haproxy/instances?serverId={seeded.ServerId}"));
+        Assert.Empty(operatorList.EnumerateArray());
+    }
+
+    [Fact]
     public async Task Server_os_update_check_runs_manually_in_background()
     {
         using var admin = await ClientForAsync("os.manual", systemAdmin: true);
