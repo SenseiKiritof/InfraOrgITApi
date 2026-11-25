@@ -41,6 +41,7 @@ public static class HaproxyEndpoints
         group.MapGet("/instances/{id:int}/servers", ListServersAsync);
         group.MapGet("/instances/{id:int}/live", LiveAsync);
         group.MapGet("/instances/{id:int}/metrics", MetricsAsync);
+        group.MapGet("/instances/{id:int}/protocol", ProtocolAsync);
         group.MapGet("/instances/{id:int}/certificates", ListCertificatesAsync);
         group.MapPost("/instances/{id:int}/certificates", UploadCertificateAsync)
             .RequireRateLimiting("remote-run");
@@ -106,6 +107,7 @@ public static class HaproxyEndpoints
                 x.Certificates.Count,
                 x.Username,
                 x.StatsUsername,
+                x.StatsBaseUrl,
                 x.CaPem,
                 x.Username != null && x.EncryptedPassword != null,
                 x.AllowSelfSigned))
@@ -310,6 +312,7 @@ public static class HaproxyEndpoints
         instance.Username = Guard.OptionalText(input.Username, "Username", 100);
         instance.StatsUsername = Guard.OptionalText(
             input.StatsUsername, "StatsUsername", 100);
+        instance.StatsBaseUrl = OptionalUrl(input.StatsBaseUrl, "StatsBaseUrl");
         instance.CaPem = caPem;
         instance.AllowSelfSigned = input.AllowSelfSigned ?? false;
         instance.ServerApplicationId = input.ServerApplicationId;
@@ -585,6 +588,52 @@ public static class HaproxyEndpoints
         return Results.Ok(items);
     }
 
+    private static async Task<IResult> ProtocolAsync(
+        int id,
+        HttpContext http,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        CancellationToken ct)
+    {
+        var instance = await db.HaproxyInstances.AsNoTracking()
+            .Include(x => x.Server)
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Istanza HAProxy", id);
+        await access.RequireOperatorAsync(
+            user, [instance.Server!.ProviderEnvironmentId], ct);
+        var kind = (http.Request.Query["kind"].ToString() is { Length: > 0 } value
+            ? value
+            : "frontend").ToLowerInvariant();
+        if (kind is not ("frontend" or "backend" or "server"))
+            throw Guard.Unprocessable("Kind ammesso: frontend, backend, server.");
+        var bucket = await db.HaproxyProtocolMetricSamples.AsNoTracking()
+            .Where(x => x.HaproxyInstanceId == id &&
+                        x.ResolutionMinutes == 1 &&
+                        x.Kind == kind)
+            .OrderByDescending(x => x.Bucket)
+            .Select(x => (DateTime?)x.Bucket)
+            .FirstOrDefaultAsync(ct);
+        if (bucket is null) return Results.Ok(Array.Empty<HaproxyProtocolDto>());
+        var items = await db.HaproxyProtocolMetricSamples.AsNoTracking()
+            .Where(x => x.HaproxyInstanceId == id &&
+                        x.ResolutionMinutes == 1 &&
+                        x.Kind == kind &&
+                        x.Bucket == bucket.Value)
+            .OrderBy(x => x.Proxy).ThenBy(x => x.Server)
+            .Select(x => new HaproxyProtocolDto(
+                x.Proxy, x.Server, x.H2Req, x.H2Sess, x.H3Req, x.H3Sess,
+                x.H2OpenConnections, x.H2BackendOpenStreams,
+                x.H2ConnErrors, x.H2StreamErrors, x.QuicHandshakeFail,
+                x.QuicDroppedPkt, x.QuicLostPkt, x.QuicSentPkt,
+                x.QuicRetryError, x.QuicTooShortDgram, x.QuicRxbufFull,
+                x.QuicSocketFull, x.H3VersionFallback, x.H3ProtocolErrors,
+                x.QuicTransportErrors, x.QpackEncoderErrors,
+                x.QpackDecoderErrors, x.SslFailedHandshake, x.Bucket))
+            .ToListAsync(ct);
+        return Results.Ok(items);
+    }
+
     private static async Task<IResult> ListCertificatesAsync(
         int id,
         ClaimsPrincipal user,
@@ -855,6 +904,16 @@ public static class HaproxyEndpoints
 
     private static string Trim(string value, int max) =>
         value.Length <= max ? value : value[..max];
+
+    private static string? OptionalUrl(string? value, string field)
+    {
+        var text = Guard.OptionalText(value, field, 300);
+        if (text is null) return null;
+        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https"))
+            throw Guard.Unprocessable($"{field} deve essere un URL http o https.");
+        return text.TrimEnd('/');
+    }
 }
 
 public sealed record MonitoringInput(string? Choice);
@@ -871,7 +930,8 @@ public sealed record HaproxySettingsInput(
     string? CaPem,
     bool? AllowSelfSigned,
     int? ServerApplicationId,
-    int? ClusterId = null);
+    int? ClusterId = null,
+    string? StatsBaseUrl = null);
 
 public sealed record HaproxyClusterInput(
     int? ProviderEnvironmentId,
@@ -918,6 +978,7 @@ public sealed record HaproxyInstanceDto(
     int CertificateCount,
     string? Username,
     string? StatsUsername,
+    string? StatsBaseUrl,
     string? CaPem,
     bool HasCredentials,
     bool AllowSelfSigned);
@@ -979,6 +1040,33 @@ public sealed record HaproxyClusterDto(
     string? Vip,
     string? Notes,
     int InstanceCount);
+
+public sealed record HaproxyProtocolDto(
+    string Proxy,
+    string Server,
+    long H2Req,
+    long H2Sess,
+    long H3Req,
+    long H3Sess,
+    long H2OpenConnections,
+    long H2BackendOpenStreams,
+    long H2ConnErrors,
+    long H2StreamErrors,
+    long QuicHandshakeFail,
+    long QuicDroppedPkt,
+    long QuicLostPkt,
+    long QuicSentPkt,
+    long QuicRetryError,
+    long QuicTooShortDgram,
+    long QuicRxbufFull,
+    long QuicSocketFull,
+    long H3VersionFallback,
+    long H3ProtocolErrors,
+    long QuicTransportErrors,
+    long QpackEncoderErrors,
+    long QpackDecoderErrors,
+    long SslFailedHandshake,
+    DateTime Bucket);
 
 internal sealed class MetricAccumulator
 {

@@ -27,6 +27,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<HaproxyCertificateSnapshot> HaproxyCertificateSnapshots => Set<HaproxyCertificateSnapshot>();
     public DbSet<HaproxyMetricSample> HaproxyMetricSamples => Set<HaproxyMetricSample>();
     public DbSet<HaproxyProcessMetricSample> HaproxyProcessMetricSamples => Set<HaproxyProcessMetricSample>();
+    public DbSet<HaproxyProtocolMetricSample> HaproxyProtocolMetricSamples => Set<HaproxyProtocolMetricSample>();
     public DbSet<Application> Applications => Set<Application>();
     public DbSet<ApplicationType> ApplicationTypes => Set<ApplicationType>();
     public DbSet<ApplicationVersion> ApplicationVersions => Set<ApplicationVersion>();
@@ -218,6 +219,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
             e.Property(x => x.ApiVersion).HasMaxLength(10);
             e.Property(x => x.Username).HasMaxLength(100);
             e.Property(x => x.StatsUsername).HasMaxLength(100);
+            e.Property(x => x.StatsBaseUrl).HasMaxLength(300);
             e.Property(x => x.MonitoringChoice).HasMaxLength(10);
             e.Property(x => x.MonitoringChangedBy).HasMaxLength(100);
             e.Property(x => x.DiscoverySource).HasMaxLength(10);
@@ -331,6 +333,24 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
                 x.HaproxyInstanceId,
                 x.ResolutionMinutes,
                 x.Bucket
+            }).IsUnique();
+            e.HasOne(x => x.HaproxyInstance).WithMany()
+                .HasForeignKey(x => x.HaproxyInstanceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<HaproxyProtocolMetricSample>(e =>
+        {
+            e.Property(x => x.Kind).HasMaxLength(10);
+            e.Property(x => x.Proxy).HasMaxLength(100);
+            e.Property(x => x.Server).HasMaxLength(200);
+            e.HasIndex(x => new
+            {
+                x.HaproxyInstanceId,
+                x.ResolutionMinutes,
+                x.Bucket,
+                x.Kind,
+                x.Proxy,
+                x.Server
             }).IsUnique();
             e.HasOne(x => x.HaproxyInstance).WithMany()
                 .HasForeignKey(x => x.HaproxyInstanceId).OnDelete(DeleteBehavior.Cascade);

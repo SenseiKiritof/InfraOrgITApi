@@ -24,6 +24,7 @@ public sealed class HaproxyInstance : EntityBase
     public string? StatsUsername { get; set; }
     public string? EncryptedStatsPassword { get; set; }
     public int? StatsPasswordKeyVersion { get; set; }
+    public string? StatsBaseUrl { get; set; }
     public string? CaPem { get; set; }
     public bool AllowSelfSigned { get; set; }
     /// <summary>Undecided, Enabled or Disabled.</summary>
