@@ -1414,6 +1414,36 @@
         ]
       }
     },
+    "/api/servers/{id}/os-update-check": {
+      "post": {
+        "tags": [
+          "ServersEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
     "/api/servers/{id}/applications": {
       "get": {
         "tags": [

@@ -267,6 +267,7 @@ builder.Services.AddHttpClient("endoflife", client =>
 });
 builder.Services.AddSingleton<IEndOfLifeCatalog, EndOfLifeCatalog>();
 builder.Services.AddScoped<ServerOsUpdateChecker>();
+builder.Services.AddSingleton<ServerOsUpdateRunner>();
 builder.Services.AddHostedService<ServerOsUpdateService>();
 builder.Services.AddHttpClient("application-api-insecure")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler

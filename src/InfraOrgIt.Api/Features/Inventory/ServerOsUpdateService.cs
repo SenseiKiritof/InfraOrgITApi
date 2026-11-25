@@ -1,6 +1,4 @@
 using InfraOrgIt.Api.Infrastructure.Persistence;
-using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
-using InfraOrgIt.Api.Infrastructure.Ssh;
 using Microsoft.EntityFrameworkCore;
 
 namespace InfraOrgIt.Api.Features.Inventory;
@@ -11,7 +9,7 @@ namespace InfraOrgIt.Api.Features.Inventory;
 /// </summary>
 public sealed class ServerOsUpdateService(
     IServiceScopeFactory scopes,
-    ILogger<ServerOsUpdateService> logger) : BackgroundService
+    ServerOsUpdateRunner runner) : BackgroundService
 {
     private const int Concurrency = 4;
 
@@ -50,7 +48,7 @@ public sealed class ServerOsUpdateService(
             await semaphore.WaitAsync(ct);
             try
             {
-                await CheckOneAsync(id, ltsOnly, ct);
+                await runner.CheckAsync(id, ltsOnly, ct);
             }
             finally
             {
@@ -58,30 +56,5 @@ public sealed class ServerOsUpdateService(
             }
         });
         await Task.WhenAll(tasks);
-    }
-
-    private async Task CheckOneAsync(int serverId, bool defaultLtsOnly, CancellationToken ct)
-    {
-        using var scope = scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
-        var server = await db.Servers.SingleOrDefaultAsync(x => x.Id == serverId, ct);
-        if (server is null) return;
-        var ssh = scope.ServiceProvider.GetRequiredService<ISshConnector>();
-        var checker = scope.ServiceProvider.GetRequiredService<ServerOsUpdateChecker>();
-        var result = await checker.CheckAsync(
-            server, server.OsUpdateLtsOnly ?? defaultLtsOnly, ct);
-        server.OsName = result.OsName ?? server.OsName;
-        server.OsVersion = result.OsVersion ?? server.OsVersion;
-        server.OsUpdateTarget = result.Target;
-        server.OsUpdateTargetLts = result.Target is null ? null : result.TargetLts;
-        server.OsEolDate = result.EolDate?.ToDateTime(TimeOnly.MinValue);
-        server.OsUpdateStatus = result.Status;
-        server.OsUpdateDetail = result.Detail;
-        server.OsUpdateCheckedAt = result.CheckedAt;
-        await db.SaveChangesAsync(ct);
-        if (result.Status is "Error" or "Unsupported")
-            logger.LogInformation(
-                "Controllo OS server {ServerId}: {Status} {Detail}",
-                serverId, result.Status, result.Detail);
     }
 }
