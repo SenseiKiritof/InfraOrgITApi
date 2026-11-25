@@ -21,6 +21,9 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<Server> Servers => Set<Server>();
     public DbSet<ServerApplication> ServerApplications => Set<ServerApplication>();
     public DbSet<HaproxyInstance> HaproxyInstances => Set<HaproxyInstance>();
+    public DbSet<HaproxyRouteSnapshot> HaproxyRouteSnapshots => Set<HaproxyRouteSnapshot>();
+    public DbSet<HaproxyServerSnapshot> HaproxyServerSnapshots => Set<HaproxyServerSnapshot>();
+    public DbSet<HaproxyCertificateSnapshot> HaproxyCertificateSnapshots => Set<HaproxyCertificateSnapshot>();
     public DbSet<Application> Applications => Set<Application>();
     public DbSet<ApplicationType> ApplicationTypes => Set<ApplicationType>();
     public DbSet<ApplicationVersion> ApplicationVersions => Set<ApplicationVersion>();
@@ -218,6 +221,9 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
             e.Property(x => x.DiscoveryStatus).HasMaxLength(20);
             e.Property(x => x.DetectedVersion).HasMaxLength(200);
             e.Property(x => x.DetectedConfigPath).HasMaxLength(300);
+            e.Property(x => x.EffectiveApiVersion).HasMaxLength(10);
+            e.Property(x => x.LastRefreshStatus).HasMaxLength(20);
+            e.Property(x => x.LastRefreshDetail).HasMaxLength(500);
             e.Property(x => x.LastTestStatus).HasMaxLength(20);
             e.Property(x => x.LastTestDetail).HasMaxLength(500);
             e.HasIndex(x => x.ServerId).IsUnique();
@@ -241,8 +247,45 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
                 .HasForeignKey(x => x.ServerApplicationId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<HaproxyRouteSnapshot>(e =>
+        {
+            e.Property(x => x.Frontend).HasMaxLength(100);
+            e.Property(x => x.Bind).HasMaxLength(200);
+            e.Property(x => x.Host).HasMaxLength(200);
+            e.Property(x => x.Path).HasMaxLength(255);
+            e.Property(x => x.Backend).HasMaxLength(100);
+            e.Property(x => x.RawCondition).HasMaxLength(500);
+            e.HasIndex(x => new { x.HaproxyInstanceId, x.Frontend, x.Host, x.Path, x.Backend }).IsUnique();
+            e.HasOne(x => x.HaproxyInstance).WithMany(x => x.Routes)
+                .HasForeignKey(x => x.HaproxyInstanceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<HaproxyServerSnapshot>(e =>
+        {
+            e.Property(x => x.Backend).HasMaxLength(100);
+            e.Property(x => x.Server).HasMaxLength(200);
+            e.Property(x => x.Address).HasMaxLength(300);
+            e.Property(x => x.Status).HasMaxLength(50);
+            e.Property(x => x.CheckStatus).HasMaxLength(50);
+            e.HasIndex(x => new { x.HaproxyInstanceId, x.Backend, x.Server }).IsUnique();
+            e.HasOne(x => x.HaproxyInstance).WithMany(x => x.Servers)
+                .HasForeignKey(x => x.HaproxyInstanceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<HaproxyCertificateSnapshot>(e =>
+        {
+            e.Property(x => x.StorageName).HasMaxLength(200);
+            e.Property(x => x.Path).HasMaxLength(500);
+            e.Property(x => x.Domains).HasMaxLength(1000);
+            e.Property(x => x.Issuer).HasMaxLength(500);
+            e.HasIndex(x => new { x.HaproxyInstanceId, x.StorageName }).IsUnique();
+            e.HasOne(x => x.HaproxyInstance).WithMany(x => x.Certificates)
+                .HasForeignKey(x => x.HaproxyInstanceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<ApplicationType>(e =>
-        {            e.Property(x => x.Name).HasMaxLength(20);
+        {
+            e.Property(x => x.Name).HasMaxLength(20);
             e.Property(x => x.Label).HasMaxLength(50);
             e.HasIndex(x => x.Name).IsUnique();
         });

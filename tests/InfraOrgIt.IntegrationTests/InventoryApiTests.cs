@@ -1059,6 +1059,45 @@ public sealed class InventoryApiTests : IAsyncLifetime
         var operatorList = await ReadAsync(await operatorUser.GetAsync(
             $"/api/haproxy/instances?serverId={seeded.ServerId}"));
         Assert.Empty(operatorList.EnumerateArray());
+
+        var managerSecrets = await SendAsync(manager, HttpMethod.Put,
+            $"/api/haproxy/instances/{instanceId}/secrets",
+            new { password = "secret" });
+        Assert.Equal(HttpStatusCode.Forbidden, managerSecrets.StatusCode);
+
+        var systemSecrets = await SendAsync(system, HttpMethod.Put,
+            $"/api/haproxy/instances/{instanceId}/secrets",
+            new { password = "secret" });
+        Assert.Equal(HttpStatusCode.NoContent, systemSecrets.StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var cipher = scope.ServiceProvider.GetRequiredService<CredentialCipher>();
+            var stored = await db.HaproxyInstances.SingleAsync(
+                x => x.Id == instanceId);
+            Assert.NotNull(stored.EncryptedPassword);
+            Assert.NotEqual("secret", stored.EncryptedPassword);
+            Assert.Equal("secret",
+                cipher.Decrypt(stored.EncryptedPassword!, stored.PasswordKeyVersion!.Value));
+        }
+
+        var settings = await SendAsync(manager, HttpMethod.Put,
+            $"/api/haproxy/instances/{instanceId}", new
+            {
+                name = "haproxy-" + suffix,
+                baseUrl = "http://127.0.0.1:5555",
+                transport = "SshForward",
+                apiHost = "127.0.0.1",
+                apiPort = 5555,
+                apiVersion = "auto",
+                username = "dpapi",
+                statsUsername = "",
+                caPem = "",
+                allowSelfSigned = false,
+                serverApplicationId = (int?)null
+            });
+        Assert.Equal(HttpStatusCode.NoContent, settings.StatusCode);
     }
 
     [Fact]

@@ -272,6 +272,9 @@ builder.Services.AddSingleton<ServerOsUpdateRunner>();
 builder.Services.AddHostedService<ServerOsUpdateService>();
 builder.Services.AddSingleton<HaproxyDiscoveryRunner>();
 builder.Services.AddHostedService<HaproxyDiscoveryService>();
+builder.Services.AddScoped<HaproxyClientFactory>();
+builder.Services.AddSingleton<HaproxyRefreshRunner>();
+builder.Services.AddHostedService<HaproxyRefreshService>();
 builder.Services.AddHttpClient("application-api-insecure")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {

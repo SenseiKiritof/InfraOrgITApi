@@ -35,6 +35,11 @@ public sealed class HaproxyInstance : EntityBase
     public string DiscoveryStatus { get; set; } = "Found";
     public string? DetectedVersion { get; set; }
     public string? DetectedConfigPath { get; set; }
+    public string? EffectiveApiVersion { get; set; }
+    public DateTime? LastRefreshAt { get; set; }
+    public string? LastRefreshStatus { get; set; }
+    public string? LastRefreshDetail { get; set; }
+    public int? ConfigurationVersion { get; set; }
     public DateTime? LastSeenAt { get; set; }
     public DateTime? LastTestAt { get; set; }
     public string? LastTestStatus { get; set; }
@@ -42,4 +47,7 @@ public sealed class HaproxyInstance : EntityBase
 
     public Server? Server { get; set; }
     public ServerApplication? ServerApplication { get; set; }
+    public List<HaproxyRouteSnapshot> Routes { get; set; } = [];
+    public List<HaproxyServerSnapshot> Servers { get; set; } = [];
+    public List<HaproxyCertificateSnapshot> Certificates { get; set; } = [];
 }

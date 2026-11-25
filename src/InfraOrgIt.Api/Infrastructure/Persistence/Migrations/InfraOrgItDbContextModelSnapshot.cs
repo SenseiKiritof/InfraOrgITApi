@@ -1348,6 +1348,65 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("GroupUser", (string)null);
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCertificateSnapshot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CollectedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Domains")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Issuer")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<DateTime?>("NotAfter")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("NotBefore")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StorageName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "StorageName")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyCertificateSnapshots");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", b =>
                 {
                     b.Property<int>("Id")
@@ -1378,6 +1437,9 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<string>("CaPem")
                         .HasColumnType("longtext");
 
+                    b.Property<int?>("ConfigurationVersion")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
@@ -1399,11 +1461,26 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("varchar(20)");
 
+                    b.Property<string>("EffectiveApiVersion")
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
                     b.Property<string>("EncryptedPassword")
                         .HasColumnType("longtext");
 
                     b.Property<string>("EncryptedStatsPassword")
                         .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("LastRefreshAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("LastRefreshDetail")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<string>("LastRefreshStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
 
                     b.Property<DateTime?>("LastSeenAt")
                         .HasColumnType("datetime(6)");
@@ -1487,6 +1564,128 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_HaproxyInstances_Transport", "`Transport` IN ('Direct','SshForward','DesktopRelay')");
                         });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyRouteSnapshot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<string>("Backend")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("Bind")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<DateTime>("CollectedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("ConfigurationVersion")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Frontend")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<string>("RawCondition")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "Frontend", "Host", "Path", "Backend")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyRouteSnapshots");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyServerSnapshot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("varchar(300)");
+
+                    b.Property<string>("Backend")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("CheckStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<DateTime>("CollectedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Server")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.Property<int?>("Weight")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "Backend", "Server")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyServerSnapshots");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", b =>
@@ -3272,6 +3471,17 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCertificateSnapshot", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany("Certificates")
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", b =>
                 {
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerApplication", "ServerApplication")
@@ -3288,6 +3498,28 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Navigation("Server");
 
                     b.Navigation("ServerApplication");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyRouteSnapshot", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany("Routes")
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyServerSnapshot", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany("Servers")
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", b =>
@@ -3650,6 +3882,15 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", b =>
                 {
                     b.Navigation("ProviderEnvironments");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", b =>
+                {
+                    b.Navigation("Certificates");
+
+                    b.Navigation("Routes");
+
+                    b.Navigation("Servers");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", b =>
