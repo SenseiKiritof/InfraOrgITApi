@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using InfraOrgIt.Api.BuildingBlocks.Auth;
 using InfraOrgIt.Api.BuildingBlocks.Security;
+using InfraOrgIt.Api.Features.Inventory;
 using InfraOrgIt.Api.Infrastructure.Files;
 using InfraOrgIt.Api.Infrastructure.Persistence;
 using InfraOrgIt.Api.Infrastructure.Persistence.Entities;
@@ -57,6 +58,8 @@ public sealed class InventoryApiTests : IAsyncLifetime
                 services.AddSingleton<ISshConnector>(_ssh);
                 services.RemoveAll<IFileTransferConnector>();
                 services.AddSingleton<IFileTransferConnector>(_files);
+                services.RemoveAll<IEndOfLifeCatalog>();
+                services.AddSingleton<IEndOfLifeCatalog>(new FakeCatalog());
                 services.AddHttpClient("application-api")
                     .ConfigurePrimaryHttpMessageHandler(() => _outbound);
             });
@@ -985,6 +988,64 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
         await SendAsync(admin, HttpMethod.Put, "/api/server-update-policy",
             new { enabled = true, ltsOnly = true });
+    }
+
+    [Fact]
+    public async Task Server_os_update_check_runs_manually_in_background()
+    {
+        using var admin = await ClientForAsync("os.manual", systemAdmin: true);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        using var manager = await ClientForAsync("os.manager");
+        await AssignEnvironmentRoleAsync(admin, seeded.ProviderEnvironmentId,
+            "os.manager", "ServerAdmin", manager);
+        var credential = await ReadAsync(await SendAsync(admin, HttpMethod.Post,
+            "/api/server-credentials", new
+            {
+                name = "Credenziale OS " + suffix,
+                username = "root",
+                authType = "Password",
+                secret = "secret"
+            }));
+        var assign = await SendAsync(admin, HttpMethod.Put,
+            $"/api/servers/{seeded.ServerId}/ssh",
+            new
+            {
+                credentialId = credential.GetProperty("id").GetInt32(),
+                sshPort = 22
+            });
+        Assert.Equal(HttpStatusCode.NoContent, assign.StatusCode);
+
+        _ssh.Result = new SshCommandResult(0,
+            "PRETTY_NAME=\"Ubuntu 22.04.4 LTS\"\nID=ubuntu\nVERSION_ID=\"22.04\"\n"
+            + "__INFRAORGIT_OS__\nNo new release found");
+
+        var start = await SendAsync(manager, HttpMethod.Post,
+            $"/api/servers/{seeded.ServerId}/os-update-check", new { });
+        var startText = await start.Content.ReadAsStringAsync();
+        Assert.True(start.StatusCode == HttpStatusCode.OK, startText);
+
+        JsonElement? checkedServer = null;
+        for (var attempt = 0; attempt < 50; attempt += 1)
+        {
+            var server = await ReadAsync(
+                await manager.GetAsync($"/api/servers/{seeded.ServerId}"));
+            if (server.GetProperty("osUpdateCheckedAt").ValueKind
+                == JsonValueKind.String)
+            {
+                checkedServer = server;
+                break;
+            }
+            await Task.Delay(100);
+        }
+
+        Assert.NotNull(checkedServer);
+        Assert.Equal("Ok",
+            checkedServer.Value.GetProperty("osUpdateStatus").GetString());
+        Assert.Equal("24.04",
+            checkedServer.Value.GetProperty("osUpdateTarget").GetString());
+        Assert.Equal("Ubuntu 22.04.4 LTS",
+            checkedServer.Value.GetProperty("osName").GetString());
     }
 
     [Fact]
@@ -2433,6 +2494,18 @@ public sealed class InventoryApiTests : IAsyncLifetime
 
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class FakeCatalog : IEndOfLifeCatalog
+    {
+        public Task<OsCatalogResult?> LookupAsync(
+            OsReleaseInfo info, bool ltsOnly, CancellationToken ct) =>
+            Task.FromResult<OsCatalogResult?>(new OsCatalogResult(
+                "ubuntu",
+                "24.04",
+                true,
+                new DateOnly(2027, 4, 30),
+                null));
     }
 
     private sealed class FakeSsh : ISshConnector
