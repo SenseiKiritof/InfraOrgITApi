@@ -92,6 +92,9 @@ public sealed class HaproxyRefreshRunner(
             await db.HaproxyServerSnapshots
                 .Where(x => x.HaproxyInstanceId == instance.Id)
                 .ExecuteDeleteAsync(ct);
+            await db.HaproxyCertificateSnapshots
+                .Where(x => x.HaproxyInstanceId == instance.Id)
+                .ExecuteDeleteAsync(ct);
             foreach (var route in result.Routes)
                 db.HaproxyRouteSnapshots.Add(new HaproxyRouteSnapshot
                 {
@@ -118,6 +121,19 @@ public sealed class HaproxyRefreshRunner(
                     Weight = server.Weight,
                     CollectedAt = now
                 });
+            foreach (var certificate in result.Certificates)
+                db.HaproxyCertificateSnapshots.Add(new HaproxyCertificateSnapshot
+                {
+                    HaproxyInstanceId = instance.Id,
+                    StorageName = certificate.StorageName,
+                    Path = certificate.Path,
+                    Domains = certificate.Domains,
+                    Issuer = certificate.Issuer,
+                    NotBefore = certificate.NotBefore,
+                    NotAfter = certificate.NotAfter,
+                    Size = certificate.Size,
+                    CollectedAt = now
+                });
 
             instance.ConfigurationVersion = result.ConfigurationVersion;
             instance.LastRefreshAt = now;
@@ -130,7 +146,8 @@ public sealed class HaproxyRefreshRunner(
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             return new HaproxyRefreshOutcome(
-                result.Routes.Count, result.Servers.Count, now);
+                result.Routes.Count, result.Servers.Count,
+                result.Certificates.Count, now);
         }
         catch (Exception exception)
         {
@@ -156,6 +173,7 @@ public sealed class HaproxyRefreshRunner(
 public sealed record HaproxyRefreshOutcome(
     int Routes,
     int Servers,
+    int Certificates,
     DateTime RefreshedAt);
 
 /// <summary>Periodic read-only snapshot refresh for instances with monitoring enabled.</summary>

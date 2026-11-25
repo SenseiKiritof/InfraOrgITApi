@@ -92,6 +92,33 @@ public sealed class HaproxyClientTests
         Assert.Equal(4, process.Threads);
     }
 
+    [Fact]
+    public async Task Refreshes_certificate_metadata()
+    {
+        var handler = new FakeHandler(new Dictionary<string, string>
+        {
+            ["/v3/info"] = """{"api":{"version":"v3.0"}}""",
+            ["/v3/services/haproxy/storage/ssl_certificates"] =
+                """[{"storage_name":"site.pem","file":"/etc/haproxy/ssl/site.pem"}]""",
+            ["/v3/services/haproxy/storage/ssl_certificates/site.pem"] =
+                """{"storage_name":"site.pem","file":"/etc/haproxy/ssl/site.pem","domains":"example.com","issuers":"Example CA","not_after":"2027-01-01T00:00:00Z","size":2048}"""
+        });
+        var http = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://haproxy.local/")
+        };
+        var instance = new HaproxyInstance { ApiVersion = "v3" };
+        await using var client = new HaproxyClient(http, instance);
+
+        var result = await client.RefreshAsync(CancellationToken.None);
+
+        var certificate = Assert.Single(result.Certificates);
+        Assert.Equal("site.pem", certificate.StorageName);
+        Assert.Equal("example.com", certificate.Domains);
+        Assert.Equal("Example CA", certificate.Issuer);
+        Assert.Equal(2048, certificate.Size);
+    }
+
     private sealed class FakeHandler(Dictionary<string, string> responses)
         : HttpMessageHandler
     {

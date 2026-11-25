@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.RegularExpressions;
 using InfraOrgIt.Api.BuildingBlocks.Audit;
 using InfraOrgIt.Api.BuildingBlocks.Authorization;
 using InfraOrgIt.Api.BuildingBlocks.Pagination;
@@ -33,6 +34,13 @@ public static class HaproxyEndpoints
         group.MapGet("/instances/{id:int}/servers", ListServersAsync);
         group.MapGet("/instances/{id:int}/live", LiveAsync);
         group.MapGet("/instances/{id:int}/metrics", MetricsAsync);
+        group.MapGet("/instances/{id:int}/certificates", ListCertificatesAsync);
+        group.MapPost("/instances/{id:int}/certificates", UploadCertificateAsync)
+            .RequireRateLimiting("remote-run");
+        group.MapPut("/instances/{id:int}/certificates/{name}", ReplaceCertificateAsync)
+            .RequireRateLimiting("remote-run");
+        group.MapDelete("/instances/{id:int}/certificates/{name}", DeleteCertificateAsync)
+            .RequireRateLimiting("remote-run");
         group.MapPost("/discovery/run", RunDiscoveryAsync)
             .RequireRateLimiting("remote-run");
     }
@@ -86,6 +94,7 @@ public static class HaproxyEndpoints
                 x.LastRefreshDetail,
                 x.Routes.Count,
                 x.Servers.Count,
+                x.Certificates.Count,
                 x.Username,
                 x.StatsUsername,
                 x.CaPem,
@@ -355,7 +364,7 @@ public static class HaproxyEndpoints
             var result = await refresher.RefreshAsync(instance.Id, ct);
             await audit.RecordAsync(AuditEntries.Change(
                 user, "haproxy.refresh", "HaproxyInstance", instance.Id,
-                detail: new { result.Routes, result.Servers }), ct);
+                detail: new { result.Routes, result.Servers, result.Certificates }), ct);
             return Results.Ok(result);
         }
         catch (Exception exception)
@@ -410,6 +419,177 @@ public static class HaproxyEndpoints
                 x.CheckStatus, x.Weight, x.CollectedAt))
             .ToListAsync(ct);
         return Results.Ok(items);
+    }
+
+    private static async Task<IResult> ListCertificatesAsync(
+        int id,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        CancellationToken ct)
+    {
+        var instance = await db.HaproxyInstances.AsNoTracking()
+            .Include(x => x.Server)
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Istanza HAProxy", id);
+        await access.RequireOperatorAsync(
+            user, [instance.Server!.ProviderEnvironmentId], ct);
+        var items = await db.HaproxyCertificateSnapshots.AsNoTracking()
+            .Where(x => x.HaproxyInstanceId == id)
+            .OrderBy(x => x.NotAfter).ThenBy(x => x.StorageName)
+            .Select(x => new HaproxyCertificateDto(
+                x.Id, x.StorageName, x.Path, x.Domains, x.Issuer,
+                x.NotBefore, x.NotAfter, x.Size, x.CollectedAt))
+            .ToListAsync(ct);
+        return Results.Ok(items);
+    }
+
+    private static async Task<IResult> UploadCertificateAsync(
+        int id,
+        HttpContext http,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        HaproxyClientFactory clients,
+        HaproxyClientCache clientCache,
+        IAuditService audit,
+        CancellationToken ct)
+    {
+        var loaded = await LoadCertificateTargetAsync(
+            id, user, access, db, ct);
+        var (name, pem) = await ReadCertificateFormAsync(http, null, ct);
+        await using var client = await clients.CreateAsync(
+            loaded.Instance, loaded.Server, ct);
+        await client.UploadCertificateAsync(name, pem, false, ct);
+        await clientCache.InvalidateAsync(id);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "haproxy.certificate", "HaproxyInstance", id,
+            detail: new { name, operation = "upload" }), ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ReplaceCertificateAsync(
+        int id,
+        string name,
+        HttpContext http,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        HaproxyClientFactory clients,
+        HaproxyClientCache clientCache,
+        IAuditService audit,
+        CancellationToken ct)
+    {
+        var loaded = await LoadCertificateTargetAsync(
+            id, user, access, db, ct);
+        var (formName, pem) = await ReadCertificateFormAsync(http, name, ct);
+        await using var client = await clients.CreateAsync(
+            loaded.Instance, loaded.Server, ct);
+        await client.UploadCertificateAsync(formName, pem, true, ct);
+        await clientCache.InvalidateAsync(id);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "haproxy.certificate", "HaproxyInstance", id,
+            detail: new { name = formName, operation = "replace" }), ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> DeleteCertificateAsync(
+        int id,
+        string name,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        HaproxyClientFactory clients,
+        HaproxyClientCache clientCache,
+        IAuditService audit,
+        CancellationToken ct)
+    {
+        var loaded = await LoadCertificateTargetAsync(
+            id, user, access, db, ct);
+        var clean = SafeCertificateName(name);
+        await using var client = await clients.CreateAsync(
+            loaded.Instance, loaded.Server, ct);
+        await client.DeleteCertificateAsync(clean, ct);
+        await clientCache.InvalidateAsync(id);
+        await audit.RecordAsync(AuditEntries.Change(
+            user, "haproxy.certificate", "HaproxyInstance", id,
+            detail: new { name = clean, operation = "delete" }), ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<(HaproxyInstance Instance, Server Server)>
+        LoadCertificateTargetAsync(
+            int id,
+            ClaimsPrincipal user,
+            EnvironmentAccessService access,
+            InfraOrgItDbContext db,
+            CancellationToken ct)
+    {
+        var instance = await db.HaproxyInstances
+            .Include(x => x.Server).ThenInclude(x => x!.Credential)
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Istanza HAProxy", id);
+        await access.RequireAdminAsync(
+            user, [instance.Server!.ProviderEnvironmentId], ct);
+        if (string.IsNullOrEmpty(instance.Username) ||
+            string.IsNullOrEmpty(instance.EncryptedPassword))
+            throw Guard.Unprocessable("Credenziali Data Plane API non configurate.");
+        return (instance, instance.Server);
+    }
+
+    private static async Task<(string Name, string Pem)> ReadCertificateFormAsync(
+        HttpContext http,
+        string? pathName,
+        CancellationToken ct)
+    {
+        string name;
+        string pem;
+        try
+        {
+            var form = await http.Request.ReadFormAsync(ct);
+            var file = form.Files["file"] ?? form.Files.FirstOrDefault()
+                       ?? throw Guard.Unprocessable("File PEM mancante.");
+            if (file.Length is <= 0 or > 1_048_576)
+                throw Guard.Unprocessable("Il PEM deve essere tra 1 byte e 1 MiB.");
+            name = pathName ?? form["name"].ToString();
+            if (string.IsNullOrWhiteSpace(name))
+                name = Path.GetFileName(file.FileName);
+            using var reader = new StreamReader(file.OpenReadStream());
+            pem = await reader.ReadToEndAsync(ct);
+        }
+        catch (InvalidDataException)
+        {
+            throw Guard.Unprocessable("Multipart non valido.");
+        }
+
+        name = SafeCertificateName(name);
+        if (!pem.Contains("PRIVATE KEY", StringComparison.Ordinal) ||
+            !pem.Contains("CERTIFICATE", StringComparison.Ordinal))
+            throw Guard.Unprocessable(
+                "Il PEM deve contenere certificato e chiave privata.");
+        try
+        {
+            var certificates = new X509Certificate2Collection();
+            certificates.ImportFromPem(pem);
+            if (certificates.Count == 0)
+                throw new FormatException();
+        }
+        catch (Exception exception) when (exception is CryptographicException
+                                              or FormatException
+                                              or ArgumentException)
+        {
+            throw Guard.Unprocessable("PEM non valido.");
+        }
+        return (name, pem);
+    }
+
+    private static string SafeCertificateName(string value)
+    {
+        var name = Path.GetFileName(value.Trim());
+        if (!Regex.IsMatch(name, @"^[A-Za-z0-9._-]{1,200}$"))
+            throw Guard.Unprocessable(
+                "Nome certificato non valido (lettere, numeri, punto, trattino, underscore).");
+        return name;
     }
 
     private static async Task<IResult> LiveAsync(
@@ -561,6 +741,7 @@ public sealed record HaproxyInstanceDto(
     string? LastRefreshDetail,
     int RouteCount,
     int ServerCount,
+    int CertificateCount,
     string? Username,
     string? StatsUsername,
     string? CaPem,
@@ -602,6 +783,17 @@ public sealed record HaproxyMetricPointDto(
     long Ctime,
     long Ttime,
     long Qtime);
+
+public sealed record HaproxyCertificateDto(
+    int Id,
+    string StorageName,
+    string Path,
+    string Domains,
+    string Issuer,
+    DateTime? NotBefore,
+    DateTime? NotAfter,
+    long Size,
+    DateTime CollectedAt);
 
 internal sealed class MetricAccumulator
 {

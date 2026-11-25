@@ -37,7 +37,17 @@ public sealed record HaproxyServerResult(
 public sealed record HaproxyRefreshResult(
     IReadOnlyList<HaproxyRouteResult> Routes,
     IReadOnlyList<HaproxyServerResult> Servers,
+    IReadOnlyList<HaproxyCertificateResult> Certificates,
     int? ConfigurationVersion);
+
+public sealed record HaproxyCertificateResult(
+    string StorageName,
+    string Path,
+    string Domains,
+    string Issuer,
+    DateTime? NotBefore,
+    DateTime? NotAfter,
+    long Size);
 
 public sealed record HaproxyStatsRow(
     string Kind,
@@ -153,8 +163,127 @@ public sealed class HaproxyClient : IAsyncDisposable
         var configVersion = await ConfigurationVersionAsync(version, ct);
         var routes = await RoutesAsync(version, configVersion, ct);
         var servers = await ServersAsync(version, ct);
-        return new HaproxyRefreshResult(routes, servers, configVersion);
+        var certificates = await CertificatesAsync(version, ct);
+        return new HaproxyRefreshResult(
+            routes, servers, certificates, configVersion);
     }
+
+    public async Task<int?> GetVersionAsync(CancellationToken ct)
+    {
+        var version = await DetectVersionAsync(ct);
+        return await ConfigurationVersionAsync(version, ct);
+    }
+
+    public async Task UploadCertificateAsync(
+        string name,
+        string pem,
+        bool replace,
+        CancellationToken ct)
+    {
+        var version = await DetectVersionAsync(ct);
+        var configVersion = await ConfigurationVersionAsync(version, ct)
+                            ?? throw new InvalidOperationException(
+                                "Configuration-Version non disponibile.");
+        var encoded = Uri.EscapeDataString(name);
+        HttpResponseMessage response;
+        if (replace)
+        {
+            using var content = new StringContent(pem, Encoding.UTF8, "text/plain");
+            response = await http.PutAsync(
+                $"{version}/services/haproxy/storage/ssl_certificates/{encoded}?version={configVersion}",
+                content, ct);
+        }
+        else
+        {
+            using var form = new MultipartFormDataContent();
+            using var content = new ByteArrayContent(Encoding.UTF8.GetBytes(pem));
+            content.Headers.ContentType =
+                new MediaTypeHeaderValue("application/x-pem-file");
+            form.Add(content, "file_upload", name);
+            response = await http.PostAsync(
+                $"{version}/services/haproxy/storage/ssl_certificates?version={configVersion}",
+                form, ct);
+        }
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException(
+                    $"Data Plane API HTTP {(int)response.StatusCode} sul certificato {name}: " +
+                    await response.Content.ReadAsStringAsync(ct));
+        }
+    }
+
+    public async Task DeleteCertificateAsync(string name, CancellationToken ct)
+    {
+        var version = await DetectVersionAsync(ct);
+        var configVersion = await ConfigurationVersionAsync(version, ct)
+                            ?? throw new InvalidOperationException(
+                                "Configuration-Version non disponibile.");
+        using var response = await http.DeleteAsync(
+            $"{version}/services/haproxy/storage/ssl_certificates/{Uri.EscapeDataString(name)}?version={configVersion}",
+            ct);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException(
+                $"Data Plane API HTTP {(int)response.StatusCode} sul certificato {name}.");
+    }
+
+    private async Task<List<HaproxyCertificateResult>> CertificatesAsync(
+        string version,
+        CancellationToken ct)
+    {
+        var items = await GetArrayAsync(version,
+            "services/haproxy/storage/ssl_certificates", ct);
+        var result = new List<HaproxyCertificateResult>();
+        foreach (var item in items)
+        {
+            var name = Text(item, "storage_name");
+            if (name.Length == 0) continue;
+            var path = Text(item, "file");
+            var domains = "";
+            var issuer = "";
+            DateTime? notBefore = null;
+            DateTime? notAfter = null;
+            long size = 0;
+            try
+            {
+                var meta = await GetJsonAsync(version,
+                    $"services/haproxy/storage/ssl_certificates/{Uri.EscapeDataString(name)}",
+                    ct);
+                if (meta is not null)
+                {
+                    domains = Text(meta.Value, "domains");
+                    issuer = Text(meta.Value, "issuers");
+                    notBefore = Date(meta.Value, "not_before");
+                    notAfter = Date(meta.Value, "not_after");
+                    if (meta.Value.TryGetProperty("size", out var sizeValue) &&
+                        sizeValue.TryGetInt64(out var parsedSize))
+                        size = parsedSize;
+                    path = Text(meta.Value, "file");
+                }
+            }
+            catch (Exception exception) when (exception is HttpRequestException
+                                                  or JsonException)
+            {
+                // metadata is optional; keep the list entry
+            }
+            result.Add(new HaproxyCertificateResult(
+                Trim(name, 200),
+                Trim(path, 500),
+                Trim(domains, 1000),
+                Trim(issuer, 500),
+                notBefore,
+                notAfter,
+                size));
+        }
+        return result;
+    }
+
+    private static DateTime? Date(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) &&
+        value.ValueKind == JsonValueKind.String &&
+        DateTime.TryParse(value.GetString(), out var parsed)
+            ? parsed.ToUniversalTime()
+            : null;
 
     public async Task<IReadOnlyList<HaproxyStatsRow>> StatsAsync(
         CancellationToken ct)
