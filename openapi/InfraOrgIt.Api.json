@@ -1511,6 +1511,662 @@
         ]
       }
     },
+    "/api/haproxy/instances": {
+      "get": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/clusters": {
+      "get": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaproxyClusterInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/clusters/{id}": {
+      "put": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaproxyClusterInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}": {
+      "put": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaproxySettingsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/secrets": {
+      "put": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaproxySecretsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/monitoring": {
+      "put": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonitoringInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/test": {
+      "post": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/refresh": {
+      "post": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/server-actions": {
+      "post": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaproxyServerActionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/routes": {
+      "get": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/servers": {
+      "get": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/live": {
+      "get": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/metrics": {
+      "get": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/protocol": {
+      "get": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/certificates": {
+      "get": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/instances/{id}/certificates/{name}": {
+      "put": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
+    "/api/haproxy/discovery/run": {
+      "post": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ],
+            "csrf": [ ]
+          }
+        ]
+      }
+    },
     "/api/server-update-policy": {
       "get": {
         "tags": [
@@ -7881,6 +8537,213 @@
           }
         }
       },
+      "HaproxyClusterInput": {
+        "required": [
+          "providerEnvironmentId",
+          "name",
+          "mode",
+          "vip",
+          "notes"
+        ],
+        "type": "object",
+        "properties": {
+          "providerEnvironmentId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "vip": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "notes": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "HaproxySecretsInput": {
+        "required": [
+          "password",
+          "statsPassword"
+        ],
+        "type": "object",
+        "properties": {
+          "password": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "statsPassword": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "clearPassword": {
+            "type": "boolean",
+            "default": false
+          },
+          "clearStatsPassword": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "HaproxyServerActionInput": {
+        "required": [
+          "backend",
+          "server",
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "backend": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "server": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "action": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "HaproxySettingsInput": {
+        "required": [
+          "name",
+          "baseUrl",
+          "transport",
+          "apiHost",
+          "apiPort",
+          "apiVersion",
+          "username",
+          "statsUsername",
+          "caPem",
+          "allowSelfSigned",
+          "serverApplicationId"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "baseUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "transport": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "apiHost": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "apiPort": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "apiVersion": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "username": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "statsUsername": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "caPem": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "allowSelfSigned": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "serverApplicationId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "clusterId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "statsBaseUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "ImportConfirmInput": {
         "required": [
           "token",
@@ -8044,6 +8907,20 @@
               ],
               "format": "int32"
             }
+          }
+        }
+      },
+      "MonitoringInput": {
+        "required": [
+          "choice"
+        ],
+        "type": "object",
+        "properties": {
+          "choice": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -9825,6 +10702,9 @@
     },
     {
       "name": "ServersEndpoints"
+    },
+    {
+      "name": "HaproxyEndpoints"
     },
     {
       "name": "ServerUpdatePolicyEndpoints"

@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:8c6edfb26c85153f236d26efebd9ad349aec403583f343f201ee67838b23658d AS build
 WORKDIR /src
 
 ARG APP_VERSION=0.1.0
@@ -12,7 +12,7 @@ RUN dotnet publish src/InfraOrgIt.Api/InfraOrgIt.Api.csproj \
     -c Release -o /app --no-restore /p:UseAppHost=false \
     /p:Version=${APP_VERSION#v} /p:InformationalVersion=${APP_VERSION#v}
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:de0ee358cdd672f7017a003bed21e9ac9ed48a27c922a59b18175b6e82fa7fee AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:aac50ceef10391e78a899e3d2ccd00bbafa2dcb56ccf4586cbccf00edb84fc21 AS final
 
 ARG APP_VERSION=0.1.0
 LABEL org.opencontainers.image.title="InfraOrgIT API" \

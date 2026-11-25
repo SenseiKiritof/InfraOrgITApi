@@ -1346,6 +1346,789 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
                     b.ToTable("GroupUser", (string)null);
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCertificateSnapshot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CollectedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Domains")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Issuer")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NotAfter")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NotBefore")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StorageName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "StorageName")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyCertificateSnapshots");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCluster", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ProviderEnvironmentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Vip")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderEnvironmentId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyClusters", t =>
+                        {
+                            t.HasCheckConstraint("CK_HaproxyClusters_Mode", "`Mode` IN ('active-active','active-passive')");
+                        });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AllowSelfSigned")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ApiHost")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ApiPort")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ApiVersion")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BaseUrl")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CaPem")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ClusterId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ConfigurationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("DetectedConfigPath")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DetectedVersion")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DiscoverySource")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DiscoveryStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EffectiveApiVersion")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EncryptedPassword")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EncryptedStatsPassword")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastRefreshAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastRefreshDetail")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastRefreshStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastTestAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastTestDetail")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastTestStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("MonitoringChangedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MonitoringChangedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MonitoringChoice")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PasswordKeyVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ServerApplicationId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ServerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StatsBaseUrl")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("StatsPasswordKeyVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StatsUsername")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Transport")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Username")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClusterId");
+
+                    b.HasIndex("ServerApplicationId");
+
+                    b.HasIndex("ServerId")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyInstances", t =>
+                        {
+                            t.HasCheckConstraint("CK_HaproxyInstances_ApiVersion", "`ApiVersion` IN ('auto','v2','v3','stats')");
+
+                            t.HasCheckConstraint("CK_HaproxyInstances_DiscoverySource", "`DiscoverySource` IN ('Auto','Manual')");
+
+                            t.HasCheckConstraint("CK_HaproxyInstances_DiscoveryStatus", "`DiscoveryStatus` IN ('Found','Inactive','CredentialsRequired','Unreachable','Ready')");
+
+                            t.HasCheckConstraint("CK_HaproxyInstances_MonitoringChoice", "`MonitoringChoice` IN ('Undecided','Enabled','Disabled')");
+
+                            t.HasCheckConstraint("CK_HaproxyInstances_Transport", "`Transport` IN ('Direct','SshForward','DesktopRelay')");
+                        });
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyMetricSample", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Bin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Bout")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("Bucket")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CheckHealth")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CheckStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Chkdown")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Chkfail")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CliAbrt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnRateMax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnTot")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("Ctime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Dcon")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Downtime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Dreq")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Dresp")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Dses")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Econ")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Eresp")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H1xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H2xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H3xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H4xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H5xx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("HOther")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Lastsess")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Lbtot")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Proxy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Qcur")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Qmax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Qtime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Rate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("RateMax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Req")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ReqRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ReqRateMax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ResolutionMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Rtime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Scur")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Server")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Slim")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Smax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SrvAbrt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Ttime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Weight")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Wredis")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Wretr")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "Bucket");
+
+                    b.HasIndex("HaproxyInstanceId", "ResolutionMinutes", "Bucket", "Kind", "Proxy", "Server")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyMetricSamples");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyProcessMetricSample", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ActivePeers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("Bucket")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BytesOutRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConnectedPeers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("CumConns")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CumSslConns")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CurrConns")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CurrSslConns")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("DroppedLogs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("FailedResolutions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("IdlePct")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("MaxConn")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("MaxMemoryMb")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ResolutionMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("RunQueue")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SessRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Tasks")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Threads")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("Uptime")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "ResolutionMinutes", "Bucket")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyProcessMetricSamples");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyProtocolMetricSample", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("Bucket")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("H2BackendOpenStreams")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H2ConnErrors")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H2OpenConnections")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H2Req")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H2Sess")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H2StreamErrors")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H3ProtocolErrors")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H3Req")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H3Sess")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("H3VersionFallback")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Proxy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("QpackDecoderErrors")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QpackEncoderErrors")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QuicDroppedPkt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QuicHandshakeFail")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QuicLostPkt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QuicRetryError")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QuicRxbufFull")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QuicSentPkt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QuicSocketFull")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QuicTooShortDgram")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QuicTransportErrors")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ResolutionMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Server")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SslFailedHandshake")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "ResolutionMinutes", "Bucket", "Kind", "Proxy", "Server")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyProtocolMetricSamples");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyRouteSnapshot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Backend")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Bind")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CollectedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ConfigurationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Frontend")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RawCondition")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "Frontend", "Host", "Path", "Backend")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyRouteSnapshots");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyServerSnapshot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Backend")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CheckStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CollectedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("HaproxyInstanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Server")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Weight")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HaproxyInstanceId", "Backend", "Server")
+                        .IsUnique();
+
+                    b.ToTable("HaproxyServerSnapshots");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", b =>
                 {
                     b.Property<int>("Id")
@@ -1652,6 +2435,19 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
                             Name = "Servers",
                             Order = 1,
                             Path = "/servers",
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Version = 0
+                        },
+                        new
+                        {
+                            Id = 27,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            HideBackButton = true,
+                            IsActive = true,
+                            IsVisible = true,
+                            Name = "HAProxy",
+                            Order = 6,
+                            Path = "/haproxy",
                             UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
                             Version = 0
                         },
@@ -3129,6 +3925,108 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCertificateSnapshot", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany("Certificates")
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCluster", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ProviderEnvironment", "ProviderEnvironment")
+                        .WithMany()
+                        .HasForeignKey("ProviderEnvironmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProviderEnvironment");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCluster", "Cluster")
+                        .WithMany("Instances")
+                        .HasForeignKey("ClusterId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.ServerApplication", "ServerApplication")
+                        .WithMany()
+                        .HasForeignKey("ServerApplicationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.Server", "Server")
+                        .WithMany()
+                        .HasForeignKey("ServerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Cluster");
+
+                    b.Navigation("Server");
+
+                    b.Navigation("ServerApplication");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyMetricSample", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany()
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyProcessMetricSample", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany()
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyProtocolMetricSample", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany()
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyRouteSnapshot", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany("Routes")
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyServerSnapshot", b =>
+                {
+                    b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", "HaproxyInstance")
+                        .WithMany("Servers")
+                        .HasForeignKey("HaproxyInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HaproxyInstance");
+                });
+
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", b =>
                 {
                     b.HasOne("InfraOrgIt.Api.Infrastructure.Persistence.Entities.User", "ApprovedByUser")
@@ -3489,6 +4387,20 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.EnvironmentDefinition", b =>
                 {
                     b.Navigation("ProviderEnvironments");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyCluster", b =>
+                {
+                    b.Navigation("Instances");
+                });
+
+            modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.HaproxyInstance", b =>
+                {
+                    b.Navigation("Certificates");
+
+                    b.Navigation("Routes");
+
+                    b.Navigation("Servers");
                 });
 
             modelBuilder.Entity("InfraOrgIt.Api.Infrastructure.Persistence.Entities.McpAgent", b =>
