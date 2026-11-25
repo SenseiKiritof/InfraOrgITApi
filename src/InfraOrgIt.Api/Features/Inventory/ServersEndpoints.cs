@@ -23,6 +23,8 @@ public static class ServersEndpoints
         group.MapDelete("/{id:int}", DeleteAsync);
         group.MapPut("/{id:int}/provider-environment/{providerEnvironmentId:int}", MoveAsync);
         group.MapPut("/{id:int}/os-update-policy", UpdateOsPolicyAsync);
+        group.MapPost("/{id:int}/os-update-check", RunOsUpdateCheckAsync)
+            .RequireRateLimiting("remote-run");
         group.MapGet("/{id:int}/applications", ListApplicationsAsync);
         group.MapPost("/{id:int}/applications", CreateApplicationAsync);
     }
@@ -259,6 +261,26 @@ public static class ServersEndpoints
             user, "server.os-policy", "Server", id,
             detail: new { ltsOnly = input.LtsOnly }), ct);
         return Results.NoContent();
+    }
+
+    private static async Task<IResult> RunOsUpdateCheckAsync(
+        int id,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        ServerOsUpdateRunner runner,
+        CancellationToken ct)
+    {
+        var server = await db.Servers.AsNoTracking()
+                         .SingleOrDefaultAsync(x => x.Id == id, ct)
+                     ?? throw Guard.NotFound("Server", id);
+        await access.RequireAdminAsync(user, [server.ProviderEnvironmentId], ct);
+        if (server.CredentialId is null)
+            throw Guard.Unprocessable("Il server non ha una credenziale SSH.");
+        if (!runner.Start(id))
+            throw Guard.Conflict(
+                "Controllo del sistema operativo già in corso.");
+        return Results.Ok(new { started = true });
     }
 
     private static async Task<IResult> ListApplicationsAsync(
