@@ -74,6 +74,10 @@ public sealed class HaproxyMetricsRunner(
     private readonly ConcurrentDictionary<int, Saved> saved = new();
     private readonly TimeSpan statsOnlyInterval = TimeSpan.FromSeconds(
         configuration.GetValue("Haproxy:StatsOnlyIntervalSeconds", 15));
+    private readonly TimeSpan rawRetention = TimeSpan.FromDays(Math.Clamp(
+        configuration.GetValue("Haproxy:MetricsRawRetentionDays", 7), 1, 3650));
+    private readonly TimeSpan longRetention = TimeSpan.FromDays(Math.Clamp(
+        configuration.GetValue("Haproxy:MetricsRetentionDays", 90), 1, 3650));
 
     public async Task TickAsync(CancellationToken ct)
     {
@@ -171,8 +175,8 @@ public sealed class HaproxyMetricsRunner(
 
         if (at - state.LastPrune > TimeSpan.FromHours(1))
         {
-            var raw = at.AddDays(-7);
-            var longTerm = at.AddDays(-90);
+            var raw = at - rawRetention;
+            var longTerm = at - longRetention;
             await db.HaproxyMetricSamples
                 .Where(x => x.HaproxyInstanceId == instanceId &&
                             ((x.ResolutionMinutes == 1 && x.Bucket < raw) ||
@@ -285,7 +289,8 @@ public sealed class HaproxyMetricsRunner(
 
 public sealed class HaproxyMetricsService(
     HaproxyMetricsRunner runner,
-    IConfiguration configuration) : BackgroundService
+    IConfiguration configuration,
+    ILogger<HaproxyMetricsService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -298,7 +303,15 @@ public sealed class HaproxyMetricsService(
             using var timer = new PeriodicTimer(interval);
             do
             {
-                await runner.TickAsync(stoppingToken);
+                try
+                {
+                    await runner.TickAsync(stoppingToken);
+                }
+                catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning(exception,
+                        "Raccolta metriche HAProxy non riuscita");
+                }
             } while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException)

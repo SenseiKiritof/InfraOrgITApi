@@ -225,7 +225,15 @@ public sealed class HaproxyRefreshService(
             using var timer = new PeriodicTimer(interval);
             do
             {
-                await RefreshAllAsync(stoppingToken);
+                try
+                {
+                    await RefreshAllAsync(stoppingToken);
+                }
+                catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning(exception,
+                        "Aggiornamento HAProxy periodico non riuscito");
+                }
             } while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException)

@@ -21,6 +21,10 @@ public sealed class HaproxyProtocolMetricsService(
     }
 
     private readonly ConcurrentDictionary<int, Saved> saved = new();
+    private readonly TimeSpan rawRetention = TimeSpan.FromDays(Math.Clamp(
+        configuration.GetValue("Haproxy:MetricsRawRetentionDays", 7), 1, 3650));
+    private readonly TimeSpan longRetention = TimeSpan.FromDays(Math.Clamp(
+        configuration.GetValue("Haproxy:MetricsRetentionDays", 90), 1, 3650));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -34,7 +38,15 @@ public sealed class HaproxyProtocolMetricsService(
             using var timer = new PeriodicTimer(interval);
             do
             {
-                await TickAsync(stoppingToken);
+                try
+                {
+                    await TickAsync(stoppingToken);
+                }
+                catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning(exception,
+                        "Raccolta metriche protocollo HAProxy non riuscita");
+                }
             } while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException)
@@ -106,8 +118,8 @@ public sealed class HaproxyProtocolMetricsService(
         }
         if (!wrote) return;
         await db.SaveChangesAsync(ct);
-        var cutoff = now.AddDays(-7);
-        var longCutoff = now.AddDays(-90);
+        var cutoff = now - rawRetention;
+        var longCutoff = now - longRetention;
         await db.HaproxyProtocolMetricSamples
             .Where(x => x.HaproxyInstanceId == instanceId &&
                         ((x.ResolutionMinutes == 1 && x.Bucket < cutoff) ||
