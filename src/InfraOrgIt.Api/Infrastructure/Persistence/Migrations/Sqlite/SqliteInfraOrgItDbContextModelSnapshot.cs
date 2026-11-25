@@ -1997,6 +1997,19 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
                         },
                         new
                         {
+                            Id = 27,
+                            CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            HideBackButton = true,
+                            IsActive = true,
+                            IsVisible = true,
+                            Name = "HAProxy",
+                            Order = 6,
+                            Path = "/haproxy",
+                            UpdatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Version = 0
+                        },
+                        new
+                        {
                             Id = 6,
                             CreatedAt = new DateTime(2026, 10, 25, 0, 0, 0, 0, DateTimeKind.Utc),
                             HideBackButton = false,

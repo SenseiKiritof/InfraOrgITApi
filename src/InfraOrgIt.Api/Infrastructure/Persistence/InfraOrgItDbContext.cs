@@ -800,6 +800,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
             Menu(3, "Applicazioni", "/applications", true, true, true, 1, null),
             Menu(4, "Providers", "/providers", true, true, true, 1, null),
             Menu(5, "Servers", "/servers", true, true, true, 1, null),
+            Menu(27, "HAProxy", "/haproxy", true, true, true, 6, null),
             Menu(6, "Ambiente {name}", "/environments/{id}", true, false, false, 0, 2),
             Menu(7, "Applicazione {name}", "/applications/{id}", true, false, false, 0, 3),
             Menu(8, "Server {name}", "/servers/{id}", true, false, false, 0, 5),
