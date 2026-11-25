@@ -227,6 +227,27 @@ public sealed class HaproxyClient : IAsyncDisposable
                 $"Data Plane API HTTP {(int)response.StatusCode} sul certificato {name}.");
     }
 
+    public async Task SetServerStateAsync(
+        string backend,
+        string server,
+        string state,
+        CancellationToken ct)
+    {
+        var version = await DetectVersionAsync(ct);
+        var path = version == "v2"
+            ? $"services/haproxy/runtime/servers/{Uri.EscapeDataString(server)}?backend={Uri.EscapeDataString(backend)}"
+            : $"services/haproxy/runtime/backends/{Uri.EscapeDataString(backend)}/servers/{Uri.EscapeDataString(server)}";
+        var body = JsonSerializer.SerializeToUtf8Bytes(new { admin_state = state });
+        using var content = new ByteArrayContent(body);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        using var response = await http.PutAsync(
+            $"{version}/{path}", content, ct);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException(
+                $"Data Plane API HTTP {(int)response.StatusCode} su {backend}/{server}: " +
+                await response.Content.ReadAsStringAsync(ct));
+    }
+
     private async Task<List<HaproxyCertificateResult>> CertificatesAsync(
         string version,
         CancellationToken ct)

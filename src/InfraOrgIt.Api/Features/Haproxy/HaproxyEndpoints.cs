@@ -37,6 +37,8 @@ public static class HaproxyEndpoints
             .RequireRateLimiting("remote-run");
         group.MapPost("/instances/{id:int}/refresh", RefreshAsync)
             .RequireRateLimiting("remote-run");
+        group.MapPost("/instances/{id:int}/server-actions", ServerActionAsync)
+            .RequireRateLimiting("remote-run");
         group.MapGet("/instances/{id:int}/routes", ListRoutesAsync);
         group.MapGet("/instances/{id:int}/servers", ListServersAsync);
         group.MapGet("/instances/{id:int}/live", LiveAsync);
@@ -634,6 +636,44 @@ public static class HaproxyEndpoints
         return Results.Ok(items);
     }
 
+    private static async Task<IResult> ServerActionAsync(
+        int id,
+        HaproxyServerActionInput input,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        HaproxyClientFactory clients,
+        IAuditService audit,
+        CancellationToken ct)
+    {
+        var instance = await db.HaproxyInstances
+            .Include(x => x.Server).ThenInclude(x => x!.Credential)
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Istanza HAProxy", id);
+        await access.RequireOperatorAsync(
+            user, [instance.Server!.ProviderEnvironmentId], ct);
+        var action = input.Action?.Trim().ToLowerInvariant() ?? "";
+        if (action is not ("ready" or "drain" or "maint"))
+            throw Guard.Unprocessable("Azione ammessa: ready, drain, maint.");
+        var backend = Guard.Text(input.Backend, "Backend", 100);
+        var server = Guard.Text(input.Server, "Server", 200);
+        try
+        {
+            await using var client = await clients.CreateAsync(
+                instance, instance.Server, ct);
+            await client.SetServerStateAsync(backend, server, action, ct);
+            await audit.RecordAsync(AuditEntries.Change(
+                user, "haproxy.server-action", "HaproxyInstance", id,
+                detail: new { backend, server, action }), ct);
+            return Results.NoContent();
+        }
+        catch (Exception exception)
+        {
+            return Results.Json(
+                new { message = exception.Message }, statusCode: 502);
+        }
+    }
+
     private static async Task<IResult> ListCertificatesAsync(
         int id,
         ClaimsPrincipal user,
@@ -939,6 +979,11 @@ public sealed record HaproxyClusterInput(
     string? Mode,
     string? Vip,
     string? Notes);
+
+public sealed record HaproxyServerActionInput(
+    string? Backend,
+    string? Server,
+    string? Action);
 
 public sealed record HaproxySecretsInput(
     string? Password,
