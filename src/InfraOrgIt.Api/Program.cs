@@ -10,6 +10,7 @@ using InfraOrgIt.Api.Features.Auth;
 using InfraOrgIt.Api.Features.Catalog;
 using InfraOrgIt.Api.Features.Data;
 using InfraOrgIt.Api.Features.Devices;
+using InfraOrgIt.Api.Features.Haproxy;
 using InfraOrgIt.Api.Features.Inventory;
 using InfraOrgIt.Api.Features.Mcp;
 using InfraOrgIt.Api.Features.Menus;
@@ -269,6 +270,17 @@ builder.Services.AddSingleton<IEndOfLifeCatalog, EndOfLifeCatalog>();
 builder.Services.AddScoped<ServerOsUpdateChecker>();
 builder.Services.AddSingleton<ServerOsUpdateRunner>();
 builder.Services.AddHostedService<ServerOsUpdateService>();
+builder.Services.AddSingleton<HaproxyDiscoveryRunner>();
+builder.Services.AddHostedService<HaproxyDiscoveryService>();
+builder.Services.AddScoped<HaproxyClientFactory>();
+builder.Services.AddScoped<HaproxyStatsClientFactory>();
+builder.Services.AddSingleton<HaproxyClientCache>();
+builder.Services.AddSingleton<HaproxyMetricsCache>();
+builder.Services.AddSingleton<HaproxyMetricsRunner>();
+builder.Services.AddHostedService<HaproxyMetricsService>();
+builder.Services.AddHostedService<HaproxyProtocolMetricsService>();
+builder.Services.AddSingleton<HaproxyRefreshRunner>();
+builder.Services.AddHostedService<HaproxyRefreshService>();
 builder.Services.AddHttpClient("application-api-insecure")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
@@ -623,6 +635,7 @@ ProvidersEndpoints.Map(app);
 EnvironmentDefinitionsEndpoints.Map(app);
 ProviderEnvironmentsEndpoints.Map(app);
 ServersEndpoints.Map(app);
+HaproxyEndpoints.Map(app);
 ServerUpdatePolicyEndpoints.Map(app);
 TunnelServiceEndpoints.Map(app);
 ServerApplicationsEndpoints.Map(app);
