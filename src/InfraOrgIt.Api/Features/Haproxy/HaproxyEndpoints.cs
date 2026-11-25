@@ -515,16 +515,52 @@ public static class HaproxyEndpoints
             ?? throw Guard.NotFound("Istanza HAProxy", id);
         await access.RequireOperatorAsync(
             user, [instance.Server!.ProviderEnvironmentId], ct);
-        var items = await db.HaproxyRouteSnapshots.AsNoTracking()
+        var snapshots = await db.HaproxyRouteSnapshots.AsNoTracking()
             .Where(x => x.HaproxyInstanceId == id)
             .OrderBy(x => x.Frontend).ThenBy(x => x.Host).ThenBy(x => x.Path)
-            .Select(x => new HaproxyRouteDto(
+            .ToListAsync(ct);
+        var inventory = await db.ProxyRoutes.AsNoTracking()
+            .Where(x => x.ProxyConnection!.SourceServerId == instance.ServerId)
+            .Select(x => new
+            {
+                x.Id,
+                x.VirtualHost,
+                x.Route,
+                x.ListenPort,
+                x.MappedTo
+            })
+            .ToListAsync(ct);
+        var items = snapshots.Select(x =>
+        {
+            var port = FirstPort(x.Bind);
+            var match = inventory.FirstOrDefault(candidate =>
+                string.Equals(candidate.VirtualHost, x.Host,
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(NormalizePath(candidate.Route),
+                    NormalizePath(x.Path), StringComparison.OrdinalIgnoreCase) &&
+                (candidate.ListenPort is null || candidate.ListenPort == port));
+            return new HaproxyRouteDto(
                 x.Id, x.Frontend, x.Bind, x.Host, x.Path, x.Backend,
                 x.IsDefault, x.RawCondition, x.ConfigurationVersion,
-                x.CollectedAt))
-            .ToListAsync(ct);
+                x.CollectedAt,
+                match?.Id,
+                match is null
+                    ? null
+                    : $"{match.VirtualHost ?? "*"}{match.Route}" +
+                      (match.MappedTo is null ? "" : $" → {match.MappedTo}"));
+        }).ToList();
         return Results.Ok(items);
     }
+
+    private static int? FirstPort(string bind)
+    {
+        var first = bind.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        return int.TryParse(first, out var port) ? port : null;
+    }
+
+    private static string NormalizePath(string? value) =>
+        string.IsNullOrWhiteSpace(value) || value == "/" ? "/" : value;
 
     private static async Task<IResult> ListServersAsync(
         int id,
@@ -896,7 +932,9 @@ public sealed record HaproxyRouteDto(
     bool IsDefault,
     string? RawCondition,
     int? ConfigurationVersion,
-    DateTime CollectedAt);
+    DateTime CollectedAt,
+    int? ProxyRouteId,
+    string? ProxyRouteLabel);
 
 public sealed record HaproxyServerDto(
     int Id,
