@@ -55,6 +55,10 @@ public sealed class HaproxyRefreshRunner(
                 "Aggiornamento HAProxy non riuscito per l'istanza {InstanceId}",
                 instanceId);
         }
+        finally
+        {
+            running.TryRemove(instanceId, out _);
+        }
     }
 
     private async Task<HaproxyRefreshOutcome> RefreshCoreAsync(
