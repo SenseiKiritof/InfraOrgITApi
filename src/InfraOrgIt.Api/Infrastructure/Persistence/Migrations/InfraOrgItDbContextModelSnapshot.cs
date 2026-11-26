@@ -2050,6 +2050,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsDefault")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
                     b.Property<string>("Path")
                         .IsRequired()
                         .HasMaxLength(255)

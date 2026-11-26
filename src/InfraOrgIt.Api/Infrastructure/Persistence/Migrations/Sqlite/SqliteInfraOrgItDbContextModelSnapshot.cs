@@ -2048,6 +2048,11 @@ namespace InfraOrgIt.Api.Infrastructure.Persistence.Migrations.Sqlite
                     b.Property<bool>("IsDefault")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Path")
                         .IsRequired()
                         .HasMaxLength(255)

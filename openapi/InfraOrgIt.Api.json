@@ -1975,6 +1975,35 @@
         ]
       }
     },
+    "/api/haproxy/instances/{id}/metrics/series": {
+      "get": {
+        "tags": [
+          "HaproxyEndpoints"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "session": [ ]
+          }
+        ]
+      }
+    },
     "/api/haproxy/instances/{id}/protocol": {
       "get": {
         "tags": [
