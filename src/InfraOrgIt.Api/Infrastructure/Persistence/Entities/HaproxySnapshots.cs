@@ -6,6 +6,7 @@ public sealed class HaproxyRouteSnapshot : EntityBase
     public int HaproxyInstanceId { get; set; }
     public string Frontend { get; set; } = "";
     public string Bind { get; set; } = "";
+    public string Mode { get; set; } = "http";
     public string Host { get; set; } = "";
     public string Path { get; set; } = "/";
     public string Backend { get; set; } = "";

@@ -273,6 +273,7 @@ public class InfraOrgItDbContext(DbContextOptions options) : DbContext(options)
         {
             e.Property(x => x.Frontend).HasMaxLength(100);
             e.Property(x => x.Bind).HasMaxLength(200);
+            e.Property(x => x.Mode).HasMaxLength(10);
             e.Property(x => x.Host).HasMaxLength(200);
             e.Property(x => x.Path).HasMaxLength(255);
             e.Property(x => x.Backend).HasMaxLength(100);

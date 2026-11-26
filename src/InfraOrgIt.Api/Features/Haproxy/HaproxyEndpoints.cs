@@ -43,6 +43,7 @@ public static class HaproxyEndpoints
         group.MapGet("/instances/{id:int}/servers", ListServersAsync);
         group.MapGet("/instances/{id:int}/live", LiveAsync);
         group.MapGet("/instances/{id:int}/metrics", MetricsAsync);
+        group.MapGet("/instances/{id:int}/metrics/series", MetricsSeriesAsync);
         group.MapGet("/instances/{id:int}/protocol", ProtocolAsync);
         group.MapGet("/instances/{id:int}/certificates", ListCertificatesAsync);
         group.MapPost("/instances/{id:int}/certificates", UploadCertificateAsync)
@@ -569,13 +570,24 @@ public static class HaproxyEndpoints
             .ToListAsync(ct);
         var inventory = await db.ProxyRoutes.AsNoTracking()
             .Where(x => x.ProxyConnection!.SourceServerId == instance.ServerId)
+            .Include(x => x.TargetServerApplication)
+            .ThenInclude(x => x!.ApplicationVersion)
+            .ThenInclude(x => x!.Application)
             .Select(x => new
             {
                 x.Id,
                 x.VirtualHost,
                 x.Route,
                 x.ListenPort,
-                x.MappedTo
+                x.MappedTo,
+                ApplicationName = x.TargetServerApplication == null
+                    ? null
+                    : x.TargetServerApplication.ApplicationVersion == null
+                        ? null
+                        : x.TargetServerApplication.ApplicationVersion.Application == null
+                            ? null
+                            : x.TargetServerApplication.ApplicationVersion.Application.Name,
+                x.TargetServerApplication!.HostPort
             })
             .ToListAsync(ct);
         var items = snapshots.Select(x =>
@@ -588,14 +600,16 @@ public static class HaproxyEndpoints
                     NormalizePath(x.Path), StringComparison.OrdinalIgnoreCase) &&
                 (candidate.ListenPort is null || candidate.ListenPort == port));
             return new HaproxyRouteDto(
-                x.Id, x.Frontend, x.Bind, x.Host, x.Path, x.Backend,
+                x.Id, x.Frontend, x.Bind, x.Mode, x.Host, x.Path, x.Backend,
                 x.IsDefault, x.RawCondition, x.ConfigurationVersion,
                 x.CollectedAt,
                 match?.Id,
                 match is null
                     ? null
                     : $"{match.VirtualHost ?? "*"}{match.Route}" +
-                      (match.MappedTo is null ? "" : $" → {match.MappedTo}"));
+                      (match.MappedTo is null ? "" : $" → {match.MappedTo}"),
+                match?.ApplicationName,
+                match?.HostPort);
         }).ToList();
         return Results.Ok(items);
     }
@@ -999,6 +1013,65 @@ public static class HaproxyEndpoints
             .ToList());
     }
 
+    private static async Task<IResult> MetricsSeriesAsync(
+        int id,
+        HttpContext http,
+        ClaimsPrincipal user,
+        EnvironmentAccessService access,
+        InfraOrgItDbContext db,
+        CancellationToken ct)
+    {
+        var instance = await db.HaproxyInstances.AsNoTracking()
+            .Include(x => x.Server)
+            .SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw Guard.NotFound("Istanza HAProxy", id);
+        await access.RequireOperatorAsync(
+            user, [instance.Server!.ProviderEnvironmentId], ct);
+
+        var minutes = Math.Clamp(
+            PageRequest.IntQuery(http, "minutes") ?? 60, 5, 129_600);
+        var kind = (http.Request.Query["kind"].ToString() is { Length: > 0 } value
+            ? value
+            : "server").ToLowerInvariant();
+        if (kind is not ("frontend" or "backend" or "server"))
+            throw Guard.Unprocessable("Kind ammesso: frontend, backend, server.");
+        var resolution = minutes > 10_080 ? 5 : 1;
+        var since = DateTime.UtcNow.AddMinutes(-minutes);
+        var rows = await db.HaproxyMetricSamples.AsNoTracking()
+            .Where(x => x.HaproxyInstanceId == id &&
+                        x.ResolutionMinutes == resolution &&
+                        x.Kind == kind &&
+                        x.Bucket >= since)
+            .OrderBy(x => x.Bucket)
+            .ThenBy(x => x.Proxy)
+            .ThenBy(x => x.Server)
+            .ToListAsync(ct);
+
+        var previous = new Dictionary<string, HaproxyMetricSample>();
+        var series = new Dictionary<string, (string Proxy, string Server,
+            List<HaproxyMetricPointDto> Points)>();
+        foreach (var row in rows)
+        {
+            var key = $"{row.Proxy}|{row.Server}";
+            previous.TryGetValue(key, out var before);
+            previous[key] = row;
+            if (!series.TryGetValue(key, out var item))
+            {
+                item = (row.Proxy, row.Server, []);
+                series[key] = item;
+            }
+            var accumulator = new MetricAccumulator();
+            accumulator.Add(row, before);
+            item.Points.Add(accumulator.ToDto(row.Bucket));
+        }
+
+        return Results.Ok(series.Values
+            .OrderBy(x => x.Proxy).ThenBy(x => x.Server)
+            .Select(x => new HaproxyMetricSeriesDto(
+                x.Proxy, x.Server, x.Points))
+            .ToList());
+    }
+
     private static async Task<IResult> RunDiscoveryAsync(
         int? serverId,
         ClaimsPrincipal user,
@@ -1111,6 +1184,7 @@ public sealed record HaproxyRouteDto(
     int Id,
     string Frontend,
     string Bind,
+    string Mode,
     string Host,
     string Path,
     string Backend,
@@ -1119,7 +1193,9 @@ public sealed record HaproxyRouteDto(
     int? ConfigurationVersion,
     DateTime CollectedAt,
     int? ProxyRouteId,
-    string? ProxyRouteLabel);
+    string? ProxyRouteLabel,
+    string? ApplicationName,
+    int? HostPort);
 
 public sealed record HaproxyServerDto(
     int Id,
@@ -1144,6 +1220,11 @@ public sealed record HaproxyMetricPointDto(
     long Ctime,
     long Ttime,
     long Qtime);
+
+public sealed record HaproxyMetricSeriesDto(
+    string Proxy,
+    string Server,
+    IReadOnlyList<HaproxyMetricPointDto> Points);
 
 public sealed record HaproxyCertificateDto(
     int Id,
