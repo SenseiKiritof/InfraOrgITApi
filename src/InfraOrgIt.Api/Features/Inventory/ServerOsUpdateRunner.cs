@@ -43,6 +43,7 @@ public sealed class ServerOsUpdateRunner(
             using var scope = scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
             var server = await db.Servers
+                .Include(x => x.Credential)
                 .SingleOrDefaultAsync(x => x.Id == serverId, ct);
             if (server is null) return;
 
@@ -56,6 +57,10 @@ public sealed class ServerOsUpdateRunner(
 
             server.OsName = result.OsName ?? server.OsName;
             server.OsVersion = result.OsVersion ?? server.OsVersion;
+            var osName = result.OsName?.Trim();
+            if (!string.IsNullOrEmpty(osName))
+                server.OperatingSystem =
+                    osName.Length <= 100 ? osName : osName[..100];
             server.OsUpdateTarget = result.Target;
             server.OsUpdateTargetLts =
                 result.Target is null ? null : result.TargetLts;
