@@ -116,8 +116,16 @@ public static class HaproxyEndpoints
                 x.AllowSelfSigned))
             .ToListAsync(ct);
 
-        return Results.Ok(items);
+        return Results.Ok(items.Select(x => x with
+        {
+            LastSeenAt = AsUtc(x.LastSeenAt),
+            LastTestAt = AsUtc(x.LastTestAt),
+            LastRefreshAt = AsUtc(x.LastRefreshAt)
+        }).ToList());
     }
+
+    private static DateTime? AsUtc(DateTime? value) =>
+        value is null ? null : DateTime.SpecifyKind(value.Value, DateTimeKind.Utc);
 
     private static async Task<IResult> ListClustersAsync(
         ClaimsPrincipal user,
@@ -568,41 +576,15 @@ public static class HaproxyEndpoints
             .Where(x => x.HaproxyInstanceId == id)
             .OrderBy(x => x.Frontend).ThenBy(x => x.Host).ThenBy(x => x.Path)
             .ToListAsync(ct);
-        var inventory = await db.ProxyRoutes.AsNoTracking()
-            .Where(x => x.ProxyConnection!.SourceServerId == instance.ServerId)
-            .Include(x => x.TargetServerApplication)
-            .ThenInclude(x => x!.ApplicationVersion)
-            .ThenInclude(x => x!.Application)
-            .Select(x => new
-            {
-                x.Id,
-                x.VirtualHost,
-                x.Route,
-                x.ListenPort,
-                x.MappedTo,
-                ApplicationName = x.TargetServerApplication == null
-                    ? null
-                    : x.TargetServerApplication.ApplicationVersion == null
-                        ? null
-                        : x.TargetServerApplication.ApplicationVersion.Application == null
-                            ? null
-                            : x.TargetServerApplication.ApplicationVersion.Application.Name,
-                x.TargetServerApplication!.HostPort
-            })
-            .ToListAsync(ct);
+        var inventory = await LoadRouteInventoryAsync(db, instance.ServerId, ct);
         var items = snapshots.Select(x =>
         {
-            var port = FirstPort(x.Bind);
-            var match = inventory.FirstOrDefault(candidate =>
-                string.Equals(candidate.VirtualHost, x.Host,
-                    StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(NormalizePath(candidate.Route),
-                    NormalizePath(x.Path), StringComparison.OrdinalIgnoreCase) &&
-                (candidate.ListenPort is null || candidate.ListenPort == port));
+            var match = MatchRoute(
+                inventory, x.Host, x.Path, FirstPort(x.Bind));
             return new HaproxyRouteDto(
                 x.Id, x.Frontend, x.Bind, x.Mode, x.Host, x.Path, x.Backend,
                 x.IsDefault, x.RawCondition, x.ConfigurationVersion,
-                x.CollectedAt,
+                DateTime.SpecifyKind(x.CollectedAt, DateTimeKind.Utc),
                 match?.Id,
                 match is null
                     ? null
@@ -624,6 +606,46 @@ public static class HaproxyEndpoints
     private static string NormalizePath(string? value) =>
         string.IsNullOrWhiteSpace(value) || value == "/" ? "/" : value;
 
+    private sealed record RouteInventoryItem(
+        int Id,
+        string? VirtualHost,
+        string? Route,
+        int? ListenPort,
+        string? MappedTo,
+        string? ApplicationName,
+        int? HostPort);
+
+    private static Task<List<RouteInventoryItem>> LoadRouteInventoryAsync(
+        InfraOrgItDbContext db, int serverId, CancellationToken ct) =>
+        db.ProxyRoutes.AsNoTracking()
+            .Where(x => x.ProxyConnection!.SourceServerId == serverId)
+            .Select(x => new RouteInventoryItem(
+                x.Id,
+                x.VirtualHost,
+                x.Route,
+                x.ListenPort,
+                x.MappedTo,
+                x.TargetServerApplication == null
+                    ? null
+                    : x.TargetServerApplication.ApplicationVersion == null
+                        ? null
+                        : x.TargetServerApplication.ApplicationVersion.Application == null
+                            ? null
+                            : x.TargetServerApplication.ApplicationVersion.Application.Name,
+                x.TargetServerApplication!.HostPort))
+            .ToListAsync(ct);
+
+    private static RouteInventoryItem? MatchRoute(
+        List<RouteInventoryItem> inventory, string? host, string? path, int? port) =>
+        inventory.FirstOrDefault(candidate =>
+            string.Equals(candidate.VirtualHost, host,
+                StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(NormalizePath(candidate.Route),
+                NormalizePath(path), StringComparison.OrdinalIgnoreCase) &&
+            (candidate.ListenPort is null || candidate.ListenPort == port));
+
+    private const int MaxApplicationNames = 5;
+
     private static async Task<IResult> ListServersAsync(
         int id,
         ClaimsPrincipal user,
@@ -637,14 +659,107 @@ public static class HaproxyEndpoints
             ?? throw Guard.NotFound("Istanza HAProxy", id);
         await access.RequireOperatorAsync(
             user, [instance.Server!.ProviderEnvironmentId], ct);
-        var items = await db.HaproxyServerSnapshots.AsNoTracking()
+        var snapshots = await db.HaproxyServerSnapshots.AsNoTracking()
             .Where(x => x.HaproxyInstanceId == id)
             .OrderBy(x => x.Backend).ThenBy(x => x.Server)
-            .Select(x => new HaproxyServerDto(
-                x.Id, x.Backend, x.Server, x.Address, x.Status,
-                x.CheckStatus, x.Weight, x.CollectedAt))
             .ToListAsync(ct);
+        var deployments = await db.ServerApplications.AsNoTracking()
+            .Where(x => x.Server!.ProviderEnvironmentId ==
+                instance.Server.ProviderEnvironmentId)
+            .Include(x => x.Server)
+            .Include(x => x.ApplicationVersion).ThenInclude(x => x!.Application)
+            .ToListAsync(ct);
+        Dictionary<string, List<string>>? backendApplications = null;
+        var items = new List<HaproxyServerDto>(snapshots.Count);
+        foreach (var snapshot in snapshots)
+        {
+            var names = MatchApplicationsByAddress(deployments, snapshot.Address);
+            if (names.Count == 0)
+            {
+                backendApplications ??= await LoadBackendApplicationsAsync(
+                    db, id, instance.ServerId, ct);
+                names = backendApplications.GetValueOrDefault(snapshot.Backend)
+                    ?? [];
+            }
+            items.Add(new HaproxyServerDto(
+                snapshot.Id, snapshot.Backend, snapshot.Server, snapshot.Address,
+                snapshot.Status, snapshot.CheckStatus, snapshot.Weight,
+                DateTime.SpecifyKind(snapshot.CollectedAt, DateTimeKind.Utc),
+                names));
+        }
         return Results.Ok(items);
+    }
+
+    private static IReadOnlyList<string> MatchApplicationsByAddress(
+        List<ServerApplication> deployments, string? address)
+    {
+        var (host, port) = ParseAddress(address);
+        if (host.Length == 0 || port is null) return [];
+        return deployments
+            .Where(x => x.HostPort == port &&
+                x.Server is not null &&
+                string.Equals(x.Server.IpAddress, host,
+                    StringComparison.OrdinalIgnoreCase) &&
+                x.ApplicationVersion?.Application is not null)
+            .Select(x => x.ApplicationVersion!.Application!.Name)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .Take(MaxApplicationNames)
+            .ToList();
+    }
+
+    private static (string Host, int? Port) ParseAddress(string? address)
+    {
+        var value = address?.Trim() ?? "";
+        if (value.Length == 0) return ("", null);
+        if (value[0] == '[')
+        {
+            var end = value.IndexOf(']');
+            if (end > 0)
+            {
+                var rest = value[(end + 1)..].TrimStart(':');
+                return (value[1..end],
+                    int.TryParse(rest, out var bracketed) ? bracketed : null);
+            }
+        }
+        var colon = value.LastIndexOf(':');
+        if (colon > 0 && !value[..colon].Contains(':') &&
+            int.TryParse(value[(colon + 1)..], out var port))
+            return (value[..colon], port);
+        return (value, null);
+    }
+
+    private static async Task<Dictionary<string, List<string>>>
+        LoadBackendApplicationsAsync(
+            InfraOrgItDbContext db, int instanceId, int serverId,
+            CancellationToken ct)
+    {
+        var snapshots = await db.HaproxyRouteSnapshots.AsNoTracking()
+            .Where(x => x.HaproxyInstanceId == instanceId)
+            .ToListAsync(ct);
+        var inventory = await LoadRouteInventoryAsync(db, serverId, ct);
+        var collected = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var snapshot in snapshots)
+        {
+            var name = MatchRoute(
+                inventory, snapshot.Host, snapshot.Path,
+                FirstPort(snapshot.Bind))?.ApplicationName;
+            if (name is null) continue;
+            if (!collected.TryGetValue(snapshot.Backend, out var names))
+            {
+                names = [];
+                collected[snapshot.Backend] = names;
+            }
+            if (!names.Contains(name, StringComparer.Ordinal))
+                names.Add(name);
+        }
+        return collected.ToDictionary(
+            x => x.Key,
+            x => x.Value
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .Take(MaxApplicationNames)
+                .ToList(),
+            StringComparer.Ordinal);
     }
 
     private static async Task<IResult> ProtocolAsync(
@@ -690,7 +805,10 @@ public static class HaproxyEndpoints
                 x.QuicTransportErrors, x.QpackEncoderErrors,
                 x.QpackDecoderErrors, x.SslFailedHandshake, x.Bucket))
             .ToListAsync(ct);
-        return Results.Ok(items);
+        return Results.Ok(items.Select(x => x with
+        {
+            Bucket = DateTime.SpecifyKind(x.Bucket, DateTimeKind.Utc)
+        }).ToList());
     }
 
     private static async Task<IResult> ServerActionAsync(
@@ -762,7 +880,10 @@ public static class HaproxyEndpoints
                 x.Id, x.StorageName, x.Path, x.Domains, x.Issuer,
                 x.NotBefore, x.NotAfter, x.Size, x.CollectedAt))
             .ToListAsync(ct);
-        return Results.Ok(items);
+        return Results.Ok(items.Select(x => x with
+        {
+            CollectedAt = DateTime.SpecifyKind(x.CollectedAt, DateTimeKind.Utc)
+        }).ToList());
     }
 
     private static async Task<IResult> UploadCertificateAsync(
@@ -1205,7 +1326,8 @@ public sealed record HaproxyServerDto(
     string Status,
     string? CheckStatus,
     int? Weight,
-    DateTime CollectedAt);
+    DateTime CollectedAt,
+    IReadOnlyList<string> ApplicationNames);
 
 public sealed record HaproxyMetricPointDto(
     DateTime Timestamp,
@@ -1305,7 +1427,7 @@ internal sealed class MetricAccumulator
     }
 
     public HaproxyMetricPointDto ToDto(DateTime timestamp) =>
-        new(timestamp,
+        new(DateTime.SpecifyKind(timestamp, DateTimeKind.Utc),
             req,
             h4xx,
             h5xx,

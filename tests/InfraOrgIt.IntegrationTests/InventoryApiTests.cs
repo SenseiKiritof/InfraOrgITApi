@@ -1103,6 +1103,269 @@ public sealed class InventoryApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Haproxy_timestamps_are_serialized_as_utc()
+    {
+        using var system = await ClientForAsync(
+            "hap.utc.system", systemAdmin: true);
+        using var manager = await ClientForAsync("hap.utc.manager");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        await AssignEnvironmentRoleAsync(system, seeded.ProviderEnvironmentId,
+            "hap.utc.manager", "ServerAdmin", manager);
+
+        var now = DateTime.UtcNow;
+        var bucket = new DateTime(now.Year, now.Month, now.Day, now.Hour,
+            now.Minute, 0, DateTimeKind.Utc);
+        int instanceId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var instance = new HaproxyInstance
+            {
+                ServerId = seeded.ServerId,
+                Name = "haproxy-" + suffix,
+                BaseUrl = "http://127.0.0.1:5555",
+                Transport = "SshForward",
+                ApiHost = "127.0.0.1",
+                ApiPort = 5555,
+                ApiVersion = "auto",
+                MonitoringChoice = "Enabled",
+                DiscoverySource = "Auto",
+                DiscoveryStatus = "Found",
+                LastSeenAt = bucket,
+                LastTestAt = bucket,
+                LastRefreshAt = bucket
+            };
+            db.HaproxyInstances.Add(instance);
+            await db.SaveChangesAsync();
+            instanceId = instance.Id;
+            db.HaproxyMetricSamples.Add(new HaproxyMetricSample
+            {
+                HaproxyInstanceId = instanceId,
+                ResolutionMinutes = 1,
+                Bucket = bucket,
+                Kind = "frontend",
+                Proxy = "public",
+                Req = 10
+            });
+            db.HaproxyProtocolMetricSamples.Add(new HaproxyProtocolMetricSample
+            {
+                HaproxyInstanceId = instanceId,
+                ResolutionMinutes = 1,
+                Bucket = bucket,
+                Kind = "frontend",
+                Proxy = "public",
+                H2Req = 3
+            });
+            db.HaproxyRouteSnapshots.Add(new HaproxyRouteSnapshot
+            {
+                HaproxyInstanceId = instanceId,
+                Frontend = "public",
+                Bind = "127.0.0.1:80",
+                Host = "example.test",
+                Path = "/",
+                Backend = "app",
+                CollectedAt = bucket
+            });
+            db.HaproxyServerSnapshots.Add(new HaproxyServerSnapshot
+            {
+                HaproxyInstanceId = instanceId,
+                Backend = "app",
+                Server = "node1",
+                Address = "10.0.0.1:8080",
+                Status = "UP",
+                CollectedAt = bucket
+            });
+            db.HaproxyCertificateSnapshots.Add(new HaproxyCertificateSnapshot
+            {
+                HaproxyInstanceId = instanceId,
+                StorageName = "site.pem",
+                Path = "/etc/haproxy/ssl/site.pem",
+                Domains = "example.test",
+                Issuer = "Example CA",
+                Size = 2048,
+                CollectedAt = bucket
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var metrics = await ReadAsync(await manager.GetAsync(
+            $"/api/haproxy/instances/{instanceId}/metrics?minutes=60&kind=frontend"));
+        var point = metrics.EnumerateArray().Single();
+        Assert.EndsWith("Z", point.GetProperty("timestamp").GetString());
+
+        var series = await ReadAsync(await manager.GetAsync(
+            $"/api/haproxy/instances/{instanceId}/metrics/series?minutes=60&kind=frontend"));
+        var seriesPoint = series.EnumerateArray().Single()
+            .GetProperty("points").EnumerateArray().Single();
+        Assert.EndsWith("Z", seriesPoint.GetProperty("timestamp").GetString());
+
+        var protocol = await ReadAsync(await manager.GetAsync(
+            $"/api/haproxy/instances/{instanceId}/protocol?kind=frontend"));
+        var protocolRow = protocol.EnumerateArray().Single();
+        Assert.EndsWith("Z", protocolRow.GetProperty("bucket").GetString());
+
+        var routes = await ReadAsync(await manager.GetAsync(
+            $"/api/haproxy/instances/{instanceId}/routes"));
+        Assert.EndsWith("Z", routes.EnumerateArray().Single()
+            .GetProperty("collectedAt").GetString());
+
+        var servers = await ReadAsync(await manager.GetAsync(
+            $"/api/haproxy/instances/{instanceId}/servers"));
+        Assert.EndsWith("Z", servers.EnumerateArray().Single()
+            .GetProperty("collectedAt").GetString());
+
+        var instances = await ReadAsync(await manager.GetAsync(
+            $"/api/haproxy/instances?serverId={seeded.ServerId}"));
+        var instanceRow = instances.EnumerateArray().Single();
+        Assert.EndsWith("Z", instanceRow.GetProperty("lastSeenAt").GetString());
+        Assert.EndsWith("Z", instanceRow.GetProperty("lastTestAt").GetString());
+        Assert.EndsWith("Z",
+            instanceRow.GetProperty("lastRefreshAt").GetString());
+
+        var certificates = await ReadAsync(await manager.GetAsync(
+            $"/api/haproxy/instances/{instanceId}/certificates"));
+        Assert.EndsWith("Z", certificates.EnumerateArray().Single()
+            .GetProperty("collectedAt").GetString());
+    }
+
+    [Fact]
+    public async Task Haproxy_servers_report_reconciled_application_names()
+    {
+        using var system = await ClientForAsync("hap.app.system", systemAdmin: true);
+        using var manager = await ClientForAsync("hap.app.manager");
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedEnvironmentAsync(suffix);
+        await AssignEnvironmentRoleAsync(system, seeded.ProviderEnvironmentId,
+            "hap.app.manager", "ServerAdmin", manager);
+        var targetServerId = await AddServerAsync(
+            seeded.ProviderEnvironmentId, "hap-app-" + suffix);
+
+        var now = DateTime.UtcNow;
+        int instanceId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            var checkout = new Application
+            {
+                Name = "Checkout " + suffix,
+                BasePath = "/checkout",
+                ListeningOnPort = 8080
+            };
+            var billing = new Application
+            {
+                Name = "Billing " + suffix,
+                BasePath = "/billing",
+                ListeningOnPort = 9090
+            };
+            db.Applications.AddRange(checkout, billing);
+            await db.SaveChangesAsync();
+            var checkoutVersion = new ApplicationVersion
+            {
+                ApplicationId = checkout.Id,
+                VersionNumber = "1.0.0"
+            };
+            var billingVersion = new ApplicationVersion
+            {
+                ApplicationId = billing.Id,
+                VersionNumber = "1.0.0"
+            };
+            db.ApplicationVersions.AddRange(checkoutVersion, billingVersion);
+            await db.SaveChangesAsync();
+            db.ServerApplications.Add(new ServerApplication
+            {
+                ServerId = seeded.ServerId,
+                ApplicationVersionId = checkoutVersion.Id,
+                ExposedPort = 8080,
+                HostPort = 8080
+            });
+            var billingDeployment = new ServerApplication
+            {
+                ServerId = targetServerId,
+                ApplicationVersionId = billingVersion.Id,
+                ExposedPort = 9090,
+                HostPort = 9090
+            };
+            db.ServerApplications.Add(billingDeployment);
+            var connection = new ProxyConnection
+            {
+                SourceServerId = seeded.ServerId,
+                TargetServerId = targetServerId,
+                Direction = "Outgoing"
+            };
+            db.ProxyConnections.Add(connection);
+            await db.SaveChangesAsync();
+            db.ProxyRoutes.Add(new ProxyRoute
+            {
+                ProxyConnectionId = connection.Id,
+                Route = "/billing",
+                VirtualHost = "billing.test",
+                ListenPort = 9090,
+                TargetServerApplicationId = billingDeployment.Id
+            });
+            var instance = new HaproxyInstance
+            {
+                ServerId = seeded.ServerId,
+                Name = "haproxy-" + suffix,
+                BaseUrl = "http://127.0.0.1:5555",
+                Transport = "SshForward",
+                ApiHost = "127.0.0.1",
+                ApiPort = 5555,
+                ApiVersion = "auto",
+                MonitoringChoice = "Enabled",
+                DiscoverySource = "Auto",
+                DiscoveryStatus = "Found"
+            };
+            db.HaproxyInstances.Add(instance);
+            await db.SaveChangesAsync();
+            instanceId = instance.Id;
+            db.HaproxyServerSnapshots.AddRange(
+                new HaproxyServerSnapshot
+                {
+                    HaproxyInstanceId = instanceId,
+                    Backend = "checkout",
+                    Server = "node1",
+                    Address = "10.20.0.1:8080",
+                    Status = "UP",
+                    CollectedAt = now
+                },
+                new HaproxyServerSnapshot
+                {
+                    HaproxyInstanceId = instanceId,
+                    Backend = "billing",
+                    Server = "node2",
+                    Address = "10.20.0.9:9090",
+                    Status = "UP",
+                    CollectedAt = now
+                });
+            db.HaproxyRouteSnapshots.Add(new HaproxyRouteSnapshot
+            {
+                HaproxyInstanceId = instanceId,
+                Frontend = "public",
+                Bind = "9090",
+                Host = "billing.test",
+                Path = "/billing",
+                Backend = "billing",
+                CollectedAt = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var servers = await ReadAsync(await manager.GetAsync(
+            $"/api/haproxy/instances/{instanceId}/servers"));
+        var rows = servers.EnumerateArray()
+            .ToDictionary(x => x.GetProperty("backend").GetString()!);
+
+        var checkoutNames = rows["checkout"].GetProperty("applicationNames")
+            .EnumerateArray().Select(x => x.GetString()).ToList();
+        Assert.Equal(["Checkout " + suffix], checkoutNames);
+
+        var billingNames = rows["billing"].GetProperty("applicationNames")
+            .EnumerateArray().Select(x => x.GetString()).ToList();
+        Assert.Equal(["Billing " + suffix], billingNames);
+    }
+
+    [Fact]
     public async Task Server_os_update_check_runs_manually_in_background()
     {
         using var admin = await ClientForAsync("os.manual", systemAdmin: true);
