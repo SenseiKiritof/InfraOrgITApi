@@ -20,6 +20,7 @@ public sealed record HaproxyConnectionTest(
 public sealed record HaproxyRouteResult(
     string Frontend,
     string Bind,
+    string Mode,
     string Host,
     string Path,
     string Backend,
@@ -530,6 +531,8 @@ public sealed class HaproxyClient : IAsyncDisposable
         {
             var name = Text(frontend, "name");
             if (name.Length == 0) continue;
+            var mode = Text(frontend, "mode").ToLowerInvariant();
+            if (mode is not ("http" or "tcp")) mode = "http";
             var defaultBackend = Text(frontend, "default_backend");
             var encoded = Uri.EscapeDataString(name);
             var binds = await GetArrayAsync(version,
@@ -577,17 +580,17 @@ public sealed class HaproxyClient : IAsyncDisposable
                         ? match.Groups["path"].Value
                         : "/";
                     foreach (var host in values)
-                        AddRoute(result, name, bind, host, path, backend,
+                        AddRoute(result, name, bind, mode, host, path, backend,
                             false, null, configVersion);
                 }
                 else
                 {
-                    AddRoute(result, name, bind, "", "", backend, false,
+                    AddRoute(result, name, bind, mode, "", "", backend, false,
                         test, configVersion);
                 }
             }
             if (defaultBackend.Length > 0)
-                AddRoute(result, name, bind, "", "", defaultBackend, true,
+                AddRoute(result, name, bind, mode, "", "", defaultBackend, true,
                     "default_backend", configVersion);
         }
 
@@ -601,6 +604,7 @@ public sealed class HaproxyClient : IAsyncDisposable
         List<HaproxyRouteResult> routes,
         string frontend,
         string bind,
+        string mode,
         string host,
         string path,
         string backend,
@@ -611,6 +615,7 @@ public sealed class HaproxyClient : IAsyncDisposable
         routes.Add(new HaproxyRouteResult(
             Trim(frontend, 100),
             Trim(bind, 200),
+            mode,
             Trim(host, 200),
             Trim(path.Length == 0 ? "/" : path, 255),
             Trim(backend, 100),

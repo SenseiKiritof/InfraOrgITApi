@@ -130,6 +130,7 @@ public sealed class HaproxyRefreshRunner(
                     HaproxyInstanceId = instance.Id,
                     Frontend = route.Frontend,
                     Bind = route.Bind,
+                    Mode = route.Mode,
                     Host = route.Host,
                     Path = route.Path,
                     Backend = route.Backend,
