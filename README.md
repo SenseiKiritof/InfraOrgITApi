@@ -19,6 +19,10 @@ use fictitious demo data.
 - **Remote operations**: SSH console, SFTP/FTPS file transfer, command
   templates, application actions and network reachability tests executed from
   the server.
+- **HAProxy monitoring**: read-only discovery over SSH, opt-in per instance,
+  Data Plane API or stats endpoint, one- and five-minute metrics with 90-day
+  retention, routes, servers, protocol counters, certificate metadata and
+  backend-to-application reconciliation.
 - **MCP**: inventory tools, resources and prompts over `/mcp` (Streamable
   HTTP), for IDE assistants and agents.
 - **Desktop tunnels**: the tunnel API accepts the authenticated BFF session as
@@ -46,6 +50,23 @@ use fictitious demo data.
   individual permissions; action calls then need no per-call decision.
 - **Audit**: MCP calls, console sessions, actions, tests and tunnel events,
   with a tamper-evident hash chain and an optional external anchor.
+
+## HAProxy
+
+`/api/haproxy` exposes discovered instances, clusters, runtime actions, routes,
+servers, live and historical metrics, certificate metadata and protocol
+counters. Discovery uses SSH in read-only mode; monitoring must be enabled
+explicitly and never changes the HAProxy configuration. The client reaches the
+Data Plane API directly over HTTPS or through an SSH forward, and supports a
+stats-only mode for older versions. Metrics keep one-minute samples for 7 days
+and five-minute samples for 90 days. Every server in `/servers` reports the
+inventory applications reconciled by `IP:port`, with the applications of the
+reconciled backend routes as fallback. Metric, protocol, route, server,
+certificate and instance timestamps are serialized as UTC. Certificate writes
+accept PEM upload, replace and delete, but the API stores metadata only and
+never keeps private keys. See
+[HAProxy management](https://github.com/SenseiKiritof/AllInfraOrgIT/blob/main/docs/architecture/haproxy-management.md)
+for the transport and permission model.
 
 ## Connect an MCP client
 
