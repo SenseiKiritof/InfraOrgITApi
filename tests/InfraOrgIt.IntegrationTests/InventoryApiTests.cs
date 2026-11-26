@@ -1158,6 +1158,9 @@ public sealed class InventoryApiTests : IAsyncLifetime
             checkedServer.Value.GetProperty("osUpdateTarget").GetString());
         Assert.Equal("Ubuntu 22.04.4 LTS",
             checkedServer.Value.GetProperty("osName").GetString());
+        Assert.Equal("Ubuntu 22.04.4 LTS",
+            checkedServer.Value.GetProperty("operatingSystem").GetString());
+        Assert.NotNull(_ssh.Servers[^1].Credential);
     }
 
     [Fact]
@@ -2625,9 +2628,13 @@ public sealed class InventoryApiTests : IAsyncLifetime
         public SshCommandResult Result { get; set; } = new(0, "");
         public List<string> Scripts { get; } = [];
         public List<FakeShell> Shells { get; } = [];
+        public List<Server> Servers { get; } = [];
 
-        public Task<ISshSession> ConnectAsync(Server server, CancellationToken ct) =>
-            Task.FromResult<ISshSession>(new FakeSession(this));
+        public Task<ISshSession> ConnectAsync(Server server, CancellationToken ct)
+        {
+            Servers.Add(server);
+            return Task.FromResult<ISshSession>(new FakeSession(this));
+        }
 
         public Task<InfraOrgIt.Api.Infrastructure.Files.IFileTransferSession> OpenSftpAsync(
             Server server, ServerCredential credential, int port, CancellationToken ct) =>
