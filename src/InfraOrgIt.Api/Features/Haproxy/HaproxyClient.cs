@@ -427,35 +427,42 @@ public sealed class HaproxyClient : IAsyncDisposable
         var requested = instance.ApiVersion.Trim().ToLowerInvariant();
         if (requested is "v2" or "v3")
         {
-            if (await ProbeAsync(requested, ct)) return requested;
+            var detail = await ProbeAsync(requested, ct);
+            if (detail is null) return requested;
             throw new InvalidOperationException(
-                $"La Data Plane API non risponde su {requested}.");
+                $"La Data Plane API non risponde su {requested}: {detail}.");
         }
 
-        if (instance.EffectiveApiVersion is "v2" or "v3" &&
-            await ProbeAsync(instance.EffectiveApiVersion, ct))
-            return instance.EffectiveApiVersion;
+        if (instance.EffectiveApiVersion is "v2" or "v3")
+        {
+            var cached = await ProbeAsync(instance.EffectiveApiVersion, ct);
+            if (cached is null) return instance.EffectiveApiVersion;
+        }
 
-        if (await ProbeAsync("v3", ct)) return "v3";
-        if (await ProbeAsync("v2", ct)) return "v2";
+        var v3 = await ProbeAsync("v3", ct);
+        if (v3 is null) return "v3";
+        var v2 = await ProbeAsync("v2", ct);
+        if (v2 is null) return "v2";
         throw new InvalidOperationException(
-            "Data Plane API non raggiungibile su v3 o v2.");
+            $"Data Plane API non raggiungibile: v3 {v3}; v2 {v2}.");
     }
 
-    private async Task<bool> ProbeAsync(string version, CancellationToken ct)
+    private async Task<string?> ProbeAsync(string version, CancellationToken ct)
     {
         try
         {
             using var response = await http.GetAsync($"{version}/info", ct);
-            return response.IsSuccessStatusCode;
+            return response.IsSuccessStatusCode
+                ? null
+                : $"HTTP {(int)response.StatusCode}";
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException exception)
         {
-            return false;
+            return exception.Message;
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            return false;
+            return "timeout";
         }
     }
 
