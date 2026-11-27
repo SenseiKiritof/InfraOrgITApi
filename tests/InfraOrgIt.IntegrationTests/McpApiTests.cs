@@ -670,6 +670,20 @@ public sealed class McpApiTests : IAsyncLifetime
             Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
         }
 
+        var emptyApprove = await SendAsync(userSession, HttpMethod.Post,
+            $"/api/mcp/agents/{agentId}/approve",
+            new { permissions = Array.Empty<object>() });
+        Assert.Equal(
+            HttpStatusCode.UnprocessableEntity, emptyApprove.StatusCode);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<InfraOrgItDbContext>();
+            Assert.Equal("Pending", await db.McpAgents
+                .Where(x => x.Id == agentId)
+                .Select(x => x.Status)
+                .SingleAsync());
+        }
+
         Assert.Equal(HttpStatusCode.Unauthorized,
             (await mcp.GetAsync("/api/mcp/agents")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized,
