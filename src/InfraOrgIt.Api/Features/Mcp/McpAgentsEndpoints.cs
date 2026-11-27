@@ -88,8 +88,11 @@ public static class McpAgentsEndpoints
     {
         var agent = await LoadManagedAgentAsync(
             id, user, db, agents, access, ct);
+        if (input.Permissions is null || input.Permissions.Count == 0)
+            throw Guard.Unprocessable(
+                "Seleziona almeno un permesso per approvare l'agente MCP.");
         await agents.ReplacePermissionsAsync(
-            agent.Id, input.Permissions ?? [], ct);
+            agent.Id, input.Permissions, ct);
 
         var now = DateTime.UtcNow;
         agent.Status = McpAgentStatuses.Approved;
